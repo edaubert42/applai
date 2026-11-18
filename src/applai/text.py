@@ -1,5 +1,6 @@
 """Small text helpers."""
 
+import os
 import re
 import unicodedata
 
