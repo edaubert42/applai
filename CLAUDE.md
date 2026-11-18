@@ -26,6 +26,21 @@ The gates are the steps of `.github/workflows/ci.yml`; run them locally and have
 
 ## Agents that build ApplAI
 
-Agents in `.github/workflows/agent-*.yml` build ApplAI from GitHub issues ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)): the coder builds an issue labeled `ready-for-agent`, the reviewer reviews each PR, the fixer answers the owner's `@claude` and repairs red CI on `agent/*` branches. Issues labeled `hard` get Opus, others Sonnet. Agents push branches and open PRs; only the owner merges.
+Agents in `.github/workflows/agent-*.yml` build ApplAI from GitHub issues ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)): the coder builds an issue labeled `ready-for-agent`, the reviewer reviews each PR, the fixer answers the owner's `@claude` and repairs red CI on `agent/*` branches. Agents push branches and open PRs; only the owner merges.
+
+An issue is `hard` when any of these holds; otherwise it is normal:
+
+- it touches a rule that protects the candidate: sending, the gates, autonomy levels, fact citation (ADR 0003, 0004, 0008);
+- it designs a state machine, concurrency, or a migration that changes existing data;
+- it designs an agent's prompt or tools, or changes what the bench measures;
+- it touches security: secrets, authentication, the agent workflows;
+- no existing pattern in the code shows how to do it.
+
+| Agent | Normal | `hard` |
+|---|---|---|
+| Coder | Sonnet 5.5, effort high | Opus 5.5, effort xhigh |
+| Reviewer | Sonnet 5.5, effort medium | Opus 5.5, effort high |
+| Fixer (`@claude`) | Sonnet 5.5, effort high | Opus 5.5, effort high |
+| Fixer (red CI) | Sonnet 5.5, effort high | Sonnet 5.5, effort high |
 
 `gh pr edit` fails on this repository; edit a PR with `gh api -X PATCH repos/edaubert42/applai/pulls/<n> -F body=@<file>`.

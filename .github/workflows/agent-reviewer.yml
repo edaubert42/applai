@@ -31,9 +31,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allow_fork_prs: "false"
-          # Opus reviews PRs labeled `hard`, Sonnet the rest.
+          # `hard` PRs: Opus at high. Others: Sonnet at medium (reads code, judges, writes no code).
           claude_args: |
             --model ${{ contains(github.event.pull_request.labels.*.name, 'hard') && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
+            --effort ${{ contains(github.event.pull_request.labels.*.name, 'hard') && 'high' || 'medium' }}
             --max-turns 40
             --allowedTools "Read,Glob,Grep,Bash(uv run pytest:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh pr comment:*),mcp__github_inline_comment__create_inline_comment"
           prompt: |

@@ -14,6 +14,12 @@ about: One vertical slice an agent or a human can build in one PR
 - [ ]
 - [ ]
 
+## Difficulty
+
+<!-- Normal, or `hard` (add the label) when a criterion of CLAUDE.md "Agents that build ApplAI" holds. Say which one. -->
+
+Normal.
+
 ## Blocked by
 
 None.
