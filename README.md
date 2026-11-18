@@ -15,7 +15,7 @@ ApplAI finds offers, drafts answers and cover letters from a verified fact sheet
 I build ApplAI with Claude Code, the same way ApplAI works: the agents do the work, a human makes the decisions.
 
 - **I decide.** Goals, scope and design choices are mine. Claude Code lays out the options and their trade-offs; what I chose, and why, is in the [design decisions](docs/adr/).
-- **Claude Code writes most of the code**, one small pull request at a time. Most issues are built by agents in GitHub Actions: a coder opens the pull request, a reviewer reads it with a fresh context, a fixer repairs failing checks ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)). That is why commits carry a `Co-authored-by: Claude` line.
+- **Claude Code writes most of the code**, one small pull request at a time. Most issues are built by agents in GitHub Actions: a coder opens the pull request, a reviewer reads it with a fresh context, a fixer repairs failing checks, a learner proposes a rule or a check when a mistake comes back ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)). That is why commits carry a `Co-authored-by: Claude` line.
 - **I review and merge every pull request**, and only once the checks pass: lint, types, tests, and a scan for personal data.
 - **Measurements decide whether a change helped.** Every agent is scored on a fixed evaluation bench, and the numbers published here come from it.
 

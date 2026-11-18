@@ -79,7 +79,7 @@ def _list(run: Run, path: str) -> list[dict[str, Any]]:
 
 def _by(item: dict[str, Any], login: str) -> bool:
     user: dict[str, Any] = item.get("user") or {}  # None for a deleted account
-    return str(user.get("login")).casefold() == login.casefold()
+    return str(user.get("login") or "").casefold() == login.casefold()
 
 
 def findings(run: Run, owner: str, pr: int) -> list[Finding]:
@@ -194,7 +194,10 @@ def _body(lesson: Lesson) -> str:
 
 def open_lessons(run: Run, owner: str, path: Path, dry_run: bool) -> list[str]:
     """Open an issue for each lesson code finds backed; return the report."""
-    lessons = json.loads(path.read_text()).get("lessons")
+    returned = json.loads(path.read_text())
+    lessons = (
+        cast(dict[str, object], returned).get("lessons") if isinstance(returned, dict) else None
+    )
     if not isinstance(lessons, list):
         raise ValueError(f"{path} has no list of lessons")
     taken = {i.kind: f"lesson #{i.number}" for i in lesson_issues(run) if i.kind}

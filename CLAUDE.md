@@ -26,7 +26,7 @@ The gates are the steps of `.github/workflows/ci.yml`; run them locally and have
 
 ## Agents that build ApplAI
 
-Agents in `.github/workflows/agent-*.yml` build ApplAI from GitHub issues ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)): the coder builds an issue labeled `ready-for-agent`, the reviewer reviews each PR, the fixer answers the owner's `@claude`, repairs red CI on `agent/*` branches, and applies the reviewer's `changes needed`. Difficulty is measured, not only guessed: after a second failed review the PR becomes `hard` and Opus takes over; after a third, the agents stop and hand over to the owner. Agents push branches and open PRs; only the owner merges.
+Agents in `.github/workflows/agent-*.yml` build ApplAI from GitHub issues ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)): the coder builds an issue labeled `ready-for-agent`, the reviewer reviews each PR, the fixer answers the owner's `@claude`, repairs red CI on `agent/*` branches, and applies the reviewer's `changes needed`. After each merged PR, the learner reads what went wrong on recent ones and may propose a rule or a check as an issue labeled `lesson`; it only reads, and the owner accepts a lesson by labeling it `ready-for-agent`. Difficulty is measured, not only guessed: after a second failed review the PR becomes `hard` and Opus takes over; after a third, the agents stop and hand over to the owner. Agents push branches and open PRs; only the owner merges.
 
 How agents work on a PR:
 
@@ -51,5 +51,6 @@ The owner questions a `hard` issue (numbered questions, a recommended answer eac
 | Fixer (`@claude`) | Sonnet 5.5, effort high | Opus 5.5, effort high |
 | Fixer (red CI) | Sonnet 5.5, effort high | Sonnet 5.5, effort high |
 | Fixer (review) | 1st failed review: Sonnet 5.5, high | 2nd: Opus 5.5, high, and the PR becomes `hard` |
+| Learner (each merged PR) | Sonnet 5.5, effort high | Sonnet 5.5, effort high |
 
 `gh pr edit` fails on this repository; edit a PR's title or description with `python3 tools/edit_pr.py <n> --title <title> --body-file <file>`. Agents never close or merge a PR: say what blocks you in a PR comment instead.
