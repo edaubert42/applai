@@ -1,0 +1,38 @@
+# Candidate data never lives in this repository (see docs/adr/0001)
+data/
+.applai/
+applai-private/
+*.sqlite
+*.sqlite3
+*.db
+traces/
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+web/dist/
+
+# Playwright
+playwright-report/
+test-results/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
