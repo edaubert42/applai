@@ -28,6 +28,11 @@ The gates are the steps of `.github/workflows/ci.yml`; run them locally and have
 
 Agents in `.github/workflows/agent-*.yml` build ApplAI from GitHub issues ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)): the coder builds an issue labeled `ready-for-agent`, the reviewer reviews each PR, the fixer answers the owner's `@claude`, repairs red CI on `agent/*` branches, and applies the reviewer's `changes needed`. Difficulty is measured, not only guessed: after a second failed review the PR becomes `hard` and Opus takes over; after a third, the agents stop and hand over to the owner. Agents push branches and open PRs; only the owner merges.
 
+How agents work on a PR:
+
+- A PR comment is short: outcome first, then at most 5 short lines or a short checklist. No paragraphs. Details go in the commit message, the PR body or inline comments.
+- A tool you need is on `main` but not on your branch: `git merge origin/main`, then go on. Never rebase, never force-push.
+
 An issue is `hard` when any of these holds; otherwise it is normal:
 
 - it touches a rule that protects the candidate: sending, the gates, autonomy levels, fact citation (ADR 0003, 0004, 0008);
