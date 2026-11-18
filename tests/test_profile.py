@@ -131,7 +131,9 @@ def test_without_APPLAI_DATA_DIR_the_error_names_it(
         pytest.param(("targets",), REMOVE, "targets", id="missing section"),
         pytest.param(("facts", 1, "text"), REMOVE, "facts[1].text", id="missing fact text"),
         pytest.param(("facts", 2, "status"), "approved", "facts[2].status", id="unknown status"),
-        pytest.param(("facts", 3, "diffusion"), "public", "facts[3].diffusion", id="unknown diffusion"),
+        pytest.param(
+            ("facts", 3, "diffusion"), "public", "facts[3].diffusion", id="unknown diffusion"
+        ),
         pytest.param(("facts", 4, "id"), "F2", "facts[4].id", id="repeated fact id"),
         pytest.param(("facts", 0, "id"), "1", "facts[0].id", id="id that cannot be cited"),
         pytest.param(("identity", "nickname"), "Jo", "identity.nickname", id="unknown field"),
@@ -148,16 +150,19 @@ def test_a_profile_it_cannot_trust_is_refused_naming_the_file_and_the_field(
     assert field in message
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        pytest.param(DEMO_TEXT.replace("city: Lyon", f"city: Lyon: {SECRET}"), id="not YAML"),
-        pytest.param(
-            DEMO_TEXT.replace("diffusion: never", f"diffusion: never\n    diffusion: {SECRET}"),
-            id="repeated key",
-        ),
-    ],
-)
+# Files that are not plain YAML data, with the faulty value on the faulty line.
+NOT_PLAIN_YAML = [
+    pytest.param(DEMO_TEXT.replace("city: Lyon", f"city: Lyon: {SECRET}"), id="not YAML"),
+    # PyYAML's own message for this one quotes the tag.
+    pytest.param(DEMO_TEXT.replace("city: Lyon", f"city: !{SECRET} Lyon"), id="unknown YAML tag"),
+    pytest.param(
+        DEMO_TEXT.replace("diffusion: never", f"diffusion: never\n    diffusion: {SECRET}"),
+        id="repeated key",
+    ),
+]
+
+
+@pytest.mark.parametrize("text", NOT_PLAIN_YAML)
 def test_a_file_that_is_not_plain_yaml_is_refused_naming_the_file_and_the_line(
     tmp_path: Path, text: str
 ):
@@ -177,11 +182,7 @@ def test_a_file_that_is_not_plain_yaml_is_refused_naming_the_file_and_the_line(
         pytest.param(_edited(("facts", 0, "id"), SECRET), id="id that cannot be cited"),
         pytest.param(_edited(("targets", "salary", "minimum"), SECRET), id="salary not a number"),
         pytest.param(_edited(("identity", "city"), [SECRET]), id="text that is a list"),
-        pytest.param(DEMO_TEXT.replace("city: Lyon", f"city: Lyon: {SECRET}"), id="not YAML"),
-        pytest.param(
-            DEMO_TEXT.replace("diffusion: never", f"diffusion: never\n    diffusion: {SECRET}"),
-            id="repeated key",
-        ),
+        *NOT_PLAIN_YAML,
     ],
 )
 def test_the_error_never_contains_the_refused_value(tmp_path: Path, text: str):
