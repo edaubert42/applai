@@ -53,7 +53,7 @@ jobs:
             --model ${{ (contains(github.event.issue.labels.*.name, 'hard') || contains(github.event.pull_request.labels.*.name, 'hard')) && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
             --effort high
             --max-turns 80
-            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh issue view:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh run view:*),Bash(gh run list:*)"
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh issue view:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh run view:*),Bash(gh run list:*),Bash(gh api -X PATCH repos/${{ github.repository }}/pulls/${{ github.event.issue.number || github.event.pull_request.number }} -F body=@:*)"
 
   on-ci-failure:
     if: >-
@@ -164,7 +164,7 @@ jobs:
             --model ${{ steps.verdicts.outputs.count == 2 && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
             --effort high
             --max-turns 80
-            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(gh pr comment:*)"
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(gh pr comment:*),Bash(gh api -X PATCH repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} -F body=@:*)"
           prompt: |
             You are the fixer agent of ${{ github.repository }}. The reviewer asked for changes on
             PR #${{ github.event.issue.number }}, branch `${{ steps.verdicts.outputs.branch }}`, which you have checked out.
@@ -174,3 +174,8 @@ jobs:
                Never delete or weaken a test or a check.
             3. Run every gate listed in CLAUDE.md, commit with a message starting with `Fix review:`, and push.
                The push starts a new review.
+            4. If a finding is about the PR description, edit it with
+               `gh api -X PATCH repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} -F body=@<file>`.
+               Editing the description also starts a new review.
+            5. If you cannot fix a finding, for example because a tool is denied, say which one and why
+               in a PR comment, then stop. Never end without a push, an edit or a comment.
