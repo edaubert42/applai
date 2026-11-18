@@ -10,6 +10,12 @@ ApplAI finds offers, drafts answers and cover letters from a verified fact sheet
 
 **Status:** design phase. The code lands through small pull requests.
 
+## Read more
+
+- [The plan](docs/plan.md): architecture, control levels, milestones, evaluation bench.
+- [Glossary](GLOSSARY.md): the words ApplAI uses, and the ones it avoids.
+- [Design decisions](docs/adr/): why it is built this way, one short record per decision.
+
 ## License
 
 [AGPL-3.0](LICENSE)

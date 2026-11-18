@@ -1,0 +1,3 @@
+# Agents only write facts from the fact sheet
+
+An invented fact in an application is the worst error ApplAI can make, and the hardest for a tired reviewer to spot. The profile stores the candidate's facts as numbered entries (`#F12`), each with a status (validated, to confirm, forbidden) and a diffusion (anywhere, applications only, never). Every drafted sentence must cite the facts it uses: a script checks that each cited fact exists, is validated and may be used there, then a judge checks that the sentence says what the fact says. Facts are also the unit for measuring what works (how often answers using a fact are accepted) and the base for interview preparation.

@@ -1,0 +1,3 @@
+# Sending an application is a human decision, enforced in code
+
+A sent application cannot be taken back, and a wrong one costs a real opportunity. No agent is ever given a tool that submits a form: the filling tools refuse submit buttons and the browser driver cancels the form's submit request. Every application goes through final validation in ApplAI. After it, the candidate either opens the form and sends it themselves, or gives a send authorization for that one application, which ApplAI records before clicking. Sending without an authorization (autosend) is only possible once the full-application level has earned autonomy (ADR 0004).
