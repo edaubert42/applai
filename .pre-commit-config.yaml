@@ -1,0 +1,16 @@
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+  - repo: local
+    hooks:
+      - id: denylist
+        name: denylist (needs APPLAI_DATA_DIR)
+        entry: python3 tools/denylist.py
+        language: system
+        types: [text]
+      - id: pii
+        name: contact details and documents
+        entry: python3 tools/pii.py
+        language: system

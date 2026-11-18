@@ -25,6 +25,17 @@ I build ApplAI with Claude Code, the same way ApplAI works: the agents do the wo
 - [Glossary](GLOSSARY.md): the words ApplAI uses, and the ones it avoids.
 - [Design decisions](docs/adr/): why it is built this way, one short record per decision.
 
+## Development
+
+Python 3.12 and [uv](https://docs.astral.sh/uv/).
+
+```bash
+uv sync
+uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest
+```
+
+A denylist check keeps the candidate's personal terms out of the repository. It reads them from `$APPLAI_DATA_DIR/denylist.txt` locally and from the `APPLAI_DENYLIST` secret in CI, and fails without printing them: `python3 tools/denylist.py`. A second check, `python3 tools/pii.py`, fails on any real-looking e-mail or phone number and on documents or images not listed in `tools/allowed_files.txt`. Optional pre-commit hooks: `pre-commit install`.
+
 ## License
 
 [AGPL-3.0](LICENSE)
