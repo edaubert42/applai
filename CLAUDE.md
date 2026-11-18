@@ -14,8 +14,34 @@ Read before working:
 - **Sending is never an agent tool.** No agent gets a tool that submits an application (ADR 0003).
 - **One issue, one branch, one PR**, about 400 lines at most, tests first. PR title: `Area: outcome sentence`. Fill in `.github/pull_request_template.md`. Push only to your branch; the owner reviews and merges.
 
+## Tests
+
+- One test per acceptance criterion of the issue, written first and seen failing.
+- Tests go through the public interface and touch real things: a real SQLite database in a temporary directory, real migrations, the real HTTP app. A test that would still pass with the feature broken proves nothing; mocks are for the network and for model calls only.
+- Test data is the fictional candidate's.
+
 ## Checks
 
-The gates are the steps of `.github/workflows/ci.yml`; run them locally and have them green before opening a PR. Before any push, also run `python3 tools/denylist.py` with `APPLAI_DATA_DIR` set (the candidate's own terms) and `python3 tools/pii.py` (any real-looking e-mail, phone number or document). Both fail without printing the value. Fictional contact details use `example.org` and phone numbers ending in `00 00 00 00`.
+The gates are the steps of `.github/workflows/ci.yml`; run them locally and have them green before opening a PR. Before any push, also run `python3 tools/denylist.py` with `APPLAI_DATA_DIR` set (the candidate's own terms) and `python3 tools/pii.py` (any real-looking e-mail, phone number or document). Both fail without printing the value. Fictional contact details use `example.org` and phone numbers ending in `00 00 00 00`. Agents running in GitHub Actions have no `APPLAI_DATA_DIR`: they skip the denylist, which CI runs on their PR.
+
+## Agents that build ApplAI
+
+Agents in `.github/workflows/agent-*.yml` build ApplAI from GitHub issues ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)): the coder builds an issue labeled `ready-for-agent`, the reviewer reviews each PR, the fixer answers the owner's `@claude`, repairs red CI on `agent/*` branches, and applies the reviewer's `changes needed`. Difficulty is measured, not only guessed: after a second failed review the PR becomes `hard` and Opus takes over; after a third, the agents stop and hand over to the owner. Agents push branches and open PRs; only the owner merges.
+
+An issue is `hard` when any of these holds; otherwise it is normal:
+
+- it touches a rule that protects the candidate: sending, the gates, autonomy levels, fact citation (ADR 0003, 0004, 0008);
+- it designs a state machine, concurrency, or a migration that changes existing data;
+- it designs an agent's prompt or tools, or changes what the bench measures;
+- it touches security: secrets, authentication, the agent workflows;
+- no existing pattern in the code shows how to do it.
+
+| Agent | Normal | `hard` |
+|---|---|---|
+| Coder | Sonnet 5.5, effort high | Opus 5.5, effort xhigh |
+| Reviewer | Sonnet 5.5, effort medium | Opus 5.5, effort high |
+| Fixer (`@claude`) | Sonnet 5.5, effort high | Opus 5.5, effort high |
+| Fixer (red CI) | Sonnet 5.5, effort high | Sonnet 5.5, effort high |
+| Fixer (review) | 1st failed review: Sonnet 5.5, high | 2nd: Opus 5.5, high, and the PR becomes `hard` |
 
 `gh pr edit` fails on this repository; edit a PR with `gh api -X PATCH repos/edaubert42/applai/pulls/<n> -F body=@<file>`.
