@@ -16,6 +16,7 @@ import yaml
 from lesson import main
 
 WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "agent-learner.yml"
+CI = ".github/workflows/ci.yml"
 OWNER = "fictional-owner"
 URL = "https://github.com/example/applai/pull/{}"
 KIND = "glossary-words"
@@ -26,7 +27,7 @@ MAIN = {
     "CLAUDE.md": "# Rules\n\n- Tests first.\n",
     "docs/adr/0001-public-code-private-data.md": "# Public code, private data\n",
     ".github/workflows/agent-coder.yml": "name: Agent coder\n",
-    ".github/workflows/ci.yml": "jobs:\n  checks:\n    steps:\n      - run: uv run pytest\n",
+    CI: "jobs:\n  checks:\n    steps:\n      - run: uv run pytest\n",
     "tests/test_text.py": "def test_slug():\n    assert True\n",
     "tools/pii.py": "ALLOWED = ()\n",
 }
@@ -65,7 +66,8 @@ class FakeGh:
 
 
 def git(*args: str, cwd: Path) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+    done = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+    return done.stdout
 
 
 def write(repo: Path, name: str, text: str) -> None:
@@ -82,6 +84,11 @@ def commit(repo: Path) -> None:
     git("commit", "-m", "Lesson", cwd=repo)
 
 
+def add_rule(repo: Path) -> None:
+    append(repo, "CLAUDE.md", "- Code and docs use the words of GLOSSARY.md.\n")
+    commit(repo)
+
+
 def pushed(repo: Path) -> str:
     """The commit GitHub's lesson branch points to, or "" when nothing was pushed."""
     return git("ls-remote", "origin", f"refs/heads/{BRANCH}", cwd=repo).split("\t")[0]
@@ -93,7 +100,7 @@ def option(args: list[str], name: str) -> str:
 
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A clone of a `main` with rules, checks, workflows and an ADR, on a new lesson branch."""
+    """A repository whose origin has a `main` with rules, checks, workflows and an ADR."""
     (tmp_path / "gitconfig").write_text("")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
@@ -174,8 +181,7 @@ def test_history_lists_what_went_wrong_said_by_the_owner_and_the_agents_only(
 
 
 def test_a_finding_on_three_merged_prs_opens_one_lesson_pr_linking_them(repo: Path):
-    append(repo, "CLAUDE.md", "- Code and docs use the words of GLOSSARY.md.\n")
-    commit(repo)
+    add_rule(repo)
     gh = FakeGh()
     assert open_lesson(12, 15, 17, gh=gh) == 0
     [create] = gh.created
@@ -186,8 +192,7 @@ def test_a_finding_on_three_merged_prs_opens_one_lesson_pr_linking_them(repo: Pa
 
 
 def test_a_rule_without_three_merged_prs_as_evidence_opens_nothing(repo: Path):
-    append(repo, "CLAUDE.md", "- Code and docs use the words of GLOSSARY.md.\n")
-    commit(repo)
+    add_rule(repo)
     gh = FakeGh()
     assert open_lesson(12, 15, 16, gh=gh) == 1  # 16 is still open
     assert open_lesson(12, 12, 15, gh=gh) == 1  # the same PR counts once
@@ -197,8 +202,7 @@ def test_a_rule_without_three_merged_prs_as_evidence_opens_nothing(repo: Path):
 
 
 def test_a_one_off_mistake_opens_a_lesson_pr_only_when_it_adds_a_check(repo: Path):
-    append(repo, "CLAUDE.md", "- Code and docs use the words of GLOSSARY.md.\n")
-    commit(repo)
+    add_rule(repo)
     gh = FakeGh()
     assert open_lesson(12, gh=gh) == 1
     assert gh.created == []
@@ -212,8 +216,7 @@ def test_a_one_off_mistake_opens_a_lesson_pr_only_when_it_adds_a_check(repo: Pat
 
 @pytest.mark.parametrize("state", ["OPEN", "MERGED"])
 def test_a_finding_covered_by_an_open_or_merged_lesson_opens_nothing(repo: Path, state: str):
-    append(repo, "CLAUDE.md", "- Code and docs use the words of GLOSSARY.md.\n")
-    commit(repo)
+    add_rule(repo)
     gh = FakeGh(lessons=[{"number": 41, "title": TITLE, "headRefName": BRANCH, "state": state}])
     assert open_lesson(12, 15, 17, gh=gh) == 1
     assert gh.created == []
@@ -227,7 +230,7 @@ WEAKENINGS: dict[str, Callable[[Path], None]] = {
     "changes a check tool": lambda r: append(r, "tools/pii.py", "ALLOWED = ('*',)\n"),
     "deletes a test": lambda r: (r / "tests/test_text.py").unlink(),
     "skips a test": lambda r: append(r, "tests/test_text.py", "pytestmark = pytest.mark.skip\n"),
-    "lets CI fail": lambda r: append(r, ".github/workflows/ci.yml", "        continue-on-error: true\n"),
+    "lets CI fail": lambda r: append(r, CI, "        continue-on-error: true\n"),
     "silences lint": lambda r: append(r, "tests/test_text.py", "import os  # noqa: F401\n"),
 }
 
@@ -248,8 +251,7 @@ def test_a_lesson_that_removes_or_weakens_anything_opens_nothing(
 def test_a_manual_run_writes_what_it_would_open_to_the_run_summary_and_opens_nothing(
     repo: Path, tmp_path: Path
 ):
-    append(repo, "CLAUDE.md", "- Code and docs use the words of GLOSSARY.md.\n")
-    commit(repo)
+    add_rule(repo)
     summary = tmp_path / "summary.md"
     env = {**LIVE, "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_STEP_SUMMARY": str(summary)}
     gh = FakeGh()
@@ -269,7 +271,10 @@ def test_only_the_owner_starts_a_manual_run_and_the_agent_opens_prs_only_through
         "github.event_name == 'workflow_dispatch'"
         " && github.event.sender.login == github.repository_owner" in condition
     )
-    allowed = [p.removesuffix("*").removesuffix(":") for p in re.findall(r"Bash\(([^)]*)\)", agent["claude_args"])]  # fmt: skip
+    # Without it the action starts in auto mode, where what no rule allows is not always denied.
+    assert re.search(r"^--permission-mode default$", agent["claude_args"], re.M)
+    rules = re.findall(r"Bash\(([^)]*)\)", agent["claude_args"])
+    allowed = [rule.removesuffix("*").removesuffix(":") for rule in rules]
     for command in ("git push origin HEAD", "gh pr create --label lesson", "gh api -X POST"):
         assert not any(command.startswith(prefix) for prefix in allowed), command
     # The agent runs main's tool from outside the checkout, so editing tools/ cannot weaken it.
