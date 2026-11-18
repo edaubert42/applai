@@ -32,14 +32,18 @@ jobs:
           oidc=$(curl -sSf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=claude-code-github-action" | jq -r .value)
           bot=$(curl -sSf -X POST -H "Authorization: Bearer $oidc" \
-            https://api.anthropic.com/api/github/github-app-token-exchange | jq -r '.token // .app_token')
+            https://api.anthropic.com/api/github/github-app-token-exchange | jq -er '.token // .app_token')
           echo "::add-mask::$bot"
           as_bot() { GH_TOKEN=$bot "$@"; }
 
           report() { echo "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          state() { gh pr view "$pr" --repo "$REPO" --json state --jq .state; }
+          # An attempt is judged by the PR's state afterwards, read with GITHUB_TOKEN, not by the
+          # exit code: `gh pr reopen` exits 0 on a PR that is already open.
           attempt() {
-            local name=$1 out; shift
-            if out=$("$@" 2>&1); then report "| $name | allowed | |"
+            local name=$1 expected=$2 out; shift 2
+            out=$("$@" 2>&1) || true
+            if [ "$(state)" = "$expected" ]; then report "| $name | allowed | |"
             else out=${out//$'\n'/ }; report "| $name | refused | ${out//|//} |"; fi
           }
           wait_checks() { sleep 20; gh pr checks "$pr" --repo "$REPO" --required --watch --interval 15 >/dev/null; }
@@ -55,17 +59,25 @@ jobs:
             --title "Probe: throwaway PR for issue #13" \
             --body "Part of #13. Opened by the probe workflow to test the claude[bot] token." | grep -o '[0-9]*$')
 
+          # Leave nothing open behind, even if the job stops early: close an unmerged PR, delete its branch.
+          cleanup() {
+            if [ "$(state)" != MERGED ] && ! as_bot gh pr close "$pr" --repo "$REPO" --delete-branch >/dev/null 2>&1; then
+              report "Cleanup failed: close #$pr and delete $branch by hand."
+            fi
+          }
+          trap cleanup EXIT
+
           report "Throwaway PR: #$pr"
           report ""
           report "| Attempt with the claude[bot] token | Result | GitHub's answer |"
           report "|---|---|---|"
-          attempt "read branch protection (needs administration)" as_bot gh api "repos/$REPO/branches/main/protection"
-          attempt "close the PR" as_bot gh pr close "$pr" --repo "$REPO"
-          attempt "reopen the PR" as_bot gh pr reopen "$pr" --repo "$REPO"
+          if out=$(as_bot gh api "repos/$REPO/branches/main/protection" 2>&1); then
+            report "| read branch protection (needs administration) | allowed | |"
+          else report "| read branch protection (needs administration) | refused | ${out//$'\n'/ } |"; fi
+          attempt "close the PR" CLOSED as_bot gh pr close "$pr" --repo "$REPO"
+          if [ "$(state)" = CLOSED ]; then
+            attempt "reopen the PR" OPEN as_bot gh pr reopen "$pr" --repo "$REPO"
+          else report "| reopen the PR | not tried: the PR was not closed | |"; fi
           wait_checks || report "Checks did not pass: the merge answer below may be about checks, not the token."
-          attempt "merge the PR (squash)" as_bot gh api -X PUT "repos/$REPO/pulls/$pr/merge" -f merge_method=squash
+          attempt "merge the PR (squash)" MERGED as_bot gh api -X PUT "repos/$REPO/pulls/$pr/merge" -f merge_method=squash
 
-          # Leave nothing open behind: an unmerged throwaway PR is closed and its branch deleted.
-          if [ "$(gh pr view "$pr" --repo "$REPO" --json state --jq .state)" = OPEN ]; then
-            as_bot gh pr close "$pr" --repo "$REPO" --delete-branch >/dev/null
-          fi
