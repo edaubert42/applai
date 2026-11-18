@@ -17,8 +17,8 @@ jobs:
       id-token: write # the same OIDC exchange as claude-code-action
       checks: read # GITHUB_TOKEN waits for the throwaway PR's checks
       statuses: read
-      pull-requests: read
-      contents: read
+      pull-requests: write # GITHUB_TOKEN closes the PR if the bot cannot, and cleans up
+      contents: write # GITHUB_TOKEN deletes the throwaway branch
     steps:
       - name: Try close, reopen and merge with the claude[bot] token
         env:
@@ -52,6 +52,16 @@ jobs:
           branch="probe/issue-13-$RUN_ID"
           base=$(gh api "repos/$REPO/git/ref/heads/main" --jq .object.sha)
           as_bot gh api "repos/$REPO/git/refs" -f ref="refs/heads/$branch" -f sha="$base" >/dev/null
+          pr=""
+          # Leave nothing behind, even if the job stops early. GITHUB_TOKEN cleans up, so cleanup
+          # does not depend on the token under test. A merged PR's branch is already deleted.
+          cleanup() {
+            if [ -n "$pr" ] && [ "$(state)" = OPEN ]; then gh pr close "$pr" --repo "$REPO" >/dev/null || true; fi
+            if [ -z "$pr" ] || [ "$(state)" != MERGED ]; then
+              gh api -X DELETE "repos/$REPO/git/refs/heads/$branch" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
           as_bot gh api -X PUT "repos/$REPO/contents/docs/probe/issue-13-$RUN_ID.md" -f branch="$branch" \
             -f message="Probe: throwaway file for issue #13" \
             -f content="$(printf 'Throwaway file from the issue #13 probe.\n' | base64)" >/dev/null
@@ -59,25 +69,18 @@ jobs:
             --title "Probe: throwaway PR for issue #13" \
             --body "Part of #13. Opened by the probe workflow to test the claude[bot] token." | grep -o '[0-9]*$')
 
-          # Leave nothing open behind, even if the job stops early: close an unmerged PR, delete its branch.
-          cleanup() {
-            if [ "$(state)" != MERGED ] && ! as_bot gh pr close "$pr" --repo "$REPO" --delete-branch >/dev/null 2>&1; then
-              report "Cleanup failed: close #$pr and delete $branch by hand."
-            fi
-          }
-          trap cleanup EXIT
-
           report "Throwaway PR: #$pr"
           report ""
           report "| Attempt with the claude[bot] token | Result | GitHub's answer |"
           report "|---|---|---|"
           if out=$(as_bot gh api "repos/$REPO/branches/main/protection" 2>&1); then
             report "| read branch protection (needs administration) | allowed | |"
-          else report "| read branch protection (needs administration) | refused | ${out//$'\n'/ } |"; fi
+          else out=${out//$'\n'/ }; report "| read branch protection (needs administration) | refused | ${out//|//} |"; fi
           attempt "close the PR" CLOSED as_bot gh pr close "$pr" --repo "$REPO"
-          if [ "$(state)" = CLOSED ]; then
-            attempt "reopen the PR" OPEN as_bot gh pr reopen "$pr" --repo "$REPO"
-          else report "| reopen the PR | not tried: the PR was not closed | |"; fi
+          # If the bot could not close it, GITHUB_TOKEN does, so reopen is still tried.
+          if [ "$(state)" = OPEN ]; then gh pr close "$pr" --repo "$REPO" >/dev/null; fi
+          attempt "reopen the PR" OPEN as_bot gh pr reopen "$pr" --repo "$REPO"
+          if [ "$(state)" = CLOSED ]; then gh pr reopen "$pr" --repo "$REPO" >/dev/null; fi
           wait_checks || report "Checks did not pass: the merge answer below may be about checks, not the token."
           attempt "merge the PR (squash)" MERGED as_bot gh api -X PUT "repos/$REPO/pulls/$pr/merge" -f merge_method=squash
 
