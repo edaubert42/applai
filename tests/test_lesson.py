@@ -16,9 +16,17 @@ import yaml
 from lesson import main
 
 GITHUB = Path(__file__).parents[1] / ".github"
-# The only path GitHub runs. Until the owner moves the file there (the agents' app cannot push
-# to .github/workflows/), the tests that read it fail: the learner is not live.
-WORKFLOW = GITHUB / "workflows" / "agent-learner.yml"
+# GitHub runs only .github/workflows/agent-learner.yml. The agents' app cannot push there, so the
+# workflow is committed at .github/agent-learner.yml until the owner moves it; the tests read it
+# wherever it is, and the learner is not live until it is in workflows/.
+WORKFLOW = next(
+    (
+        p
+        for p in (GITHUB / "workflows" / "agent-learner.yml", GITHUB / "agent-learner.yml")
+        if p.exists()
+    ),
+    GITHUB / "workflows" / "agent-learner.yml",
+)
 CI = ".github/workflows/ci.yml"
 OWNER = "fictional-owner"
 URL = "https://github.com/example/applai/pull/{}"
