@@ -136,7 +136,9 @@ def test_without_APPLAI_DATA_DIR_the_error_names_it(
         ),
         pytest.param(("facts", 4, "id"), "F2", "facts[4].id", id="repeated fact id"),
         pytest.param(("facts", 0, "id"), "1", "facts[0].id", id="id that cannot be cited"),
-        pytest.param(("identity", "nickname"), "Jo", "identity.nickname", id="unknown field"),
+        pytest.param(
+            ("identity", "nickname"), "Jo", "identity.<unknown field>", id="unknown field"
+        ),
     ],
 )
 def test_a_profile_it_cannot_trust_is_refused_naming_the_file_and_the_field(
@@ -193,6 +195,67 @@ def test_the_error_never_contains_the_refused_value(tmp_path: Path, text: str):
         load_profile(tmp_path)
 
     assert SECRET not in _everything_said(caught.value)
+
+
+def _with_key(where: tuple[str | int, ...], key: str, value: object) -> str:
+    """The demo profile with a key added in a mapping, as YAML text."""
+    profile: dict[str, Any] = yaml.safe_load(DEMO_TEXT)
+    node: Any = profile
+    for step in where:
+        node = node[step]
+    node[key] = value
+    return yaml.safe_dump(profile, allow_unicode=True)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(_with_key((), SECRET, "x"), id="unknown top-level field"),
+        pytest.param(_with_key(("identity",), SECRET, "x"), id="unknown identity field"),
+        pytest.param(_with_key(("facts", 0), SECRET, "x"), id="unknown fact field"),
+        pytest.param(
+            _with_key(("base_answers",), SECRET, {"fr": "Oui."}),
+            id="base answer key, answer incomplete",
+        ),
+        pytest.param(
+            _with_key(("base_answers",), SECRET, {"fr": "Oui.", "en": "Yes.", "de": "Ja."}),
+            id="base answer key, unknown language",
+        ),
+    ],
+)
+def test_the_error_never_contains_a_key_of_the_file(tmp_path: Path, text: str):
+    assert SECRET in text
+    _write(tmp_path, text)
+
+    with pytest.raises(ProfileError) as caught:
+        load_profile(tmp_path)
+
+    assert SECRET not in _everything_said(caught.value)
+
+
+def test_an_unknown_field_is_still_located_by_its_parent(tmp_path: Path):
+    _write(tmp_path, _with_key(("identity",), SECRET, "x"))
+
+    assert "identity" in _refusal(tmp_path)
+
+
+def test_a_base_answer_with_a_problem_is_located_by_its_position(tmp_path: Path):
+    _write(tmp_path, _with_key(("base_answers",), SECRET, {"fr": "Oui."}))
+    answers = yaml.safe_load(DEMO_TEXT)["base_answers"]
+    # yaml.safe_dump sorts the keys, so the position is known.
+    position = sorted([*answers, SECRET]).index(SECRET)
+
+    assert f"base_answers[{position}].en" in _refusal(tmp_path)
+
+
+def test_a_missing_profile_is_refused_naming_the_file(tmp_path: Path):
+    assert str(tmp_path / "profile.yaml") in _refusal(tmp_path)
+
+
+def test_a_profile_that_cannot_be_read_is_refused_naming_the_file(tmp_path: Path):
+    (tmp_path / "profile.yaml").mkdir()
+
+    assert str(tmp_path / "profile.yaml") in _refusal(tmp_path)
 
 
 def _demo_files() -> list[str]:
