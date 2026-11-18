@@ -54,5 +54,5 @@ jobs:
             4. Bugs and needless complexity.
 
             Post inline comments on the lines concerned, then one summary comment with `gh pr comment` that starts
-            with `Verdict: ready to merge` or `Verdict: changes needed`, followed by the findings, most severe first.
-            Report only findings you can point to in the code.
+            with `Verdict: ready to merge` or `Verdict: changes needed`, followed by at most 5 lines: the findings,
+            most severe first, one line each. Say nothing about what is fine. Report only findings you can point to in the code.
