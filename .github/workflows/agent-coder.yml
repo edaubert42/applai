@@ -1,0 +1,46 @@
+# Coder agent: the owner labels an issue `ready-for-agent`, the agent builds it and opens a PR.
+name: Agent coder
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: agent-coder-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  code:
+    if: github.event.label.name == 'ready-for-agent' && github.event.sender.login == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] agents push; no artifact is uploaded
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: anthropics/claude-code-action@e5812cd75691ca7bbfc57c0ecf4441db3a1ab7dd # v1.0.281
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allow_fork_prs: "false"
+          # Opus for tickets labeled `hard`, Sonnet otherwise.
+          claude_args: |
+            --model ${{ contains(github.event.issue.labels.*.name, 'hard') && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
+            --max-turns 120
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr view:*)"
+          prompt: |
+            You are the coder agent of ${{ github.repository }}. Build issue #${{ github.event.issue.number }}.
+
+            1. Read the issue with `gh issue view ${{ github.event.issue.number }} --comments`, then CLAUDE.md and what it points to.
+               If the issue is ambiguous or blocked by an open issue, comment on it with your questions and stop.
+            2. Create the branch `agent/issue-${{ github.event.issue.number }}-<short-slug>` from `main`.
+            3. Work test first: one failing test per acceptance criterion, then the code that makes it pass.
+            4. Run every gate listed in CLAUDE.md until all are green. Commit in small steps.
+            5. Push the branch and open a PR with `gh pr create`, filling .github/pull_request_template.md,
+               with `Closes #${{ github.event.issue.number }}`${{ contains(github.event.issue.labels.*.name, 'hard') && ' and `--label hard`' || '' }}.
+               Done when the PR is open and every gate passed locally.
