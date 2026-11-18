@@ -1,0 +1,71 @@
+# Temporary, issue #13: what the claude[bot] token, the one an agent's own code sees, can do to a PR.
+# The owner runs it by hand. It opens a throwaway PR as claude[bot], then tries to close, reopen
+# and merge it with that token, and writes each answer to the run summary. Delete it once #13 is done.
+name: Probe agent token
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      id-token: write # the same OIDC exchange as claude-code-action
+      checks: read # GITHUB_TOKEN waits for the throwaway PR's checks
+      statuses: read
+      pull-requests: read
+      contents: read
+    steps:
+      - name: Try close, reopen and merge with the claude[bot] token
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Same exchange and default permissions as claude-code-action (src/github/token.ts).
+          oidc=$(curl -sSf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=claude-code-github-action" | jq -r .value)
+          bot=$(curl -sSf -X POST -H "Authorization: Bearer $oidc" \
+            https://api.anthropic.com/api/github/github-app-token-exchange | jq -r '.token // .app_token')
+          echo "::add-mask::$bot"
+          as_bot() { GH_TOKEN=$bot "$@"; }
+
+          report() { echo "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          attempt() {
+            local name=$1 out; shift
+            if out=$("$@" 2>&1); then report "| $name | allowed | |"
+            else out=${out//$'\n'/ }; report "| $name | refused | ${out//|//} |"; fi
+          }
+          wait_checks() { sleep 20; gh pr checks "$pr" --repo "$REPO" --required --watch --interval 15 >/dev/null; }
+
+          # Throwaway PR, opened by claude[bot] like an agent's PR.
+          branch="probe/issue-13-$RUN_ID"
+          base=$(gh api "repos/$REPO/git/ref/heads/main" --jq .object.sha)
+          as_bot gh api "repos/$REPO/git/refs" -f ref="refs/heads/$branch" -f sha="$base" >/dev/null
+          as_bot gh api -X PUT "repos/$REPO/contents/docs/probe/issue-13-$RUN_ID.md" -f branch="$branch" \
+            -f message="Probe: throwaway file for issue #13" \
+            -f content="$(printf 'Throwaway file from the issue #13 probe.\n' | base64)" >/dev/null
+          pr=$(as_bot gh pr create --repo "$REPO" --base main --head "$branch" \
+            --title "Probe: throwaway PR for issue #13" \
+            --body "Part of #13. Opened by the probe workflow to test the claude[bot] token." | grep -o '[0-9]*$')
+
+          report "Throwaway PR: #$pr"
+          report ""
+          report "| Attempt with the claude[bot] token | Result | GitHub's answer |"
+          report "|---|---|---|"
+          attempt "read branch protection (needs administration)" as_bot gh api "repos/$REPO/branches/main/protection"
+          attempt "close the PR" as_bot gh pr close "$pr" --repo "$REPO"
+          attempt "reopen the PR" as_bot gh pr reopen "$pr" --repo "$REPO"
+          wait_checks || report "Checks did not pass: the merge answer below may be about checks, not the token."
+          attempt "merge the PR (squash)" as_bot gh api -X PUT "repos/$REPO/pulls/$pr/merge" -f merge_method=squash
+
+          # Leave nothing open behind: an unmerged throwaway PR is closed and its branch deleted.
+          if [ "$(gh pr view "$pr" --repo "$REPO" --json state --jq .state)" = OPEN ]; then
+            as_bot gh pr close "$pr" --repo "$REPO" --delete-branch >/dev/null
+          fi
