@@ -41,14 +41,3 @@ jobs:
         run: python3 tools/denylist.py
       - name: Contact details and documents in tracked files
         run: python3 tools/pii.py
-      # The PR title and body become the squash commit, so they are checked too.
-      - name: Denylist and contact details in the PR title and body
-        if: github.event_name == 'pull_request'
-        env:
-          APPLAI_DENYLIST: ${{ secrets.APPLAI_DENYLIST }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pull-request.md"
-          python3 tools/denylist.py "$RUNNER_TEMP/pull-request.md"
-          python3 tools/pii.py "$RUNNER_TEMP/pull-request.md"

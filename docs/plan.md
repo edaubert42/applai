@@ -101,7 +101,7 @@ Milestones are defined by content, not dates.
 
 ## Working agreement
 
-- One issue, one branch, one small PR (about 400 lines at most), squash merge. PR template: what, why, how to test, bench impact.
+- One issue, one branch, one small PR (about 400 lines at most), squash merge. PR template: what, choices to confirm, how to test, bench impact; 150 words at most, checked by CI.
 - CI required from PR 1: ruff, pyright, pytest, gitleaks, and a denylist check (patterns kept in the private repo locally and in a CI secret).
 - No push to `main`. PR descriptions, commits and screenshots use the fictional candidate only.
 - Each frontend PR carries a short explanation of the React concepts it introduces.
