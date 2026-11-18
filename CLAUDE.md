@@ -44,4 +44,4 @@ An issue is `hard` when any of these holds; otherwise it is normal:
 | Fixer (red CI) | Sonnet 5.5, effort high | Sonnet 5.5, effort high |
 | Fixer (review) | 1st failed review: Sonnet 5.5, high | 2nd: Opus 5.5, high, and the PR becomes `hard` |
 
-`gh pr edit` fails on this repository; edit a PR with `gh api -X PATCH repos/edaubert42/applai/pulls/<n> -F body=@<file>`.
+`gh pr edit` fails on this repository; edit a PR's title or description with `python3 tools/edit_pr.py <n> --title <title> --body-file <file>`. Agents never close or merge a PR: say what blocks you in a PR comment instead.

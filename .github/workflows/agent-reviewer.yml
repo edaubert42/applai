@@ -1,10 +1,10 @@
 # Reviewer agent: reads each new PR with a fresh context and posts one review.
-# It reviews again after each push by an agent (review fixes, CI fixes).
+# It reviews again after each push or PR edit by an agent (review fixes, CI fixes).
 name: Agent reviewer
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize, edited]
 
 concurrency:
   group: agent-reviewer-${{ github.event.pull_request.number }}
@@ -15,7 +15,7 @@ jobs:
     if: >-
       !github.event.pull_request.draft
       && github.event.pull_request.head.repo.full_name == github.repository
-      && (github.event.action != 'synchronize' || github.event.sender.login == 'claude[bot]')
+      && (!contains(fromJSON('["synchronize", "edited"]'), github.event.action) || github.event.sender.login == 'claude[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
