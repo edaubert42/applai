@@ -9,10 +9,11 @@ also lists every `lesson` PR with its kind and state.
 `lesson` that links its evidence. It refuses, and opens nothing, when:
 - a `lesson` PR of that kind is open, or merged (its rule or check exists);
 - the lesson removes anything, adds a suppression (noqa, skip, continue-on-error),
-  or changes a file other than CLAUDE.md, GLOSSARY.md, pyproject.toml, ci.yml or
-  tests (it may add new files under tests/ and tools/);
-- fewer than 3 merged PRs back a rule, or no merged PR backs a check (a test,
-  pyproject.toml or ci.yml).
+  or changes a file other than CLAUDE.md, GLOSSARY.md, pyproject.toml or tests (it
+  may add new files under tests/ and tools/). Workflows are out: the agents' app
+  cannot push them, and pytest already runs every test in CI;
+- fewer than 3 merged PRs back a rule, or no merged PR backs a check (a test or a
+  lint rule in pyproject.toml).
 Only a run started by a merged PR opens anything. Any other run, manual or local,
 writes what it would open to the run summary.
 
@@ -36,8 +37,8 @@ LABEL = "lesson"
 BRANCH_PREFIX = "agent/lesson-"
 BOT = "claude[bot]"  # no user login can contain brackets, so no one else can pose as the agents
 KIND = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-APPEND_ONLY = ("CLAUDE.md", "GLOSSARY.md", "pyproject.toml", ".github/workflows/ci.yml")
-CHECKS = ("tests/", "pyproject.toml", ".github/workflows/ci.yml")
+APPEND_ONLY = ("CLAUDE.md", "GLOSSARY.md", "pyproject.toml")
+CHECKS = ("tests/", "pyproject.toml")
 WEAKENING = re.compile(
     r"noqa|(?:type|pyright|zizmor):\s*ignore|fmt:\s*(?:off|skip)"
     r"|pytest\.(?:mark\.)?(?:skip|xfail)|continue-on-error|ignores?\s*="
