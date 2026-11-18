@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      - run: uv run pytest
+
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Denylist check on tracked files
+        env:
+          APPLAI_DENYLIST: ${{ secrets.APPLAI_DENYLIST }}
+        run: python3 tools/denylist.py
+      # The PR title and body become the squash commit, so they are checked too.
+      - name: Denylist check on the PR title and body
+        if: github.event_name == 'pull_request'
+        env:
+          APPLAI_DENYLIST: ${{ secrets.APPLAI_DENYLIST }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pull-request.md"
+          python3 tools/denylist.py "$RUNNER_TEMP/pull-request.md"
