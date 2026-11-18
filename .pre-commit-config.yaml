@@ -10,3 +10,7 @@ repos:
         entry: python3 tools/denylist.py
         language: system
         types: [text]
+      - id: pii
+        name: contact details and documents
+        entry: python3 tools/pii.py
+        language: system

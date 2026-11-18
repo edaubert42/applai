@@ -1,0 +1,2 @@
+# Binary or document files allowed in this public repository, one path per line.
+# Add a file here only once it is checked to hold fictional data (demo GIF, fake forms).

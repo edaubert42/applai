@@ -16,6 +16,6 @@ Read before working:
 
 ## Checks
 
-The gates are the steps of `.github/workflows/ci.yml`; run them locally and have them green before opening a PR. Before any push, also run `python3 tools/denylist.py` with `APPLAI_DATA_DIR` set: it fails on the candidate's personal terms without printing them.
+The gates are the steps of `.github/workflows/ci.yml`; run them locally and have them green before opening a PR. Before any push, also run `python3 tools/denylist.py` with `APPLAI_DATA_DIR` set (the candidate's own terms) and `python3 tools/pii.py` (any real-looking e-mail, phone number or document). Both fail without printing the value. Fictional contact details use `example.org` and phone numbers ending in `00 00 00 00`.
 
 `gh pr edit` fails on this repository; edit a PR with `gh api -X PATCH repos/edaubert42/applai/pulls/<n> -F body=@<file>`.
