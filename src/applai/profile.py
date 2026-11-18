@@ -7,13 +7,22 @@ which may be the real candidate's data (ADR 0001).
 """
 
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Self, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    WrapSerializer,
+    model_validator,
+)
 from pydantic_core import ErrorDetails, PydanticCustomError
 
 DATA_DIR_VARIABLE = "APPLAI_DATA_DIR"
@@ -33,7 +42,7 @@ class FactStatus(StrEnum):
 class Diffusion(StrEnum):
     """Where a fact may appear."""
 
-    FREE = "free"
+    ANYWHERE = "anywhere"
     APPLICATIONS_ONLY = "applications_only"
     NEVER = "never"
 
@@ -58,6 +67,34 @@ class BaseAnswer(_Section):
     en: str
 
 
+class _ReadOnlyMapping[K, V](Mapping[K, V]):
+    """A mapping nobody can change after reading, and that hashes like a frozen model."""
+
+    __slots__ = ("_items",)
+
+    def __init__(self, items: Mapping[K, V]) -> None:
+        self._items = dict(items)
+
+    def __getitem__(self, key: K) -> V:
+        return self._items[key]
+
+    def __iter__(self) -> Iterator[K]:
+        return iter(self._items)
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __hash__(self) -> int:
+        return hash(frozenset(self._items.items()))
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self._items!r})"
+
+
+def _dumped_as_dict(value: Mapping[Any, Any], handler: SerializerFunctionWrapHandler) -> Any:
+    return handler(dict(value))
+
+
 class Salary(_Section):
     minimum: int  # yearly, gross
     currency: str
@@ -79,7 +116,13 @@ class Fact(_Section):
 
 class Profile(_Section):
     identity: Identity
-    base_answers: Mapping[str, BaseAnswer]
+    # pydantic reads a mapping as a plain dict, which would leave the profile mutable;
+    # it is dumped as a dict again, or pydantic warns, quoting the answers.
+    base_answers: Annotated[
+        Mapping[str, BaseAnswer],
+        AfterValidator(_ReadOnlyMapping),
+        WrapSerializer(_dumped_as_dict),
+    ]
     targets: Targets
     facts: tuple[Fact, ...]
 

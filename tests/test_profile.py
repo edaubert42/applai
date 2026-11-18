@@ -1,5 +1,6 @@
 import os
 import traceback
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -85,10 +86,10 @@ def test_the_fictional_candidates_profile_is_read_as_a_typed_profile():
         salary=Salary(minimum=52000, currency="EUR"),
     )
     assert [(fact.id, fact.status, fact.diffusion) for fact in profile.facts] == [
-        ("F1", FactStatus.VALIDATED, Diffusion.FREE),
+        ("F1", FactStatus.VALIDATED, Diffusion.ANYWHERE),
         ("F2", FactStatus.VALIDATED, Diffusion.APPLICATIONS_ONLY),
-        ("F3", FactStatus.VALIDATED, Diffusion.FREE),
-        ("F4", FactStatus.TO_CONFIRM, Diffusion.FREE),
+        ("F3", FactStatus.VALIDATED, Diffusion.ANYWHERE),
+        ("F4", FactStatus.TO_CONFIRM, Diffusion.ANYWHERE),
         ("F5", FactStatus.FORBIDDEN, Diffusion.NEVER),
     ]
     assert profile.facts[4] == Fact(
@@ -100,6 +101,35 @@ def test_the_fictional_candidates_profile_is_read_as_a_typed_profile():
     # Typed, not only equal: a StrEnum also equals its plain string.
     assert {type(fact.status) for fact in profile.facts} == {FactStatus}
     assert {type(fact.diffusion) for fact in profile.facts} == {Diffusion}
+
+
+def test_the_profile_is_frozen_down_to_its_base_answers():
+    profile = load_profile(DEMO_DIR)
+    answers: Any = profile.base_answers
+
+    with pytest.raises(TypeError):
+        answers["availability"] = BaseAnswer(fr="Tout de suite.", en="Right away.")
+    with pytest.raises(TypeError):
+        del answers["availability"]
+    with pytest.raises(AttributeError):
+        answers.clear()
+    assert profile.base_answers["availability"].en == "Available within one month."
+    # A frozen model hashes its fields: a mutable dict among them would make this raise.
+    assert hash(profile) == hash(load_profile(DEMO_DIR))
+
+
+def test_the_profile_dumps_its_base_answers_without_a_warning():
+    profile = load_profile(DEMO_DIR)
+
+    # pydantic's serializer warning would quote the answers, the candidate's data.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        dumped = profile.model_dump()
+
+    assert dumped["base_answers"]["availability"] == {
+        "fr": "Disponible sous un mois.",
+        "en": "Available within one month.",
+    }
 
 
 def test_without_an_argument_the_profile_is_read_from_APPLAI_DATA_DIR(
@@ -133,6 +163,9 @@ def test_without_APPLAI_DATA_DIR_the_error_names_it(
         pytest.param(("facts", 2, "status"), "approved", "facts[2].status", id="unknown status"),
         pytest.param(
             ("facts", 3, "diffusion"), "public", "facts[3].diffusion", id="unknown diffusion"
+        ),
+        pytest.param(
+            ("facts", 0, "diffusion"), "free", "facts[0].diffusion", id="free, not anywhere"
         ),
         pytest.param(("facts", 4, "id"), "F2", "facts[4].id", id="repeated fact id"),
         pytest.param(("facts", 0, "id"), "1", "facts[0].id", id="id that cannot be cited"),

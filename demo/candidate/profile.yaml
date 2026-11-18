@@ -29,12 +29,12 @@ targets:
     currency: EUR
 
 # status: validated, to_confirm or forbidden.
-# diffusion: free, applications_only or never.
+# diffusion: anywhere, applications_only or never.
 facts:
   - id: F1
     text: Six years as a data engineer, at Brindille Logistique then at Ventolune Énergie.
     status: validated
-    diffusion: free
+    diffusion: anywhere
   - id: F2
     text: Cut the nightly pipeline at Ventolune Énergie from 6 hours to 40 minutes with incremental loads.
     status: validated
@@ -42,11 +42,11 @@ facts:
   - id: F3
     text: Built the delivery-time forecast used by 120 warehouses at Brindille Logistique.
     status: validated
-    diffusion: free
+    diffusion: anywhere
   - id: F4
     text: Has led a team of three engineers at Ventolune Énergie since 2025.
     status: to_confirm
-    diffusion: free
+    diffusion: anywhere
   - id: F5
     text: Left Brindille Logistique after a disagreement with management.
     status: forbidden
