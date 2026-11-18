@@ -22,11 +22,16 @@ Usage: python3 tools/lesson.py history [--limit N]
 """
 
 import argparse
+import ast
+import copy
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tokenize
+import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -38,11 +43,14 @@ BRANCH_PREFIX = "agent/lesson-"
 BOT = "claude[bot]"  # no user login can contain brackets, so no one else can pose as the agents
 KIND = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 APPEND_ONLY = ("CLAUDE.md", "GLOSSARY.md", "pyproject.toml")
+RULES = ("CLAUDE.md", "GLOSSARY.md")
 CHECKS = ("tests/", "pyproject.toml")
-WEAKENING = re.compile(
-    r"noqa|(?:type|pyright|zizmor):\s*ignore|fmt:\s*(?:off|skip)"
-    r"|pytest\.(?:mark\.)?(?:skip|xfail)|continue-on-error|ignores?\s*="
-)
+# In the comments of a Python file the lesson adds: a directive that turns a check off.
+DIRECTIVE = re.compile(r"noqa|(?:type|pyright):\s*ignore|fmt:\s*(?:off|skip)")
+# In its code: a way to skip a test. Words in strings and in docs are fine; only code counts.
+SKIPS = {"skip", "skipif", "xfail", "importorskip"}
+# The only part of pyproject.toml a lesson may grow: the lint rules that are switched on.
+LINT_RULES = ("select", "extend-select")
 
 
 def run_gh(args: Sequence[str]) -> str:
@@ -122,17 +130,66 @@ def _changes() -> tuple[list[str], list[str]]:
                 f"{path}: a lesson only adds lines to {', '.join(APPEND_ONLY)} or tests/,"
                 " or adds a file under tests/ or tools/"
             )
-    path, header = "", False
+    added: dict[str, set[int]] = {}
+    path, header, number = "", False, 0
     for line in _git(*diff, "--unified=0").splitlines():
         if line.startswith("diff --git "):
             header = True
-        elif line.startswith("@@"):
-            header = False
         elif header and line.startswith("+++ "):
             path = line.removeprefix("+++ b/")
-        elif not header and line.startswith("+") and (weakening := WEAKENING.search(line)):
-            refusals.append(f"{path}: adds `{weakening.group(0)}`, which weakens a check")
+        elif line.startswith("@@") and (hunk := re.match(r"@@ -\S+ \+(\d+)", line)):
+            header, number = False, int(hunk.group(1))
+        elif not header and line.startswith("+"):
+            added.setdefault(path, set()).add(number)
+            number += 1
+    for path, lines in added.items():
+        if Path(path).name == "conftest.py":
+            refusals.append(f"{path}: a conftest.py hooks into every test and can turn them off")
+        elif path.endswith(".py"):
+            refusals += _suppressions(path, lines)
+    if "pyproject.toml" in status:
+        refusals += _config_refusals()
     return list(status), refusals
+
+
+def _suppressions(path: str, lines: set[int]) -> list[str]:
+    """The comments and the code a lesson adds to a Python file that turn a check off."""
+    source = _git("show", f"HEAD:{path}")
+    try:
+        tree = ast.parse(source)
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (SyntaxError, tokenize.TokenError):
+        return [f"{path}: is not valid Python"]
+    found = [t.string for t in tokens if t.type == tokenize.COMMENT and t.start[0] in lines]
+    found = [text for text in found if DIRECTIVE.search(text)]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute | ast.Name | ast.alias) and node.lineno in lines:
+            name = node.attr if isinstance(node, ast.Attribute) else getattr(node, "id", "")
+            name = name or getattr(node, "name", "")
+            if name.split(".")[-1] in SKIPS:
+                found.append(name)
+    return [f"{path}: adds `{text.strip()}`, which turns a check off" for text in found]
+
+
+def _config_refusals() -> list[str]:
+    """A lesson may switch more lint rules on in pyproject.toml, and change nothing else there."""
+    try:
+        base = tomllib.loads(_git("show", "origin/main:pyproject.toml"))
+        head = tomllib.loads(_git("show", "HEAD:pyproject.toml"))
+    except tomllib.TOMLDecodeError:
+        return ["pyproject.toml: is not valid TOML"]
+
+    def lint(config: dict[str, Any]) -> dict[str, Any]:
+        return config.get("tool", {}).get("ruff", {}).get("lint", {})
+
+    kept = (copy.deepcopy(base), copy.deepcopy(head))
+    for config in kept:
+        for key in LINT_RULES:
+            lint(config).pop(key, None)
+    grown = all(set(lint(base).get(key, [])) <= set(lint(head).get(key, [])) for key in LINT_RULES)
+    if kept[0] != kept[1] or not grown:
+        return ["pyproject.toml: a lesson only switches more lint rules on (extend-select)"]
+    return []
 
 
 def _evidence(gh: Gh, numbers: Sequence[int]) -> tuple[dict[int, str], list[str]]:
@@ -162,7 +219,8 @@ def open_lesson(args: argparse.Namespace, gh: Gh, env: Mapping[str, str]) -> int
     paths, changes_refused = _changes()
     evidence, evidence_refused = _evidence(gh, args.evidence)
     refusals += changes_refused + evidence_refused
-    needed = 1 if any(path.startswith(CHECKS) for path in paths) else 3
+    is_check = any(path.startswith(CHECKS) for path in paths) and not set(paths) & set(RULES)
+    needed = 1 if is_check else 3  # a rule bundled with a check is still a rule
     if len(evidence) < needed:
         refusals.append(f"{len(evidence)} merged PR(s) as evidence: a check needs 1, a rule 3")
     if refusals:

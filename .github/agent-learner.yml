@@ -48,12 +48,14 @@ jobs:
           # Opus at high, always: a lesson changes the rules every other agent follows.
           # Permission mode default: a command no allow rule covers is denied, not left to
           # auto mode, so `git push` and `gh pr create` only happen inside the lesson tool.
+          # No command runs code the agent wrote, and it cannot write .git (hooks, config).
           claude_args: |
             --model claude-opus-5-5
             --effort high
             --permission-mode default
             --max-turns 60
-            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(python3 ${{ runner.temp }}/learner/lesson.py:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(gh pr diff:*),Bash(uv run ruff:*),Bash(uv run pyright:*),Bash(uv run pytest:*),Bash(python3 tools/pii.py:*)"
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(python3 ${{ runner.temp }}/learner/lesson.py:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(gh pr diff:*)"
+            --disallowedTools "Edit(.git/**),Write(.git/**)"
           prompt: |
             You are the learner agent of ${{ github.repository }}. You turn the agents' mistakes into rules,
             so the next PRs do not repeat them. ${{ github.event_name == 'pull_request' && format('PR #{0} was just merged.', github.event.pull_request.number) || 'This is a manual dry run: the tool writes what it would open to the run summary and opens nothing.' }}
@@ -69,11 +71,12 @@ jobs:
                Most runs keep nothing: then say so in one line and stop.
             4. For each kind kept, one PR:
                - `git checkout -b agent/lesson-<kind> origin/main`; <kind> is a few lowercase words joined by hyphens.
-               - Prefer a check: a test in tests/ (pytest runs it in CI) or a lint rule in pyproject.toml. Otherwise
+               - Prefer a check: a test in tests/ (pytest runs it in CI) or a lint rule (`extend-select` in pyproject.toml). Otherwise
                  add one short line to CLAUDE.md, in its style. A one-off mistake needs a check.
                - Only add: never remove or weaken a rule, a check, a workflow or an ADR.
-               - Run `uv run ruff check .`, `uv run ruff format --check .`, `uv run pyright`, `uv run pytest`
-                 and `python3 tools/pii.py`, then commit only the lesson's files.
+               - You never run code from the checkout (no pytest, ruff, pyright or script): it would run with the
+                 credentials the tool pushes with. The gates run in CI on the lesson PR, before the owner merges.
+                 Write the check with care, then commit only the lesson's files.
                - Write the body to `lesson-body.md` (never commit it), from .github/pull_request_template.md without
                  the `Closes` line: the mistake in one line, the rule or check, how to test. Title: `Agents: <outcome>`.
                - `LESSON open --kind <kind> --title <title> --body-file lesson-body.md --evidence <PR> --evidence <PR> ...`

@@ -16,16 +16,9 @@ import yaml
 from lesson import main
 
 GITHUB = Path(__file__).parents[1] / ".github"
-# The agents' app cannot push to .github/workflows/: the workflow is committed one
-# level up until the owner moves it there. The test follows it.
-WORKFLOW = next(
-    (
-        p
-        for p in (GITHUB / "workflows" / "agent-learner.yml", GITHUB / "agent-learner.yml")
-        if p.exists()
-    ),
-    GITHUB / "workflows" / "agent-learner.yml",
-)
+# The only path GitHub runs. Until the owner moves the file there (the agents' app cannot push
+# to .github/workflows/), the tests that read it fail: the learner is not live.
+WORKFLOW = GITHUB / "workflows" / "agent-learner.yml"
 CI = ".github/workflows/ci.yml"
 OWNER = "fictional-owner"
 URL = "https://github.com/example/applai/pull/{}"
@@ -40,6 +33,10 @@ MAIN = {
     CI: "jobs:\n  checks:\n    steps:\n      - run: uv run pytest\n",
     "tests/test_text.py": "def test_slug():\n    assert True\n",
     "tools/pii.py": "ALLOWED = ()\n",
+    "pyproject.toml": (
+        '[tool.ruff.lint]\nselect = ["E", "F"]\n\n'
+        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
+    ),
 }
 
 
@@ -216,6 +213,7 @@ def test_a_one_off_mistake_opens_a_lesson_pr_only_when_it_adds_a_check(repo: Pat
     gh = FakeGh()
     assert open_lesson(12, gh=gh) == 1
     assert gh.created == []
+    git("reset", "--hard", "origin/main", cwd=repo)
     write(repo, "tests/test_glossary.py", "def test_no_avoided_word():\n    assert True\n")
     commit(repo)
     assert open_lesson(12, gh=gh) == 0
@@ -242,6 +240,12 @@ WEAKENINGS: dict[str, Callable[[Path], None]] = {
     "skips a test": lambda r: append(r, "tests/test_text.py", "pytestmark = pytest.mark.skip\n"),
     "lets CI fail": lambda r: append(r, CI, "        continue-on-error: true\n"),
     "silences lint": lambda r: append(r, "tests/test_text.py", "import os  # noqa: F401\n"),
+    "imports a skip": lambda r: append(r, "tests/test_text.py", "from pytest import skip\n"),
+    "hides tests from pytest": lambda r: append(r, "pyproject.toml", 'python_files = ["x_*.py"]\n'),
+    "ignores tests in a conftest": lambda r: write(
+        r, "tests/conftest.py", 'collect_ignore_glob = ["test_*.py"]\n'
+    ),
+    "relaxes the lint": lambda r: append(r, "pyproject.toml", 'ignore = ["E", "F"]\n'),
 }
 
 
@@ -256,6 +260,37 @@ def test_a_lesson_that_removes_or_weakens_anything_opens_nothing(
     assert open_lesson(12, 15, 17, gh=gh) == 1
     assert gh.created == []
     assert pushed(repo) == ""
+
+
+def test_a_lesson_may_add_lint_rules_and_may_talk_about_suppressions(repo: Path):
+    config = (repo / "pyproject.toml").read_text()
+    lint = config.replace("\n[tool.pytest", 'extend-select = ["B"]\n\n[tool.pytest')
+    write(repo, "pyproject.toml", lint)
+    write(repo, "tests/test_glossary.py", 'def test_no_noqa():\n    assert "noqa" not in ""\n')
+    append(repo, "CLAUDE.md", "- Never write `noqa` or `pytest.mark.skip` to get past a gate.\n")
+    commit(repo)
+    gh = FakeGh()
+    assert open_lesson(12, 15, 17, gh=gh) == 0
+    assert len(gh.created) == 1
+
+
+def test_a_rule_bundled_with_a_test_file_still_needs_three_merged_prs(repo: Path):
+    append(repo, "CLAUDE.md", "- Code and docs use the words of GLOSSARY.md.\n")
+    write(repo, "tests/test_glossary.py", "def test_nothing():\n    assert True\n")
+    commit(repo)
+    gh = FakeGh()
+    assert open_lesson(12, gh=gh) == 1
+    assert gh.created == []
+    assert open_lesson(12, 15, 17, gh=gh) == 0
+
+
+def test_the_agent_runs_no_code_it_wrote_and_cannot_write_git_hooks_or_config():
+    _, _, agent = learner()
+    rules = re.findall(r"Bash\(([^)]*)\)", agent["claude_args"])
+    assert not [r for r in rules if r.startswith(("uv ", "python3 tools/", "pytest", "python "))]
+    denied = re.search(r'--disallowedTools "([^"]*)"', agent["claude_args"])
+    assert denied
+    assert {"Edit(.git/**)", "Write(.git/**)"} <= set(denied.group(1).split(","))
 
 
 def test_a_manual_run_writes_what_it_would_open_to_the_run_summary_and_opens_nothing(
