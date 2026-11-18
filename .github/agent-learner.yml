@@ -69,8 +69,8 @@ jobs:
                Most runs keep nothing: then say so in one line and stop.
             4. For each kind kept, one PR:
                - `git checkout -b agent/lesson-<kind> origin/main`; <kind> is a few lowercase words joined by hyphens.
-               - Prefer a check: a test in tests/, a lint rule in pyproject.toml, a step in ci.yml. Otherwise add one
-                 short line to CLAUDE.md, in its style. A one-off mistake needs a check.
+               - Prefer a check: a test in tests/ (pytest runs it in CI) or a lint rule in pyproject.toml. Otherwise
+                 add one short line to CLAUDE.md, in its style. A one-off mistake needs a check.
                - Only add: never remove or weaken a rule, a check, a workflow or an ADR.
                - Run `uv run ruff check .`, `uv run ruff format --check .`, `uv run pyright`, `uv run pytest`
                  and `python3 tools/pii.py`, then commit only the lesson's files.
