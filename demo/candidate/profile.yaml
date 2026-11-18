@@ -1,0 +1,53 @@
+# The fictional candidate's profile, read by the tests and the demo.
+# Every person, company and contact detail here is invented.
+
+identity:
+  first_name: Jeanne
+  last_name: Dupont
+  email: jeanne.dupont@example.org
+  phone: "+33 6 00 00 00 00"
+  city: Lyon
+
+# Answers to the questions most forms ask, in French and English.
+base_answers:
+  pitch:
+    fr: Data engineer depuis six ans, je construis des pipelines fiables pour la logistique et l'énergie.
+    en: Data engineer for six years, I build reliable pipelines for logistics and energy.
+  availability:
+    fr: Disponible sous un mois.
+    en: Available within one month.
+  work_authorization:
+    fr: Autorisée à travailler en France sans visa.
+    en: Authorized to work in France without a visa.
+
+targets:
+  roles: [Data engineer, Analytics engineer]
+  contracts: [permanent, freelance]  # in priority order
+  locations: [Lyon, Remote in France]
+  salary:
+    minimum: 52000
+    currency: EUR
+
+# status: validated, to_confirm or forbidden.
+# diffusion: free, applications_only or never.
+facts:
+  - id: F1
+    text: Six years as a data engineer, at Brindille Logistique then at Ventolune Énergie.
+    status: validated
+    diffusion: free
+  - id: F2
+    text: Cut the nightly pipeline at Ventolune Énergie from 6 hours to 40 minutes with incremental loads.
+    status: validated
+    diffusion: applications_only
+  - id: F3
+    text: Built the delivery-time forecast used by 120 warehouses at Brindille Logistique.
+    status: validated
+    diffusion: free
+  - id: F4
+    text: Has led a team of three engineers at Ventolune Énergie since 2025.
+    status: to_confirm
+    diffusion: free
+  - id: F5
+    text: Left Brindille Logistique after a disagreement with management.
+    status: forbidden
+    diffusion: never

@@ -5,7 +5,10 @@ description = "Agents that prepare job applications while the candidate stays in
 readme = "README.md"
 license = "AGPL-3.0-only"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "pydantic>=2.14.3",
+    "pyyaml>=6.0.3",
+]
 
 [dependency-groups]
 dev = [
@@ -13,6 +16,7 @@ dev = [
     "pyright",
     "pytest",
     "ruff",
+    "types-pyyaml>=6.0.12.20261113",
     "zizmor>=1.32.0",
 ]
 
