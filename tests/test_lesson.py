@@ -145,7 +145,11 @@ def test_a_merged_pr_runs_the_learner_once_with_its_model_and_effort_set():
     workflow, job, agent = learner()
     assert workflow[True]["pull_request"] == {"types": ["closed"]}  # YAML reads `on` as True
     assert "github.event.pull_request.merged == true" in job["if"]
-    assert workflow["concurrency"]["cancel-in-progress"] is False
+    # In the job, not the workflow: a skipped run (a PR closed unmerged) never takes the place of a
+    # waiting merged-PR run, and a dry run never takes the place of a real one.
+    assert "concurrency" not in workflow
+    assert job["concurrency"]["cancel-in-progress"] is False
+    assert "github.event_name" in job["concurrency"]["group"]
     assert re.search(r"^--model claude-[a-z]+-[0-9-]+$", agent["claude_args"], re.M)
     assert re.search(r"^--effort (low|medium|high|xhigh|max)$", agent["claude_args"], re.M)
 
@@ -231,6 +235,10 @@ def test_a_finding_covered_by_an_open_or_merged_lesson_opens_nothing(repo: Path,
     assert pushed(repo) == ""
 
 
+def new_test(code: str) -> Callable[[Path], None]:
+    return lambda r: write(r, "tests/test_stop.py", code)
+
+
 WEAKENINGS: dict[str, Callable[[Path], None]] = {
     "removes a rule": lambda r: write(r, "CLAUDE.md", "# Rules\n"),
     "changes an ADR": lambda r: append(r, "docs/adr/0001-public-code-private-data.md", "Gone.\n"),
@@ -246,6 +254,25 @@ WEAKENINGS: dict[str, Callable[[Path], None]] = {
         r, "tests/conftest.py", 'collect_ignore_glob = ["test_*.py"]\n'
     ),
     "relaxes the lint": lambda r: append(r, "pyproject.toml", 'ignore = ["E", "F"]\n'),
+    "shadows a test": lambda r: append(r, "tests/test_text.py", "def test_slug():\n    pass\n"),
+    "shadows a module the tests import": lambda r: write(r, "tests/yaml.py", "safe_load = dict\n"),
+    "shadows a tool": lambda r: write(r, "tools/yaml.py", "safe_load = dict\n"),
+    "adds bytecode": lambda r: write(r, "tools/__pycache__/pii.cpython-312.pyc", "x\n"),
+    # A new test file whose code turns other tests off: os._exit(0) ends pytest, and CI is green.
+    "ends pytest with success": new_test("import os\nos._exit(0)\n"),
+    "ends pytest from a test": new_test("import pytest\ndef test_x():\n    pytest.exit('', 0)\n"),
+    "imports os through pathlib": new_test("from pathlib import os\n"),
+    "imports os by name": new_test("__import__('os').abort()\n"),
+    "renames pytest": new_test("import pytest\nstop = pytest\n"),
+    "patches another test": new_test("from pytest import MonkeyPatch\n"),
+    "reaches the run through a fixture": new_test(
+        "def test_stop(request):\n    request.session.shouldstop = 1\n"
+    ),
+    "walks up the frames": new_test("def test_up():\n    (x for x in ()).gi_frame.f_back\n"),
+    "builds any object from YAML": new_test(
+        "import yaml\ndef test_load():\n    yaml.load('', yaml.Loader)\n"
+    ),
+    "writes a file": new_test("from pathlib import Path\nPath('tests/x.py').write_text('')\n"),
 }
 
 
@@ -274,6 +301,22 @@ def test_a_lesson_may_add_lint_rules_and_may_talk_about_suppressions(repo: Path)
     assert len(gh.created) == 1
 
 
+def test_a_check_may_read_and_parse_the_repository(repo: Path):
+    write(repo, "tests/test_workflows.py", (
+        "import ast\nimport re\nfrom pathlib import Path\n\nimport pytest\nimport yaml\n\n"
+        "ROOT = Path(__file__).parents[1]\n\n\n"
+        '@pytest.mark.parametrize("name", ["ci.yml"])\n'
+        "def test_steps_are_pinned(name: str, tmp_path: Path):\n"
+        '    workflow = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())\n'
+        '    assert all(re.search(r"@[0-9a-f]{40}", str(job)) for job in workflow["jobs"])\n'
+        '    assert ast.parse("x = 1").body\n'
+    ))  # fmt: skip
+    commit(repo)
+    gh = FakeGh()
+    assert open_lesson(12, gh=gh) == 0
+    assert len(gh.created) == 1
+
+
 def test_a_rule_bundled_with_a_test_file_still_needs_three_merged_prs(repo: Path):
     append(repo, "CLAUDE.md", "- Code and docs use the words of GLOSSARY.md.\n")
     write(repo, "tests/test_glossary.py", "def test_nothing():\n    assert True\n")
@@ -291,6 +334,17 @@ def test_the_agent_runs_no_code_it_wrote_and_cannot_write_git_hooks_or_config():
     denied = re.search(r'--disallowedTools "([^"]*)"', agent["claude_args"])
     assert denied
     assert {"Edit(.git/**)", "Write(.git/**)"} <= set(denied.group(1).split(","))
+    # `git diff/log/show --output=.git/config` writes git's config, and core.fsmonitor runs code.
+    git_rules = {r.split()[1].removesuffix(":*") for r in rules if r.startswith("git ")}
+    assert git_rules <= {"checkout", "add", "commit", "status"}
+    # Edits stay on what a lesson changes: not .git, not .claude/settings.json, not ~/.gitconfig.
+    allowed = re.search(r'--allowedTools "([^"]*)"', agent["claude_args"])
+    assert allowed
+    lesson_paths = {"CLAUDE.md", "GLOSSARY.md", "pyproject.toml", "tests/**", "lesson-body.md"}
+    edits = [t for t in allowed.group(1).split(",") if t.startswith(("Edit", "Write"))]
+    assert edits
+    assert all(re.fullmatch(r"(Edit|Write)\(.+\)", t) for t in edits), edits
+    assert {t.split("(", 1)[1].removesuffix(")") for t in edits} <= lesson_paths
 
 
 def test_a_manual_run_writes_what_it_would_open_to_the_run_summary_and_opens_nothing(

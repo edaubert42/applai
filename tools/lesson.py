@@ -9,9 +9,11 @@ also lists every `lesson` PR with its kind and state.
 `lesson` that links its evidence. It refuses, and opens nothing, when:
 - a `lesson` PR of that kind is open, or merged (its rule or check exists);
 - the lesson removes anything, adds a suppression (noqa, skip, continue-on-error),
-  or changes a file other than CLAUDE.md, GLOSSARY.md, pyproject.toml or tests (it
-  may add new files under tests/ and tools/). Workflows are out: the agents' app
-  cannot push them, and pytest already runs every test in CI;
+  or does more than add lines to CLAUDE.md, GLOSSARY.md and pyproject.toml (lint
+  rules only) and add new tests/test_<name>.py files. Workflows are out: the agents'
+  app cannot push them, and pytest already runs every test in CI. A new test only
+  reads and parses files: it imports a few modules, and nothing in it can write a
+  file, run code, or reach the test run or other tests to turn them off;
 - fewer than 3 merged PRs back a rule, or no merged PR backs a check (a test or a
   lint rule in pyproject.toml).
 Only a run started by a merged PR opens anything. Any other run, manual or local,
@@ -43,8 +45,39 @@ BRANCH_PREFIX = "agent/lesson-"
 BOT = "claude[bot]"  # no user login can contain brackets, so no one else can pose as the agents
 KIND = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 APPEND_ONLY = ("CLAUDE.md", "GLOSSARY.md", "pyproject.toml")
+# A test a lesson adds is a new module of its own: it redefines no test and shadows no module.
+NEW_TEST = re.compile(r"tests/test_[a-z0-9_]+\.py")
 RULES = ("CLAUDE.md", "GLOSSARY.md")
 CHECKS = ("tests/", "pyproject.toml")
+# What a lesson's test may import, and use of it: reading and parsing files, never writing one,
+# running code or reaching the test run (yaml.load builds any object; pytest.exit ends the run).
+IMPORTS: dict[str, frozenset[str]] = {
+    "ast": frozenset({"dump", "get_docstring", "iter_child_nodes", "literal_eval", "parse"})
+    | frozenset({"unparse", "walk"}),  # and its node classes, whose names are capitalized
+    "json": frozenset({"JSONDecodeError", "dumps", "loads"}),
+    "pathlib": frozenset({"Path", "PurePath", "PurePosixPath"}),
+    "pytest": frozenset({"approx", "fail", "fixture", "mark", "param", "raises", "warns"}),
+    "re": frozenset({"compile", "escape", "findall", "finditer", "fullmatch", "match", "search"})
+    | frozenset({"split", "sub", "subn", "Match", "Pattern", "error", "ASCII", "DOTALL"})
+    | frozenset({"IGNORECASE", "MULTILINE", "VERBOSE", "A", "I", "M", "S", "X"}),
+    "tomllib": frozenset({"TOMLDecodeError", "loads"}),
+    "yaml": frozenset({"YAMLError", "safe_load", "safe_load_all"}),
+}
+MARKS = {"parametrize"}
+# Builtins and pytest fixtures that run code, read or set any attribute, or reach the run.
+REACH = (
+    {"breakpoint", "compile", "delattr", "eval", "exec", "exit", "getattr", "globals"}
+    | {"help", "input", "locals", "open", "quit", "setattr", "vars"}
+    | {"cache", "caplog", "doctest_namespace", "monkeypatch", "pytestconfig", "pytester"}
+    | {"record_property", "record_testsuite_property", "record_xml_attribute", "request"}
+    | {"subtests", "testdir"}
+)
+# Attributes that write a file, or walk to the frames and the globals of other code.
+WRITES = {"chmod", "hardlink_to", "lchmod", "mkdir", "open", "rename", "replace", "rmdir"} | (
+    {"symlink_to", "touch", "unlink", "write_bytes", "write_text"}
+)
+DUNDER = re.compile(r"__(?!file__)\w+__")  # __import__, __builtins__…; __file__ is a path
+FRAMES = re.compile(r"(?:f|tb|gi|cr|ag|co)_\w+|frame|traceback|tb|raw|mro")
 # In the comments of a Python file the lesson adds: a directive that turns a check off.
 DIRECTIVE = re.compile(r"noqa|(?:type|pyright):\s*ignore|fmt:\s*(?:off|skip)")
 # In its code: a way to skip a test. Words in strings and in docs are fine; only code counts.
@@ -123,13 +156,15 @@ def _changes() -> tuple[list[str], list[str]]:
         _, removed, path = line.split("\t", 2)
         if removed != "0":
             refusals.append(f"{path}: {'binary file' if removed == '-' else 'removes lines'}")
-        new = status[path] == "A" and path.startswith(("tests/", "tools/"))
-        appended = status[path] == "M" and (path in APPEND_ONLY or path.startswith("tests/"))
+        new = status[path] == "A" and NEW_TEST.fullmatch(path)
+        appended = status[path] == "M" and path in APPEND_ONLY
         if not (new or appended):
             refusals.append(
-                f"{path}: a lesson only adds lines to {', '.join(APPEND_ONLY)} or tests/,"
-                " or adds a file under tests/ or tools/"
+                f"{path}: a lesson only adds lines to {', '.join(APPEND_ONLY)},"
+                " or adds a new tests/test_<name>.py"
             )
+        elif new:
+            refusals += _reach(path)
     added: dict[str, set[int]] = {}
     path, header, number = "", False, 0
     for line in _git(*diff, "--unified=0").splitlines():
@@ -169,6 +204,65 @@ def _suppressions(path: str, lines: set[int]) -> list[str]:
             if name.split(".")[-1] in SKIPS:
                 found.append(name)
     return [f"{path}: adds `{text.strip()}`, which turns a check off" for text in found]
+
+
+def _allowed(module: str, name: str) -> bool:
+    return name in IMPORTS.get(module, ()) or (module == "ast" and name[:1].isupper())
+
+
+def _names(node: ast.AST) -> list[str]:
+    match node:
+        case ast.Name(id=name) | ast.arg(arg=name):
+            return [name]
+        case ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name) | ast.ClassDef(name=name):
+            return [name]
+        case ast.alias(name=name, asname=asname):
+            return [name, asname or ""]
+        case _:
+            return []
+
+
+def _reach(path: str) -> list[str]:
+    """What a new test does beyond reading and parsing files: what could write a file, run
+    code, or reach the test run or other tests, and so turn them off (os._exit(0) passes CI)."""
+    try:
+        tree = ast.parse(_git("show", f"HEAD:{path}"))
+    except SyntaxError:
+        return [f"{path}: is not valid Python"]
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    found: list[str] = []
+    for node in ast.walk(tree):
+        match node:
+            case ast.Import(names=names):
+                found += [f"import {a.name}" for a in names if a.name not in IMPORTS or a.asname]
+            case ast.ImportFrom(module=module, names=names, level=level):
+                found += [
+                    f"from {module} import {a.name}"
+                    for a in names
+                    if level or a.name == "mark" or not _allowed(module or "", a.name)
+                ]
+            case ast.Name(id=name) if name in IMPORTS:  # only as `module.allowed_name`
+                parent = parents.get(node)
+                if not isinstance(parent, ast.Attribute) or not _allowed(name, parent.attr):
+                    found.append(name)
+                elif parent.attr == "mark":
+                    mark = parents.get(parent)
+                    if not isinstance(mark, ast.Attribute) or mark.attr not in MARKS:
+                        found.append("pytest.mark")
+            case ast.Attribute(attr=attr, ctx=ctx):
+                if attr.startswith("_") or attr in WRITES or FRAMES.fullmatch(attr):
+                    found.append(f".{attr}")
+                elif not isinstance(ctx, ast.Load):
+                    found.append(f"setting .{attr}")
+            case _:
+                pass
+        found += [n for n in _names(node) if n in REACH or DUNDER.fullmatch(n)]
+    allowed = ", ".join(IMPORTS)
+    return [
+        f"{path}: uses `{text}`; a lesson's test only imports {allowed}, reads and parses"
+        " files, and never writes one or reaches the test run"
+        for text in dict.fromkeys(found)
+    ]
 
 
 def _config_refusals() -> list[str]:

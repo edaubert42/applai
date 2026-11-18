@@ -9,12 +9,6 @@ on:
     types: [closed]
   workflow_dispatch:
 
-# One run at a time, so two runs never open the same lesson. A run waiting behind another
-# is replaced by a newer one, which reads the same history.
-concurrency:
-  group: agent-learner
-  cancel-in-progress: false
-
 jobs:
   learn:
     if: >-
@@ -23,6 +17,13 @@ jobs:
       && github.event.pull_request.head.repo.full_name == github.repository)
       || (github.event_name == 'workflow_dispatch'
       && github.event.sender.login == github.repository_owner)
+    # One run at a time, so two runs never open the same lesson. A run waiting behind another
+    # is replaced by a newer one, which reads the same history. In the job, not the workflow:
+    # a skipped job (a PR closed unmerged) never waits, so it never replaces a merged PR's run,
+    # and a dry run waits apart from the runs that open PRs.
+    concurrency:
+      group: agent-learner-${{ github.event_name }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -48,13 +49,15 @@ jobs:
           # Opus at high, always: a lesson changes the rules every other agent follows.
           # Permission mode default: a command no allow rule covers is denied, not left to
           # auto mode, so `git push` and `gh pr create` only happen inside the lesson tool.
-          # No command runs code the agent wrote, and it cannot write .git (hooks, config).
+          # No command runs code the agent wrote, and it cannot write .git (hooks, config): it
+          # edits only what a lesson changes, and has no git command that writes a file
+          # (`git diff/log/show --output=.git/config`, then core.fsmonitor runs code).
           claude_args: |
             --model claude-opus-5-5
             --effort high
             --permission-mode default
             --max-turns 60
-            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(python3 ${{ runner.temp }}/learner/lesson.py:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(gh pr diff:*)"
+            --allowedTools "Read,Glob,Grep,Edit(CLAUDE.md),Edit(GLOSSARY.md),Edit(pyproject.toml),Edit(tests/**),Write(tests/**),Edit(lesson-body.md),Write(lesson-body.md),Bash(python3 ${{ runner.temp }}/learner/lesson.py:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git status:*),Bash(gh pr diff:*)"
             --disallowedTools "Edit(.git/**),Write(.git/**)"
           prompt: |
             You are the learner agent of ${{ github.repository }}. You turn the agents' mistakes into rules,
@@ -71,8 +74,10 @@ jobs:
                Most runs keep nothing: then say so in one line and stop.
             4. For each kind kept, one PR:
                - `git checkout -b agent/lesson-<kind> origin/main`; <kind> is a few lowercase words joined by hyphens.
-               - Prefer a check: a test in tests/ (pytest runs it in CI) or a lint rule (`extend-select` in pyproject.toml). Otherwise
-                 add one short line to CLAUDE.md, in its style. A one-off mistake needs a check.
+               - Prefer a check: a new tests/test_<name>.py (pytest runs it in CI) or a lint rule (`extend-select` in pyproject.toml).
+                 Otherwise add one short line to CLAUDE.md, in its style. A one-off mistake needs a check.
+                 The test only imports ast, json, pathlib, pytest, re, tomllib and yaml (safe_load), reads and parses files,
+                 and never writes one; the tool refuses anything else, and any change to an existing test.
                - Only add: never remove or weaken a rule, a check, a workflow or an ADR.
                - You never run code from the checkout (no pytest, ruff, pyright or script): it would run with the
                  credentials the tool pushes with. The gates run in CI on the lesson PR, before the owner merges.
