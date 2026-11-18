@@ -26,7 +26,7 @@ The gates are the steps of `.github/workflows/ci.yml`; run them locally and have
 
 ## Agents that build ApplAI
 
-Agents in `.github/workflows/agent-*.yml` build ApplAI from GitHub issues ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)): the coder builds an issue labeled `ready-for-agent`, the reviewer reviews each PR, the fixer answers the owner's `@claude` and repairs red CI on `agent/*` branches. Agents push branches and open PRs; only the owner merges.
+Agents in `.github/workflows/agent-*.yml` build ApplAI from GitHub issues ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)): the coder builds an issue labeled `ready-for-agent`, the reviewer reviews each PR, the fixer answers the owner's `@claude`, repairs red CI on `agent/*` branches, and applies the reviewer's `changes needed`. Difficulty is measured, not only guessed: after a second failed review the PR becomes `hard` and Opus takes over; after a third, the agents stop and hand over to the owner. Agents push branches and open PRs; only the owner merges.
 
 An issue is `hard` when any of these holds; otherwise it is normal:
 
@@ -42,5 +42,6 @@ An issue is `hard` when any of these holds; otherwise it is normal:
 | Reviewer | Sonnet 5.5, effort medium | Opus 5.5, effort high |
 | Fixer (`@claude`) | Sonnet 5.5, effort high | Opus 5.5, effort high |
 | Fixer (red CI) | Sonnet 5.5, effort high | Sonnet 5.5, effort high |
+| Fixer (review) | 1st failed review: Sonnet 5.5, high | 2nd: Opus 5.5, xhigh, and the PR becomes `hard` |
 
 `gh pr edit` fails on this repository; edit a PR with `gh api -X PATCH repos/edaubert42/applai/pulls/<n> -F body=@<file>`.
