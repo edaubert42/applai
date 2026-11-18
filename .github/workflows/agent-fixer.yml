@@ -155,10 +155,11 @@ jobs:
           allow_fork_prs: "false"
           allowed_bots: claude[bot]
           restrict_untrusted_prs: "false"
-          # Escalation: Sonnet after the first failed review, Opus after the second.
+          # Escalation: Sonnet after the first failed review, Opus after the second. Both at high:
+          # the fix targets review findings, it does not build the issue again.
           claude_args: |
             --model ${{ steps.verdicts.outputs.count == 2 && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
-            --effort ${{ steps.verdicts.outputs.count == 2 && 'xhigh' || 'high' }}
+            --effort high
             --max-turns 80
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(gh pr comment:*)"
           prompt: |
