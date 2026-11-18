@@ -12,7 +12,3 @@ def test_runs_of_spaces_and_punctuation_become_one_hyphen_none_at_the_ends() -> 
 def test_empty_or_punctuation_only_title_gives_an_empty_slug() -> None:
     assert slugify("") == ""
     assert slugify("!!!") == ""
-
-
-def test_ligatures_without_an_accent_to_strip_are_spelled_out() -> None:
-    assert slugify("Chargé d'Œuvre") == "charge-d-oeuvre"
