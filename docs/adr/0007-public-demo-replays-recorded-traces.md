@@ -1,0 +1,3 @@
+# The public demo replays recorded traces
+
+Recruiters should be able to click through ApplAI without it spending tokens, touching real accounts or showing real data. The hosted demo runs the real backend and frontend with a fictional candidate and a `ReplayBackend` that returns recorded agent traces, on the bench's fake forms, with sending disabled. It is hosted on Railway in serverless mode, so it costs almost nothing while idle; a demo GIF in the README covers the cold start. A static site faking the API was rejected because it would be a second app to maintain and would not show the real code running.

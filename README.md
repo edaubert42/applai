@@ -10,6 +10,21 @@ ApplAI finds offers, drafts answers and cover letters from a verified fact sheet
 
 **Status:** design phase. The code lands through small pull requests.
 
+## How it's built
+
+I build ApplAI with Claude Code, the same way ApplAI works: the agents do the work, a human makes the decisions.
+
+- **I decide.** Goals, scope and design choices are mine. Claude Code lays out the options and their trade-offs; what I chose, and why, is in the [design decisions](docs/adr/).
+- **Claude Code writes most of the code**, one small pull request at a time. That is why commits carry a `Co-authored-by: Claude` line.
+- **I review and merge every pull request**, and only once the checks pass: lint, types, tests, and a scan for personal data.
+- **Measurements decide whether a change helped.** Every agent is scored on a fixed evaluation bench, and the numbers published here come from it.
+
+## Read more
+
+- [The plan](docs/plan.md): architecture, control levels, milestones, evaluation bench.
+- [Glossary](GLOSSARY.md): the words ApplAI uses, and the ones it avoids.
+- [Design decisions](docs/adr/): why it is built this way, one short record per decision.
+
 ## License
 
 [AGPL-3.0](LICENSE)

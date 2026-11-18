@@ -1,0 +1,3 @@
+# Autonomy is earned level by level from the correction rate
+
+The candidate controls four levels: the offer, the answers, the form, and the full application. A level's gate starts closed and opens on its own only when its correction rate is at most 10 % over a sliding window and at least 20 applications have been checked at that level; for forms, the rate is counted per ATS. Any invented fact or wrong field relocks the level at once. Thresholds are settings. This makes trust a number the dashboards can show, instead of a feeling, and it lets the cheapest level (triage) become autonomous long before sending does.
