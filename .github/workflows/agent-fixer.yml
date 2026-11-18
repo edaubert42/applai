@@ -33,8 +33,9 @@ jobs:
       actions: read
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] agents push; no artifact is uploaded
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - uses: anthropics/claude-code-action@e5812cd75691ca7bbfc57c0ecf4441db3a1ab7dd # v1.0.281
@@ -70,8 +71,9 @@ jobs:
       actions: read
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] agents push; no artifact is uploaded
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -142,8 +144,9 @@ jobs:
           PR: ${{ github.event.issue.number }}
         run: gh api "repos/$REPO/issues/$PR/labels" -f "labels[]=hard"
       - if: steps.verdicts.outputs.count < 3 && startsWith(steps.verdicts.outputs.branch, 'agent/')
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] agents push; no artifact is uploaded
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ steps.verdicts.outputs.branch }}
           fetch-depth: 0
       - if: steps.verdicts.outputs.count < 3 && startsWith(steps.verdicts.outputs.branch, 'agent/')
@@ -171,3 +174,8 @@ jobs:
                Never delete or weaken a test or a check.
             3. Run every gate listed in CLAUDE.md, commit with a message starting with `Fix review:`, and push.
                The push starts a new review.
+            4. If a finding is about the PR title or description, edit them with
+               `python3 tools/edit_pr.py ${{ github.event.issue.number }} --title <title> --body-file <file>`.
+               Editing them also starts a new review. Never close or merge a PR.
+            5. If you cannot fix a finding, for example because a tool is denied, say which one and why
+               in a PR comment, then stop. Never end without a push, an edit or a comment.

@@ -1,10 +1,10 @@
 # Reviewer agent: reads each new PR with a fresh context and posts one review.
-# It reviews again after each push by an agent (review fixes, CI fixes).
+# It reviews again after each push or PR edit by an agent (review fixes, CI fixes).
 name: Agent reviewer
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize, edited]
 
 concurrency:
   group: agent-reviewer-${{ github.event.pull_request.number }}
@@ -15,7 +15,7 @@ jobs:
     if: >-
       !github.event.pull_request.draft
       && github.event.pull_request.head.repo.full_name == github.repository
-      && (github.event.action != 'synchronize' || github.event.sender.login == 'claude[bot]')
+      && (!contains(fromJSON('["synchronize", "edited"]'), github.event.action) || github.event.sender.login == 'claude[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -24,8 +24,9 @@ jobs:
       issues: read
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] agents push; no artifact is uploaded
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - uses: anthropics/claude-code-action@e5812cd75691ca7bbfc57c0ecf4441db3a1ab7dd # v1.0.281
