@@ -15,7 +15,17 @@ import pytest
 import yaml
 from lesson import main
 
-WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "agent-learner.yml"
+GITHUB = Path(__file__).parents[1] / ".github"
+# The agents' app cannot push to .github/workflows/: the workflow is committed one
+# level up until the owner moves it there. The test follows it.
+WORKFLOW = next(
+    (
+        p
+        for p in (GITHUB / "workflows" / "agent-learner.yml", GITHUB / "agent-learner.yml")
+        if p.exists()
+    ),
+    GITHUB / "workflows" / "agent-learner.yml",
+)
 CI = ".github/workflows/ci.yml"
 OWNER = "fictional-owner"
 URL = "https://github.com/example/applai/pull/{}"
