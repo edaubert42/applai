@@ -43,6 +43,7 @@ jobs:
             2. Create the branch `agent/issue-${{ github.event.issue.number }}-<short-slug>` from `main`.
             3. Work test first: one failing test per acceptance criterion, then the code that makes it pass.
             4. Run every gate listed in CLAUDE.md until all are green. Commit in small steps.
-            5. Push the branch and open a PR with `gh pr create`, filling .github/pull_request_template.md,
+               Then review your own diff as the reviewer will: spec, tests that prove something, CLAUDE.md rules, bugs.
+            5. Push the branch and open a PR with `gh pr create`, filling .github/pull_request_template.md (150 words at most),
                with `Closes #${{ github.event.issue.number }}`${{ contains(github.event.issue.labels.*.name, 'hard') && ' and `--label hard`' || '' }}.
                Done when the PR is open and every gate passed locally.

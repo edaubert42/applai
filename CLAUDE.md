@@ -12,7 +12,7 @@ Read before working:
 
 - **Fictional candidate only.** Code, tests, fixtures, commits, PR text and screenshots use invented people and companies. The real candidate's data lives in a private repository, is reached only through `APPLAI_DATA_DIR`, and is never copied here.
 - **Sending is never an agent tool.** No agent gets a tool that submits an application (ADR 0003).
-- **One issue, one branch, one PR**, about 400 lines at most, tests first. PR title: `Area: outcome sentence`. Fill in `.github/pull_request_template.md`. Push only to your branch; the owner reviews and merges.
+- **One issue, one branch, one PR**, about 400 lines at most, tests first. PR title: `Area: outcome sentence`. Fill in `.github/pull_request_template.md`: at most 150 words, CI checks it. To change a description, rewrite it; never append to it. Push only to your branch; the owner reviews and merges.
 
 ## Tests
 
@@ -30,7 +30,8 @@ Agents in `.github/workflows/agent-*.yml` build ApplAI from GitHub issues ([ADR 
 
 How agents work on a PR:
 
-- A PR comment is short: outcome first, then at most 5 short lines or a short checklist. No paragraphs. Details go in the commit message, the PR body or inline comments.
+- A PR comment is short: outcome first, then at most 5 short lines or a short checklist. No paragraphs. Details go in the commit message or inline comments.
+- A review reports only what blocks a merge: at most 5 findings, at most 3 lines per inline comment. Minor points share one non-blocking line.
 - A tool you need is on `main` but not on your branch: `git merge origin/main`, then go on. Never rebase, never force-push.
 
 An issue is `hard` when any of these holds; otherwise it is normal:
@@ -40,6 +41,8 @@ An issue is `hard` when any of these holds; otherwise it is normal:
 - it designs an agent's prompt or tools, or changes what the bench measures;
 - it touches security: secrets, authentication, the agent workflows;
 - no existing pattern in the code shows how to do it.
+
+The owner questions a `hard` issue (numbered questions, a recommended answer each) before labeling it `ready-for-agent`: most review rounds come from an unclear issue, not from the code.
 
 | Agent | Normal | `hard` |
 |---|---|---|

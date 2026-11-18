@@ -174,8 +174,9 @@ jobs:
                Never delete or weaken a test or a check.
             3. Run every gate listed in CLAUDE.md, commit with a message starting with `Fix review:`, and push.
                The push starts a new review.
-            4. If a finding is about the PR title or description, edit them with
-               `python3 tools/edit_pr.py ${{ github.event.issue.number }} --title <title> --body-file <file>`.
+            4. If a finding is about the PR title or description, rewrite them with
+               `python3 tools/edit_pr.py ${{ github.event.issue.number }} --title <title> --body-file <file>`,
+               keeping the template and its 150-word limit: never append.
                Editing them also starts a new review. Never close or merge a PR.
             5. If you cannot fix a finding, for example because a tool is denied, say which one and why
                in a PR comment, then stop. Never end without a push, an edit or a comment.
