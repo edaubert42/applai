@@ -1,0 +1,14 @@
+{
+  "app.name": "ApplAI",
+  "nav.label": "Navigation principale",
+  "nav.review": "À revoir",
+  "nav.applications": "Candidatures",
+  "nav.control": "Contrôle",
+  "page.empty": "Rien ici pour l’instant.",
+  "theme.toLight": "Passer au thème clair",
+  "theme.toDark": "Passer au thème sombre",
+  "theme.light": "Clair",
+  "theme.dark": "Sombre",
+  "language.switch": "Switch to English",
+  "language.other": "EN"
+}

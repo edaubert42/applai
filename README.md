@@ -36,6 +36,8 @@ uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run 
 
 ApplAI refuses to open the candidate's database without a place for its backups: set `APPLAI_BACKUP_DIR` to a directory outside `APPLAI_DATA_DIR`. A copy is made when the newest is over 24 hours old, the 14 latest are kept, and `python -m applai.backup` makes one now.
 
+The frontend is in `frontend/` (Node 24): `npm ci && npm run lint && npm run typecheck && npm test && npm run build`, or `npm run dev` while working on it. Its design is in [docs/design.md](docs/design.md).
+
 A denylist check keeps the candidate's personal terms out of the repository. It reads them from `$APPLAI_DATA_DIR/denylist.txt` locally and from the `APPLAI_DENYLIST` secret in CI, and fails without printing them: `python3 tools/denylist.py`. A second check, `python3 tools/pii.py`, fails on any real-looking e-mail or phone number and on documents or images not listed in `tools/allowed_files.txt`. Optional pre-commit hooks: `pre-commit install`.
 
 ## License
