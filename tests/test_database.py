@@ -9,7 +9,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Connection, Engine, create_engine, inspect
+from sqlalchemy import Connection, Engine, create_engine, inspect, select
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
@@ -149,7 +149,8 @@ def test_an_offer_url_is_unique_per_user_id(tmp_path: Path, open_db: Opener):
 
         session.add(_offer(user_id=2))
         session.commit()
-        assert session.query(Offer).filter_by(url=OFFER_URL).count() == 2
+        users = session.scalars(select(Offer.user_id).where(Offer.url == OFFER_URL))
+        assert sorted(users) == [1, 2]
 
 
 def test_an_offer_has_at_most_one_application(tmp_path: Path, open_db: Opener):

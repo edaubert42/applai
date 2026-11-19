@@ -5,6 +5,9 @@ applai-private/
 *.sqlite
 *.sqlite3
 *.db
+*.db-shm
+*.db-wal
+*.db.bak-*
 traces/
 .env
 .env.*
