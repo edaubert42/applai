@@ -122,7 +122,7 @@ def test_a_described_offer_gets_its_stored_card_and_moves_to_triaged(
     assert spec.model == TRIAGE_MODEL == "claude-haiku-5-5"
     sent = json.loads(spec.input)
     assert sent["offer"] == {"title": TITLE, "company": COMPANY, "description": DESCRIPTION}
-    assert sent["targets"] == profile.targets.model_dump()
+    assert sent["targets"] == profile.targets.model_dump(mode="json")
     assert [fact["id"] for fact in sent["facts"]] == ["F1", "F2", "F3"]
     forbidden = [fact.text for fact in profile.facts if fact.status == FactStatus.FORBIDDEN]
     assert forbidden
@@ -171,9 +171,24 @@ def test_an_offer_without_a_description_is_refused_before_any_model_call(
     assert (run.offer_id, run.agent, run.outcome) == (offer_id, "triage", "no_description")
 
 
+def test_an_offer_already_triaged_is_refused_before_any_model_call(
+    engine: Engine, profile: Profile
+):
+    offer_id = _offer(engine)
+    runner = AgentRunner(FakeBackend([_result(CARD), _result(CARD)]))
+    triage_offer(runner, engine, offer_id, profile)
+
+    with pytest.raises(TriageError):
+        triage_offer(runner, engine, offer_id, profile)
+
+    assert len(_runs(engine)) == len(_triages(engine)) == 1
+
+
 def test_only_validated_facts_whose_diffusion_is_not_never_reach_the_prompt(profile: Profile):
     def fact(id: str, status: FactStatus, diffusion: Diffusion) -> Fact:
-        return Fact(id=id, text=f"Fait {id}, {status} et {diffusion}.", status=status, diffusion=diffusion)
+        return Fact(
+            id=id, text=f"Fait {id}, {status} et {diffusion}.", status=status, diffusion=diffusion
+        )
 
     facts = (
         fact("F1", FactStatus.VALIDATED, Diffusion.ANYWHERE),
