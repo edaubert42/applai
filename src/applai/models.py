@@ -1,15 +1,17 @@
 """The tables ApplAI keeps in the candidate's database.
 
 Every row carries the user_id of the candidate it belongs to, ready for multi-user;
-there is no users table yet. States are plain text until the orchestrator gives them
-rules. Times are UTC, stored without a time zone, which SQLite cannot keep.
+there is no users table yet. States are plain text; applai.orchestrator.move() is the
+only way to change one, along its transition table. Times are UTC, stored without a
+time zone, which SQLite cannot keep.
 """
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
-from sqlalchemy import ForeignKey, MetaData, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import Connection, ForeignKey, MetaData, UniqueConstraint, event, inspect
+from sqlalchemy.orm import DeclarativeBase, Mapped, Mapper, mapped_column
 
 LOCAL_USER_ID = 1  # the one candidate of a local ApplAI, until accounts come
 
@@ -105,3 +107,36 @@ class StateChange(Base):
     to_state: Mapped[str]
     actor: Mapped[str]
     changed_at: Mapped[datetime] = mapped_column(default=_utc_now)
+
+
+class AgentRun(Base):
+    """One agent call, as the trace of its offer keeps it (applai.trace).
+
+    outcome is "ok", or the kind of the error. A failed run has no tokens and no cost.
+    """
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"), index=True)
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("applications.id"))
+    agent: Mapped[str]
+    model: Mapped[str]  # the model that ran, or the spec's when the run failed
+    started_at: Mapped[datetime]
+    duration_ms: Mapped[int]
+    input_tokens: Mapped[int | None]  # cached input included
+    output_tokens: Mapped[int | None]
+    cost_usd: Mapped[float | None]  # estimated at API list price
+    outcome: Mapped[str]
+
+
+@event.listens_for(Offer, "before_update")
+@event.listens_for(Application, "before_update")
+def _refuse_a_state_set_by_hand(_: Mapper[Any], __: Connection, item: Offer | Application) -> None:
+    # move() changes a state with its own UPDATE, never through an assigned attribute.
+    if inspect(item).attrs.state.history.has_changes():
+        raise ValueError(
+            f"{type(item).__name__} {item.id}: a state changes only through"
+            " applai.orchestrator.move()."
+        )

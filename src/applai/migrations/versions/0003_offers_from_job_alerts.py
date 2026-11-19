@@ -1,14 +1,14 @@
 """Offers keep what a job alert gives about them; the alerts read are kept.
 
-Revision ID: 0002
-Revises: 0001
+Revision ID: 0003
+Revises: 0002
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0002"
-down_revision: str | None = "0001"
+revision = "0003"
+down_revision: str | None = "0002"
 branch_labels: str | None = None
 depends_on: str | None = None
 

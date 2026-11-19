@@ -1,0 +1,88 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import App from "./App";
+import en from "./locales/en.json";
+import fr from "./locales/fr.json";
+import { themes } from "./theme";
+
+/** Every text and accessible name in the page: none may be missing from the locale file. */
+function shownStrings(): string[] {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const strings: string[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent?.trim();
+    if (text) strings.push(text);
+  }
+  for (const element of document.body.querySelectorAll("[aria-label], [title]")) {
+    for (const name of ["aria-label", "title"]) {
+      const value = element.getAttribute(name);
+      if (value) strings.push(value);
+    }
+  }
+  return strings;
+}
+
+function rootToken(name: string): string {
+  return document.documentElement.style.getPropertyValue(`--ui-${name}`);
+}
+
+describe("the shell", () => {
+  it("renders in French, then in English, only from the translation files", () => {
+    render(<App />);
+    expect(document.documentElement.lang).toBe("fr");
+    for (const label of [fr["nav.review"], fr["nav.applications"], fr["nav.control"]]) {
+      expect(screen.getByRole("button", { name: label })).toBeTruthy();
+    }
+    const french = new Set(Object.values(fr));
+    expect(shownStrings().filter((s) => !french.has(s))).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
+
+    expect(document.documentElement.lang).toBe("en");
+    for (const label of [en["nav.review"], en["nav.applications"], en["nav.control"]]) {
+      expect(screen.getByRole("button", { name: label })).toBeTruthy();
+    }
+    const english = new Set(Object.values(en));
+    expect(shownStrings().filter((s) => !english.has(s))).toEqual([]);
+  });
+
+  it("has the same keys in every translation file", () => {
+    expect(Object.keys(en).sort()).toEqual(Object.keys(fr).sort());
+  });
+
+  it("switches from the dark tokens to the light ones", () => {
+    render(<App />);
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(rootToken("background")).toBe(themes.dark.background);
+
+    fireEvent.click(screen.getByRole("button", { name: fr["theme.toLight"] }));
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+    for (const [name, value] of Object.entries(themes.light)) {
+      expect(rootToken(name)).toBe(value);
+    }
+    expect(themes.light.background).not.toBe(themes.dark.background);
+  });
+
+  it("keeps the chosen theme and language after a reload", () => {
+    const { unmount } = render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: fr["theme.toLight"] }));
+    fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
+    unmount();
+
+    render(<App />);
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(screen.getByRole("button", { name: en["nav.review"] })).toBeTruthy();
+  });
+
+  it("opens the page of the pill it is on", () => {
+    render(<App />);
+    const applications = screen.getByRole("button", { name: fr["nav.applications"] });
+
+    fireEvent.click(applications);
+
+    expect(applications.getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(fr["nav.applications"]);
+  });
+});
