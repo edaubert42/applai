@@ -24,7 +24,15 @@ ALLOWED_FILES_LIST = Path(__file__).with_name("allowed_files.txt")
 _EMAIL = re.compile(r"[\w.+-]+@((?:[\w-]+\.)+[A-Za-z]{2,})")
 _FICTIONAL_DOMAINS = ("example.com", "example.org", "example.net")
 _FICTIONAL_TLDS = (".test", ".example", ".invalid", ".localhost")
-_ALLOWED_EMAILS = {"noreply@anthropic.com"}  # commit attribution trailer
+_ALLOWED_EMAILS = {
+    "noreply@anthropic.com",  # commit attribution trailer
+    # The job sites' alert senders, kept in tests/fixtures/alerts: the parser routes on them.
+    "jobalerts-noreply@linkedin.com",
+    "alerts@welcometothejungle.com",
+    "alerte@emails.hellowork.com",
+    "no-reply@notification.prod.jobteaser.net",
+    "emploi@alertes.lesjeudis.com",
+}
 
 _PHONE = re.compile(r"(?<![\w+])(?:\+33[\s.-]?|0)([1-9](?:[\s.-]?\d{2}){4})(?!\d)")
 
