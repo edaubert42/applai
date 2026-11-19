@@ -61,7 +61,7 @@ Milestones are defined by content, not dates.
 
 ### Milestone 1: the core loop, used for real
 
-- **Part 1**: skeleton and CI, data directory and importer, database and orchestrator, `run_agent` + trace, Triage agent and its bench, the **To review** screen (offer labeling), the **Applications** dashboard (sent, waiting, in progress, including those still handled by the old workflow).
+- **Part 1**: skeleton and CI, data directory and the candidate's profile, database and orchestrator, `run_agent` + trace, Triage agent and its bench, the **To review** screen (offer labeling), the **Applications** dashboard (sent, waiting, in progress, including those still handled by the old workflow).
 - **Part 2**: Drafting, the **Correct** screen (answers and cover letter), filling for Ashby and Lever (Playwright, dedicated profile), final validation with both send buttons, the **Control** dashboard per level, a simple live **Flow** view, all watch sources (career pages, Notion, LinkedIn, e-mail alerts).
 - **Part 3**: the ApplAI Chrome extension, the generic path for any ATS, LinkedIn Easy Apply (a few per day, human-paced, stops at any verification), the full Flow graph and timeline.
 - **Exit**: the author applies through ApplAI. ApplAI goes on the CV with measured facts only. README with a demo GIF and the bench's version table. Public demo on Railway ([ADR 0007](adr/0007-public-demo-replays-recorded-traces.md)).
@@ -69,7 +69,7 @@ Milestones are defined by content, not dates.
 ### Next
 
 1. **Interview prep**: for each application that reaches an interview, a prep sheet (the offer, the company, what the candidate wrote in the application), STAR stories picked from the facts, likely questions, a mock interview with Opus and feedback. Answers can be dictated by voice. New facts found while practicing go back to the profile.
-2. **Onboarding**: CV upload as the main entry, LinkedIn data export as an option, Google or Microsoft sign-in for login and mailbox, then an interview per experience until each one has enough facts, then fact validation. The author is the first user: the importer prefills, the interview fills the gaps.
+2. **Onboarding**: CV upload as the main entry, LinkedIn data export as an option, Google or Microsoft sign-in for login and mailbox, then an interview per experience until each one has enough facts, then fact validation. The author is the first user: their profile was imported by hand once from the old repository, and the interview fills the gaps.
 3. **Learning loops**: rules proposed from labels ("stop proposing fixed-term contracts"), applied only after a bench run with no regression. Blind A/B of two answer versions, review time, offers kept for later that end up sent.
 4. **Friends trial**: friends install ApplAI on their own machine, with their own private data repository and their own Claude subscription. Needs a one-command install and the onboarding, so onboarding moves ahead of interview prep when the trial starts.
 5. **Multi-user and cloud**: accounts, Postgres, the `AnthropicAPI` backend, per-user OAuth for mail, "try it with your CV" in the demo. A hosted version pays for model calls, so it needs a paid offer first (for example, prepaid API credits).
@@ -109,7 +109,7 @@ Milestones are defined by content, not dates.
 ## First pull requests
 
 1. Skeleton: `pyproject`, ruff, pyright, pytest, CI, gitleaks + denylist hook, repo `CLAUDE.md`, short README.
-2. Data directory, `profile.yaml` schema, importer from the old repository into `applai-private`.
+2. Data directory and `profile.yaml` schema. The candidate's profile was imported by hand once into `applai-private` (2026-11-19): free-form notes, read once, so no importer code.
 3. Database models, Alembic, orchestrator state machine.
 4. `run_agent`, the `ClaudeCLI` backend, the trace.
 5. Triage agent and the triage bench.
