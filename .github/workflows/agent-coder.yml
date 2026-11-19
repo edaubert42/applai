@@ -16,12 +16,12 @@ on:
         required: true
         type: number
 
-concurrency:
-  group: agent-coder-${{ github.event.issue.number || inputs.issue }}
-  cancel-in-progress: false
-
 jobs:
   code:
+    # Job level, not workflow level: a comment whose job is skipped must not cancel a queued restart.
+    concurrency:
+      group: agent-coder-${{ github.event.issue.number || inputs.issue }}
+      cancel-in-progress: false
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
       || (github.event.label.name == 'ready-for-agent' && github.event.sender.login == github.repository_owner)
@@ -67,6 +67,9 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allow_fork_prs: "false"
+          # Restarts (answerer, agent-unblock.yml) dispatch the coder with GITHUB_TOKEN, so the actor is
+          # github-actions[bot]. Only this repository's workflows can do that, and only on main (job condition).
+          allowed_bots: github-actions[bot]
           # Model per task: `hard` issues get Opus, others Sonnet; both at effort high.
           claude_args: |
             --model ${{ steps.ready.outputs.hard == 'true' && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
@@ -102,6 +105,9 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allow_fork_prs: "false"
+          # Restarts (answerer, agent-unblock.yml) dispatch the coder with GITHUB_TOKEN, so the actor is
+          # github-actions[bot]. Only this repository's workflows can do that, and only on main (job condition).
+          allowed_bots: github-actions[bot]
           claude_args: |
             --model ${{ steps.ready.outputs.hard == 'true' && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
             --effort high
