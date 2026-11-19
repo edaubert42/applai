@@ -54,10 +54,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allow_fork_prs: "false"
-          # Model and effort per task: `hard` issues get Opus at xhigh, others Sonnet at high.
+          # Model per task: `hard` issues get Opus, others Sonnet; both at effort high.
           claude_args: |
             --model ${{ steps.ready.outputs.hard == 'true' && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
-            --effort ${{ steps.ready.outputs.hard == 'true' && 'xhigh' || 'high' }}
+            --effort high
             --max-turns 120
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr view:*)"
           prompt: |
