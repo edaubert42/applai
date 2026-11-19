@@ -6,9 +6,24 @@ rules. Times are UTC, stored without a time zone, which SQLite cannot keep.
 """
 
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from sqlalchemy import ForeignKey, MetaData, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+LOCAL_USER_ID = 1  # the one candidate of a local ApplAI, until accounts come
+
+
+class OfferState(StrEnum):
+    """The states an offer can be in; the orchestrator says which moves are allowed."""
+
+    NEW = "new"
+    SCREENED_OUT = "screened_out"
+    DESCRIBED = "described"
+    TRIAGED = "triaged"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    LATER = "later"
 
 
 def _utc_now() -> datetime:
