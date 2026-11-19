@@ -107,6 +107,7 @@ def test_each_transition_made_by_its_actor_succeeds_and_is_recorded(
     with Session(engine) as session:
         item = _item(session, kind, origin)
         session.commit()
+        item_id, model = item.id, type(item)
         before = datetime.now(UTC).replace(tzinfo=None)
 
         move(session, item, to, actor)
@@ -114,7 +115,7 @@ def test_each_transition_made_by_its_actor_succeeds_and_is_recorded(
         after = datetime.now(UTC).replace(tzinfo=None)
 
     with Session(engine) as session:
-        item = session.get_one(type(item), item.id)
+        item = session.get_one(model, item_id)
         assert item.state == to
         changes = [change for change in _changes(session, item) if change.from_state == origin]
         assert len(changes) == 1
@@ -177,6 +178,7 @@ def test_accepting_an_offer_creates_its_application_in_the_same_transaction(
     with Session(engine) as session:
         offer = _offer(session, origin)
         session.commit()
+        offer_id = offer.id
 
         move(session, offer, "accepted", Actor.CANDIDATE)
         session.rollback()
@@ -189,7 +191,7 @@ def test_accepting_an_offer_creates_its_application_in_the_same_transaction(
 
     with Session(engine) as session:
         application = session.scalars(select(Application)).one()
-        assert (application.offer_id, application.state) == (offer.id, "created")
+        assert (application.offer_id, application.state) == (offer_id, "created")
         changes = _changes(session, application)
         assert [(c.from_state, c.to_state, c.actor) for c in changes] == [
             (None, "created", "candidate")

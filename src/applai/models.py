@@ -1,8 +1,9 @@
 """The tables ApplAI keeps in the candidate's database.
 
 Every row carries the user_id of the candidate it belongs to, ready for multi-user;
-there is no users table yet. States are plain text until the orchestrator gives them
-rules. Times are UTC, stored without a time zone, which SQLite cannot keep.
+there is no users table yet. States are plain text; applai.orchestrator.move() is the
+only way to change one, along its transition table. Times are UTC, stored without a
+time zone, which SQLite cannot keep.
 """
 
 from datetime import UTC, datetime
