@@ -1,4 +1,4 @@
-"""Each sender's anonymized job alert lists fictional offers behind the sender's real link format."""
+"""Each anonymized job alert lists fictional offers behind its sender's real link format."""
 
 import email
 import email.policy
