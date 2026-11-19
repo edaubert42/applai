@@ -7,10 +7,25 @@ time zone, which SQLite cannot keep.
 """
 
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import Connection, ForeignKey, MetaData, UniqueConstraint, event, inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, Mapper, mapped_column
+
+LOCAL_USER_ID = 1  # the one candidate of a local ApplAI, until accounts come
+
+
+class OfferState(StrEnum):
+    """The states an offer can be in; the orchestrator says which moves are allowed."""
+
+    NEW = "new"
+    SCREENED_OUT = "screened_out"
+    DESCRIBED = "described"
+    TRIAGED = "triaged"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    LATER = "later"
 
 
 def _utc_now() -> datetime:

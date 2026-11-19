@@ -2,7 +2,8 @@
 
 open_database() applies pending migrations in one transaction, so a migration that fails
 leaves the database as it was. Before changing a database that holds anything, it copies
-it to applai.db.bak-<its revision>, or bak-base if it has none.
+it to applai.db.bak-<its revision>, or bak-base if it has none. It also keeps a recent copy
+outside the data directory (backup.py), and refuses to open without a place for it.
 
 A new migration goes in migrations/versions, after the last one. tests/test_database.py
 fails until the models and the migrations describe the same tables. Foreign keys stay on
@@ -21,6 +22,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, create_engine, event, inspect
 from sqlalchemy.engine import URL
 
+from applai.backup import BackupError, back_up_if_due, backup_directory
 from applai.profile import DATA_DIR_VARIABLE
 
 DATABASE_FILE = "applai.db"
@@ -32,15 +34,30 @@ class DatabaseError(Exception):
     """A database ApplAI cannot open."""
 
 
-def open_database(data_dir: Path | str | None = None) -> Engine:
-    """Open the database in data_dir, by default the directory APPLAI_DATA_DIR names."""
+def database_path(data_dir: Path | str | None = None) -> Path:
+    """The database file in data_dir, by default the directory APPLAI_DATA_DIR names."""
     if data_dir is None:
         data_dir = os.environ.get(DATA_DIR_VARIABLE) or _no_data_dir()
-    path = Path(data_dir) / DATABASE_FILE
+    return Path(data_dir) / DATABASE_FILE
+
+
+def open_database(
+    data_dir: Path | str | None = None, backup_dir: Path | str | None = None
+) -> Engine:
+    """Open the database in data_dir, by default the directory APPLAI_DATA_DIR names.
+
+    The copies go to backup_dir, by default the directory APPLAI_BACKUP_DIR names.
+    """
+    path = database_path(data_dir)
+    try:
+        backups = backup_directory(path.parent, backup_dir)
+    except BackupError as error:
+        raise DatabaseError(str(error)) from None
     engine = create_engine(URL.create("sqlite", database=str(path)))
     event.listen(engine, "connect", _configure)
     try:
         _upgrade(engine, path)
+        back_up_if_due(path, backups)
     except BaseException:
         engine.dispose()
         raise

@@ -17,7 +17,7 @@ from typing import Any, cast
 from sqlalchemy import CursorResult, update
 from sqlalchemy.orm import Session
 
-from applai.models import Application, Offer, StateChange
+from applai.models import Application, Offer, OfferState, StateChange
 
 
 class Actor(StrEnum):
@@ -28,16 +28,6 @@ class Actor(StrEnum):
     DRAFTING = "drafting"
     FILLING = "filling"
     REVIEW = "review"
-
-
-class OfferState(StrEnum):
-    NEW = "new"
-    SCREENED_OUT = "screened_out"
-    DESCRIBED = "described"
-    TRIAGED = "triaged"
-    ACCEPTED = "accepted"
-    DECLINED = "declined"
-    LATER = "later"
 
 
 class ApplicationState(StrEnum):
