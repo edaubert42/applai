@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from applai.database import BUSY_TIMEOUT_MS, DatabaseError, open_database
 from applai.models import Application, Base, Offer
 
-TABLES = {"offers", "applications", "state_changes"}
+TABLES = {"offers", "applications", "state_changes", "mails_read"}
 OFFER_URL = "https://jobs.example.org/brindille-logistique/data-engineer"
 
 type Opener = Callable[..., Engine]
