@@ -1,3 +1,4 @@
+# Run by the `privacy` job of .github/workflows/ci.yml.
 """Fail on contact details or documents that look real, whoever they belong to.
 
 The denylist only knows the candidate's own terms. This check catches the rest:
