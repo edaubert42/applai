@@ -75,6 +75,24 @@ def test_main_reports_without_values(tmp_path: Path, capsys: pytest.CaptureFixtu
     assert "someone" not in out
 
 
+@pytest.mark.parametrize(
+    "sender",
+    [
+        "jobalerts-noreply" + "@linkedin.com",
+        "alerts" + "@welcometothejungle.com",
+        "alerte" + "@emails.hellowork.com",
+        "no-reply" + "@notification.prod.jobteaser.net",
+        "emploi" + "@alertes.lesjeudis.com",
+    ],
+)
+def test_a_job_alert_sender_is_allowed_for_the_mail_fixtures(sender: str):
+    assert find_pii(f"From: Alerts <{sender}>") == []
+
+
+def test_another_address_at_a_job_site_is_still_found():
+    assert [h.kind for h in find_pii("someone" + "@linkedin.com")] == ["e-mail address"]
+
+
 def test_pii_script_starts_with_a_comment_naming_the_ci_job_that_runs_it():
     root = Path(__file__).parent.parent
     first_line = (root / "tools" / "pii.py").read_text().splitlines()[0]
