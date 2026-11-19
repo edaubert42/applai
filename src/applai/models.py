@@ -28,6 +28,13 @@ class OfferState(StrEnum):
     LATER = "later"
 
 
+class OfferOrigin(StrEnum):
+    """Who found an offer: ApplAI, or the old workflow, read from Notion (ADR 0006)."""
+
+    APPLAI = "applai"
+    OLD_WORKFLOW = "old_workflow"
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
@@ -57,6 +64,9 @@ class Offer(Base):
     title: Mapped[str]
     company: Mapped[str]
     state: Mapped[str] = mapped_column(server_default="new")
+    origin: Mapped[str] = mapped_column(server_default=OfferOrigin.APPLAI)
+    # The row's status in the old workflow's Notion database, as text: never a state.
+    notion_status: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=_utc_now, onupdate=_utc_now)
 
