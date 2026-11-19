@@ -19,7 +19,7 @@ concurrency:
 jobs:
   code:
     if: >-
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
       || (github.event.label.name == 'ready-for-agent' && github.event.sender.login == github.repository_owner)
     runs-on: ubuntu-latest
     timeout-minutes: 45

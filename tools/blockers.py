@@ -61,18 +61,26 @@ def _labeled_by_owner(run: Run, number: int, owner: str) -> bool:
     return by is not None and by.casefold() == owner.casefold()
 
 
+def _completed(issue: dict[str, Any]) -> bool:
+    """A blocker closed as not planned keeps blocking: what it was to deliver is missing."""
+    return issue["state"] == "closed" and issue.get("state_reason") == "completed"
+
+
 def check(run: Run, number: int, owner: str) -> str:
     issue = _issue(run, number)
     if issue["state"] != "open":
         return "closed"
     if not _labeled_by_owner(run, number, owner):
         return f"not labeled {READY} by the owner"
-    waiting = [n for n in blocked_by(issue["body"] or "") if _issue(run, n)["state"] == "open"]
+    # The coder's branch exists once it started: two blockers closed at once start it once.
+    if _gh(run, "api", f"repos/{{owner}}/{{repo}}/git/matching-refs/heads/agent/issue-{number}-"):
+        return "already started"
+    waiting = [n for n in blocked_by(issue["body"] or "") if not _completed(_issue(run, n))]
     return f"waiting for {', '.join(f'#{n}' for n in waiting)}" if waiting else "ready"
 
 
 def unblocked(run: Run, closed: int, owner: str) -> list[int]:
-    if _issue(run, closed)["state"] != "closed":
+    if not _completed(_issue(run, closed)):
         return []
     listed = ["issue", "list", "--label", READY, "--state", "open", "--json", "number,body"]
     candidates = _gh(run, *listed, "--limit", "100")

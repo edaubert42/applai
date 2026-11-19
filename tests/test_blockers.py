@@ -32,8 +32,11 @@ def _unlabeled(login: str) -> dict[str, Any]:
     return {"event": "unlabeled", "actor": {"login": login}, "label": {"name": READY}}
 
 
-def _issue(state: str, blocked: str, events: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"state": state, "body": _body(blocked), "events": events}
+def _issue(
+    state: str, blocked: str, events: list[dict[str, Any]], reason: str = "completed"
+) -> dict[str, Any]:
+    state_reason = reason if state == "closed" else None
+    return {"state": state, "state_reason": state_reason, "body": _body(blocked), "events": events}
 
 
 # A fictional backlog: 29 is the database, the others wait for it.
@@ -47,7 +50,11 @@ ISSUES: dict[int, dict[str, Any]] = {
     35: _issue("open", "#29, #36", [_labeled(OWNER)]),
     36: _issue("open", "None.", [_labeled(OWNER)]),
     37: _issue("open", "#29", [_labeled(OWNER), _unlabeled(OWNER)]),
+    38: _issue("closed", "None.", [_labeled(OWNER)], reason="not_planned"),
+    39: _issue("open", "#38", [_labeled(OWNER)]),
+    40: _issue("open", "#29", [_labeled(OWNER)]),
 }
+BRANCHES = ["agent/issue-40-backup", "agent/issue-300-other"]  # the coder already built 40
 
 
 class FakeGh:
@@ -81,12 +88,18 @@ class FakeGh:
                 )
                 assert found, path
                 return self.issues[int(found.group(1))]["events"]
+            case ["gh", "api", path] if "/git/matching-refs/heads/" in path:
+                prefix = path.split("/git/matching-refs/heads/")[1]
+                return [{"ref": f"refs/heads/{b}"} for b in BRANCHES if b.startswith(prefix)]
             case ["gh", "api", path]:
                 found = re.fullmatch(r"repos/\{owner\}/\{repo\}/issues/(\d+)", path)
                 assert found, path
                 issue = self.issues[int(found.group(1))]
                 labels = [{"name": name} for name in self._labels(issue)]
-                return {"state": issue["state"], "body": issue["body"], "labels": labels}
+                return {
+                    **{k: issue[k] for k in ("state", "state_reason", "body")},
+                    "labels": labels,
+                }
             case ["gh", "issue", "list", "--label", label, "--state", "open", *_]:
                 return [
                     {"number": n, "body": issue["body"]}
@@ -122,6 +135,18 @@ def test_an_issue_starts_once_its_blockers_are_closed(capsys: pytest.CaptureFixt
     assert _run(capsys, ISSUES, "check", "36") == (0, "ready\n")
 
 
+def test_a_blocker_closed_as_not_planned_keeps_blocking(capsys: pytest.CaptureFixture[str]):
+    assert _run(capsys, ISSUES, "check", "39") == (0, "waiting for #38\n")
+    assert _run(capsys, ISSUES, "unblocked", "38") == (0, "")
+
+
+def test_an_issue_the_coder_already_started_does_not_start_again(
+    capsys: pytest.CaptureFixture[str],
+):
+    assert _run(capsys, ISSUES, "check", "40") == (0, "already started\n")
+    assert _run(capsys, ISSUES, "check", "30") == (0, "ready\n")  # agent/issue-300-* is not 30's
+
+
 @pytest.mark.parametrize("number", ["32", "33", "37"])
 def test_an_issue_not_labeled_by_the_owner_does_not_start(
     capsys: pytest.CaptureFixture[str], number: str
@@ -132,7 +157,8 @@ def test_an_issue_not_labeled_by_the_owner_does_not_start(
 def test_closing_a_blocker_lists_the_issues_it_was_the_last_blocker_of(
     capsys: pytest.CaptureFixture[str],
 ):
-    # Not 32 (labeled by someone else), 33 (no label), 34 (closed), 35 (#36 open), 37 (unlabeled).
+    # Not 32 (labeled by someone else), 33 (no label), 34 (closed), 35 (#36 open),
+    # 37 (unlabeled), 40 (already started).
     assert _run(capsys, ISSUES, "unblocked", "29") == (0, "30\n31\n")
 
 
@@ -148,7 +174,12 @@ def _workflow(name: str) -> dict[Any, Any]:
 def test_the_coder_runs_the_agent_only_when_the_check_says_ready():
     workflow = _workflow("agent-coder.yml")
     assert "workflow_dispatch" in workflow[True]  # `on:` is read as True by YAML 1.1
-    steps = workflow["jobs"]["code"]["steps"]
+    job = workflow["jobs"]["code"]
+    # A dispatch runs only main's code, where the owner-label check cannot be edited away.
+    assert (
+        "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in job["if"]
+    )
+    steps = job["steps"]
     check = next(step for step in steps if step.get("id") == "ready")
     assert "tools/blockers.py check" in check["run"]
     agent = next(step for step in steps if "claude-code-action" in step.get("uses", ""))
