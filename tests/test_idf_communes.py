@@ -5,7 +5,7 @@ from importlib.resources import files
 
 
 def _communes() -> list[dict[str, str]]:
-    text = files("applai").joinpath("data/idf_communes.csv").read_text(encoding="utf-8")
+    text = files("applai").joinpath("geo/idf_communes.csv").read_text(encoding="utf-8")
     return list(csv.DictReader(text.splitlines()))
 
 
@@ -19,4 +19,4 @@ def test_a_commune_is_found_by_name_with_its_postcodes():
     by_name = {r["commune"]: r for r in _communes()}
     assert by_name["Levallois-Perret"]["department"] == "92"
     assert by_name["Levallois-Perret"]["postcodes"] == "92300"
-    assert len(by_name["Paris"]["postcodes"].split()) == 21  # 75001-75020 and 75116
+    assert by_name["Paris"]["postcodes"] == "75001-75020 75116"  # its arrondissements, as a range
