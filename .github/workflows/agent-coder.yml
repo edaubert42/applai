@@ -1,17 +1,26 @@
 # Coder agent: the owner labels an issue `ready-for-agent`, the agent builds it and opens a PR.
+# An issue blocked by open issues waits; agent-unblock.yml starts it when the last one closes.
 name: Agent coder
 
 on:
   issues:
     types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue to build; it must carry `ready-for-agent`, added by the owner
+        required: true
+        type: number
 
 concurrency:
-  group: agent-coder-${{ github.event.issue.number }}
+  group: agent-coder-${{ github.event.issue.number || inputs.issue }}
   cancel-in-progress: false
 
 jobs:
   code:
-    if: github.event.label.name == 'ready-for-agent' && github.event.sender.login == github.repository_owner
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event.label.name == 'ready-for-agent' && github.event.sender.login == github.repository_owner)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -24,26 +33,42 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Wait for the issues this one is blocked by
+        id: ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+        run: |
+          reason=$(python3 tools/blockers.py check "$ISSUE")
+          hard=$(gh issue view "$ISSUE" --json labels --jq 'any(.labels[]; .name == "hard")')
+          { echo "issue=$ISSUE"; echo "hard=$hard"; } >> "$GITHUB_OUTPUT"
+          case "$reason" in
+            ready) echo "go=true" >> "$GITHUB_OUTPUT" ;;
+            waiting*) gh issue comment "$ISSUE" --body "Coder: $reason; it starts when they are closed." ;;
+            *) echo "Coder not started: $reason" ;;
+          esac
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        if: steps.ready.outputs.go == 'true'
       - uses: anthropics/claude-code-action@e5812cd75691ca7bbfc57c0ecf4441db3a1ab7dd # v1.0.281
+        if: steps.ready.outputs.go == 'true'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allow_fork_prs: "false"
           # Model and effort per task: `hard` issues get Opus at xhigh, others Sonnet at high.
           claude_args: |
-            --model ${{ contains(github.event.issue.labels.*.name, 'hard') && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
-            --effort ${{ contains(github.event.issue.labels.*.name, 'hard') && 'xhigh' || 'high' }}
+            --model ${{ steps.ready.outputs.hard == 'true' && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
+            --effort ${{ steps.ready.outputs.hard == 'true' && 'xhigh' || 'high' }}
             --max-turns 120
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr view:*)"
           prompt: |
-            You are the coder agent of ${{ github.repository }}. Build issue #${{ github.event.issue.number }}.
+            You are the coder agent of ${{ github.repository }}. Build issue #${{ steps.ready.outputs.issue }}.
 
-            1. Read the issue with `gh issue view ${{ github.event.issue.number }} --comments`, then CLAUDE.md and what it points to.
-               If the issue is ambiguous or blocked by an open issue, comment on it with your questions and stop.
-            2. Create the branch `agent/issue-${{ github.event.issue.number }}-<short-slug>` from `main`.
+            1. Read the issue with `gh issue view ${{ steps.ready.outputs.issue }} --comments`, then CLAUDE.md and what it points to.
+               If the issue is ambiguous, comment on it with your questions and stop.
+            2. Create the branch `agent/issue-${{ steps.ready.outputs.issue }}-<short-slug>` from `main`.
             3. Work test first: one failing test per acceptance criterion, then the code that makes it pass.
             4. Run every gate listed in CLAUDE.md until all are green. Commit in small steps.
                Then review your own diff as the reviewer will: spec, tests that prove something, CLAUDE.md rules, bugs.
             5. Push the branch and open a PR with `gh pr create`, filling .github/pull_request_template.md (150 words at most),
-               with `Closes #${{ github.event.issue.number }}`${{ contains(github.event.issue.labels.*.name, 'hard') && ' and `--label hard`' || '' }}.
+               with `Closes #${{ steps.ready.outputs.issue }}`${{ steps.ready.outputs.hard == 'true' && ' and `--label hard`' || '' }}.
                Done when the PR is open and every gate passed locally.
