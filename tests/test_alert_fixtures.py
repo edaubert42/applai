@@ -48,9 +48,9 @@ def _alert(sender: str) -> EmailMessage:
 
 def _links(html: str) -> list[str]:
     """The links Outlook wrapped in Safe Links, unwrapped (anchors and stylesheets are not)."""
-    links = []
+    links: list[str] = []
     for href in re.findall(r'href="([^"]+)"', html):
-        url = urlsplit(href.replace("&amp;", "&"))
+        url = urlsplit(str(href).replace("&amp;", "&"))
         if url.netloc.endswith("safelinks.protection.outlook.com"):
             links.append(parse_qs(url.query)["url"][0])
     return links
