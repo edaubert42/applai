@@ -54,9 +54,31 @@ class Offer(Base):
     reference: Mapped[str | None]  # the ATS's or the company's, not unique
     title: Mapped[str]
     company: Mapped[str]
+    location: Mapped[str | None]  # this and contract as the source gives them
+    contract: Mapped[str | None]
+    source: Mapped[str | None]  # where the watch found it: alert_linkedin…
+    received_at: Mapped[datetime | None]  # when the job alert listing it was received
     state: Mapped[str] = mapped_column(server_default="new")
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=_utc_now, onupdate=_utc_now)
+
+
+class MailRead(Base):
+    """A job alert the watch has read, so it is never read again.
+
+    error says why its offers could not be read; none means they were.
+    """
+
+    __tablename__ = "mails_read"
+    __table_args__ = (UniqueConstraint("user_id", "message_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    message_id: Mapped[str]  # Graph's immutable id of the mail
+    sender: Mapped[str]  # the address the alert came from
+    received_at: Mapped[datetime]
+    error: Mapped[str | None]
+    read_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
 class Application(Base):
