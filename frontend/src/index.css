@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+/* Only the tokens of docs/design.md: Tailwind's own palette is dropped.
+   The values come from src/theme.ts, set on <html> for the current theme. */
+@theme inline {
+  --color-*: initial;
+  --color-background: var(--ui-background);
+  --color-surface: var(--ui-surface);
+  --color-raised: var(--ui-raised);
+  --color-border: var(--ui-border);
+  --color-outline: var(--ui-outline);
+  --color-text: var(--ui-text);
+  --color-muted: var(--ui-muted);
+  --color-primary: var(--ui-primary);
+  --color-on-primary: var(--ui-on-primary);
+  --color-link: var(--ui-link);
+  --color-plus: var(--ui-plus);
+  --color-plus-bg: var(--ui-plus-bg);
+  --color-plus-border: var(--ui-plus-border);
+  --color-minus: var(--ui-minus);
+  --color-minus-bg: var(--ui-minus-bg);
+  --color-minus-border: var(--ui-minus-border);
+  --color-unknown: var(--ui-unknown);
+  --color-unknown-bg: var(--ui-unknown-bg);
+  --color-unknown-border: var(--ui-unknown-border);
+
+  --font-sans: "Figtree Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --radius-pill: 999px;
+  --radius-card: 32px;
+  --radius-block: 20px;
+}
