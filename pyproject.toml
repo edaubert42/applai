@@ -8,6 +8,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
     "fastapi>=0.165.0",
+    "jsonschema>=4.26.0",
     "pydantic>=2.14.3",
     "pyyaml>=6.0.3",
     "sqlalchemy>=2.1.9",
@@ -24,6 +25,7 @@ dev = [
     "pyright",
     "pytest",
     "ruff",
+    "types-jsonschema>=4.26.0.20261006",
     "types-pyyaml>=6.0.12.20261113",
     "zizmor>=1.32.0",
 ]

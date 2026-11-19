@@ -31,6 +31,11 @@ def test_fictional_contact_details_are_allowed(value: str):
     assert find_pii(f"contact: {value}") == []
 
 
+def test_digits_inside_a_hash_are_not_a_phone_number():
+    wheel = "packages/c3/89/" + "03022" + "15373" + "c2f8b4408b0f/rpds_py.whl"
+    assert find_pii(wheel) == []
+
+
 def test_hit_names_the_kind_never_the_value():
     hits = find_pii(f"mail {REAL_EMAIL}")
     assert hits[0].kind == "e-mail address"

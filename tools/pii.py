@@ -35,7 +35,7 @@ _ALLOWED_EMAILS = {
     "emploi@alertes.lesjeudis.com",
 }
 
-_PHONE = re.compile(r"(?<![\w+])(?:\+33[\s.-]?|0)([1-9](?:[\s.-]?\d{2}){4})(?!\d)")
+_PHONE = re.compile(r"(?<![\w+])(?:\+33[\s.-]?|0)([1-9](?:[\s.-]?\d{2}){4})(?!\w)")
 
 _DOCUMENT_SUFFIXES = {
     ".pdf", ".doc", ".docx", ".odt", ".rtf", ".pages",
