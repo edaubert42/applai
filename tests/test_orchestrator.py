@@ -250,3 +250,16 @@ def test_sent_declined_and_dropped_are_terminal(engine: Engine, kind: str, termi
                     move(session, item, to, actor)
 
                 assert _stored_state(session, item) == terminal
+
+
+def test_a_state_assigned_outside_move_is_refused_at_flush(engine: Engine):
+    with Session(engine) as session:
+        offer = _offer(session, "triaged")
+        session.commit()
+
+        offer.state = "accepted"
+        with pytest.raises(ValueError, match="move"):
+            session.flush()
+        session.rollback()
+
+        assert _stored_state(session, offer) == "triaged"

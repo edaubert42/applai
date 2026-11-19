@@ -7,9 +7,10 @@ time zone, which SQLite cannot keep.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import ForeignKey, MetaData, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import Connection, ForeignKey, MetaData, UniqueConstraint, event, inspect
+from sqlalchemy.orm import DeclarativeBase, Mapped, Mapper, mapped_column
 
 
 def _utc_now() -> datetime:
@@ -69,3 +70,14 @@ class StateChange(Base):
     to_state: Mapped[str]
     actor: Mapped[str]
     changed_at: Mapped[datetime] = mapped_column(default=_utc_now)
+
+
+@event.listens_for(Offer, "before_update")
+@event.listens_for(Application, "before_update")
+def _refuse_a_state_set_by_hand(_: Mapper[Any], __: Connection, item: Offer | Application) -> None:
+    # move() changes a state with its own UPDATE, never through an assigned attribute.
+    if inspect(item).attrs.state.history.has_changes():
+        raise ValueError(
+            f"{type(item).__name__} {item.id}: a state changes only through"
+            " applai.orchestrator.move()."
+        )
