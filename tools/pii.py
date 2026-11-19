@@ -26,7 +26,7 @@ _FICTIONAL_DOMAINS = ("example.com", "example.org", "example.net")
 _FICTIONAL_TLDS = (".test", ".example", ".invalid", ".localhost")
 _ALLOWED_EMAILS = {"noreply@anthropic.com"}  # commit attribution trailer
 
-_PHONE = re.compile(r"(?<![\w+])(?:\+33[\s.-]?|0)([1-9](?:[\s.-]?\d{2}){4})(?!\d)")
+_PHONE = re.compile(r"(?<![\w+])(?:\+33[\s.-]?|0)([1-9](?:[\s.-]?\d{2}){4})(?!\w)")
 
 _DOCUMENT_SUFFIXES = {
     ".pdf", ".doc", ".docx", ".odt", ".rtf", ".pages",
