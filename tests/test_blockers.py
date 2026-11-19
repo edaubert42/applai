@@ -194,3 +194,16 @@ def test_closing_an_issue_starts_the_coder_on_each_unblocked_issue():
     run = "\n".join(step.get("run", "") for step in job["steps"])
     assert "tools/blockers.py unblocked" in run
     assert "gh workflow run agent-coder.yml" in run
+
+
+def test_a_coder_started_by_a_workflow_is_not_refused_as_a_bot():
+    # agent-unblock.yml and the answerer dispatch the coder with GITHUB_TOKEN.
+    job = _workflow("agent-coder.yml")["jobs"]["code"]
+    agents = [s for s in job["steps"] if "claude-code-action" in s.get("uses", "")]
+    assert agents and all(s["with"]["allowed_bots"] == "github-actions[bot]" for s in agents)
+
+
+def test_a_skipped_comment_run_cannot_cancel_a_queued_coder():
+    workflow = _workflow("agent-coder.yml")
+    assert "concurrency" not in workflow
+    assert workflow["jobs"]["code"]["concurrency"]["cancel-in-progress"] is False
