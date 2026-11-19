@@ -46,7 +46,7 @@ The owner questions a `hard` issue (numbered questions, a recommended answer eac
 
 | Agent | Normal | `hard` |
 |---|---|---|
-| Coder | Sonnet 5.5, effort high | Opus 5.5, effort xhigh |
+| Coder | Sonnet 5.5, effort high | Opus 5.5, effort high |
 | Reviewer | Sonnet 5.5, effort medium | Opus 5.5, effort high |
 | Fixer (`@claude`) | Sonnet 5.5, effort high | Opus 5.5, effort high |
 | Fixer (red CI) | Sonnet 5.5, effort high | Sonnet 5.5, effort high |
