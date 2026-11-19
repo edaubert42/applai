@@ -1,6 +1,4 @@
 import json
-import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -277,16 +275,7 @@ def test_the_fake_backend_returns_its_results_in_order_and_records_the_specs():
         runner.run_agent(SPEC)
 
 
-def _claude_is_logged_in() -> bool:
-    if shutil.which("claude") is None:
-        return False
-    status = subprocess.run(
-        ["claude", "auth", "status"], capture_output=True, stdin=subprocess.DEVNULL, check=False
-    )
-    return status.returncode == 0
-
-
-@pytest.mark.skipif(not _claude_is_logged_in(), reason="claude is not installed or logged in")
+@pytest.mark.usefixtures("logged_in_claude")
 def test_the_real_claude_cli_answers_a_tiny_schema():
     spec = AgentSpec(
         name="adder",

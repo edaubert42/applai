@@ -1,3 +1,5 @@
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -9,3 +11,15 @@ def backup_dir(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Mon
     directory = tmp_path_factory.mktemp("backups")
     monkeypatch.setenv("APPLAI_BACKUP_DIR", str(directory))
     return directory
+
+
+@pytest.fixture(scope="session")
+def logged_in_claude() -> None:
+    """Skips a test that runs a real agent when `claude` is not installed or not logged in."""
+    if shutil.which("claude") is None:
+        pytest.skip("claude is not installed")
+    status = subprocess.run(
+        ["claude", "auth", "status"], capture_output=True, stdin=subprocess.DEVNULL, check=False
+    )
+    if status.returncode != 0:
+        pytest.skip("claude is not logged in")
