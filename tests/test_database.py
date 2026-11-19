@@ -44,8 +44,10 @@ def _alembic(connection: Connection | None = None) -> Config:
     return config
 
 
-def _head() -> str | None:
-    return ScriptDirectory.from_config(_alembic()).get_current_head()
+def _head() -> str:
+    head = ScriptDirectory.from_config(_alembic()).get_current_head()
+    assert head is not None
+    return head
 
 
 def _revision(path: Path) -> str | None:
@@ -60,8 +62,15 @@ def _backups(data_dir: Path) -> list[str]:
     return sorted(path.name for path in data_dir.glob("applai.db.bak-*"))
 
 
-def _offer(user_id: int = 1, url: str = OFFER_URL) -> Offer:
-    return Offer(user_id=user_id, url=url, title="Data engineer", company="Brindille Logistique")
+def _offer(user_id: int = 1) -> Offer:
+    return Offer(
+        user_id=user_id, url=OFFER_URL, title="Data engineer", company="Brindille Logistique"
+    )
+
+
+def _notes(path: Path) -> list[str]:
+    with closing(sqlite3.connect(path)) as connection:
+        return [text for (text,) in connection.execute("SELECT text FROM notes")]
 
 
 def test_an_empty_directory_gets_a_database_at_head_whose_tables_all_have_a_user_id(
@@ -106,12 +115,17 @@ def test_a_database_behind_head_is_copied_before_it_is_upgraded(tmp_path: Path, 
         command.downgrade(_alembic(connection), "-1")
     behind = _revision(tmp_path / "applai.db")
     assert behind != _head()
+    # Something only this database holds, to recognize its copy.
+    with closing(sqlite3.connect(tmp_path / "applai.db")) as connection, connection:
+        connection.execute("CREATE TABLE notes (text TEXT)")
+        connection.execute("INSERT INTO notes VALUES ('written before the upgrade')")
 
     open_db(tmp_path)
 
     backup = tmp_path / f"applai.db.bak-{behind or 'base'}"
     assert _backups(tmp_path) == [backup.name]
     assert _revision(backup) == behind
+    assert _notes(backup) == ["written before the upgrade"]
     assert _revision(tmp_path / "applai.db") == _head()
 
 
