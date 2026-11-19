@@ -91,6 +91,8 @@ class FakeMicrosoft:
         self.lifetime = 3600  # of an access token, in seconds
         self.refuses_refresh = False
         self.revoked = False
+        self.redirects_loop = False  # a click-tracking link that never leads anywhere
+        self.offers_by_query = False  # the offer's site tells its offers apart by the query
         self.filters: list[str] = []  # of each listing of the mailbox
         self.bodies_read: list[str] = []
         self.client = httpx2.Client(transport=httpx2.MockTransport(self._handle))
@@ -102,8 +104,13 @@ class FakeMicrosoft:
             return self._graph(request)
         if request.url.host == OFFER_SITE:
             return httpx2.Response(200, text="<h1>Offre</h1>")
+        if self.redirects_loop:
+            return httpx2.Response(302, headers={"Location": str(request.url)})
         where = hashlib.sha256(str(request.url).encode()).hexdigest()[:12]
-        return httpx2.Response(302, headers={"Location": f"https://{OFFER_SITE}/{where}?utm=a"})
+        offer = (
+            f"offer?id={where}&utm_source=a" if self.offers_by_query else f"{where}?utm_source=a"
+        )
+        return httpx2.Response(302, headers={"Location": f"https://{OFFER_SITE}/{offer}"})
 
     def _sign_in(self, request: httpx2.Request) -> httpx2.Response:
         base = "https://login.microsoftonline.com/consumers"
@@ -343,3 +350,38 @@ def test_an_alert_that_cannot_be_parsed_is_recorded_as_an_error_with_its_sender(
         (f"lesjeudis-{NOW - timedelta(hours=1):%d%H%M}", "emploi@alertes.lesjeudis.com", False),
     ]
     assert len(offers) == 5
+
+
+def test_a_tracking_link_that_leads_nowhere_is_recorded_as_an_error_and_stops_nothing(
+    tmp_path: Path, microsoft: FakeMicrosoft, engine: Engine
+):
+    microsoft.redirects_loop = True
+    microsoft.mails += [_alert("wttj", NOW - timedelta(hours=2)), _alert("lesjeudis")]
+    mailbox = _signed_in(tmp_path, microsoft)
+
+    reading = read_alerts(engine, mailbox)
+
+    assert [(m.sender, m.error is not None) for m in _mails_read(engine)] == [
+        ("alerts@welcometothejungle.com", True),
+        ("emploi@alertes.lesjeudis.com", False),
+    ]
+    assert [offer.source for offer in _offers(engine)] == ["alert_lesjeudis"] * 5
+    assert len(reading.errors) == 1
+    assert "alerts@welcometothejungle.com" in reading.errors[0]
+    microsoft.bodies_read.clear()
+    read_alerts(engine, mailbox)
+    assert microsoft.bodies_read == []  # the failed alert is not read again
+
+
+def test_offers_that_differ_only_by_their_query_stay_two_offers_without_the_tracking(
+    tmp_path: Path, microsoft: FakeMicrosoft, engine: Engine
+):
+    microsoft.offers_by_query = True
+    microsoft.mails.append(_alert("wttj"))
+
+    read_alerts(engine, _signed_in(tmp_path, microsoft))
+
+    urls = [offer.url for offer in _offers(engine)]
+    assert len(urls) == 2
+    assert all(url.startswith(f"https://{OFFER_SITE}/offer?id=") for url in urls)
+    assert all("utm_source" not in url and "#" not in url for url in urls)

@@ -7,7 +7,9 @@ nothing ApplAI prints or raises holds a token.
 
 read_alerts() reads the alerts received since the last one read, and records each alert
 read, with the error that kept its offers from being read if any. A network failure stops
-it before the alert is recorded, so the next run reads that alert again.
+it before the alert is recorded, so the next run reads that alert again. A tracking link that
+leads nowhere is not a network failure: it is recorded as the alert's error, like a layout
+the reader does not know, and the alert's other offers are kept.
 """
 
 import os
@@ -16,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx2
 import msal  # pyright: ignore[reportMissingTypeStubs]
@@ -33,6 +35,10 @@ AUTHORITY = "https://login.microsoftonline.com/consumers"  # personal accounts: 
 SCOPES = ["Mail.Read"]
 GRAPH = "https://graph.microsoft.com/v1.0"
 FIRST_READ = timedelta(days=14)  # how far back the first read goes
+# Query parameters that only follow the click, by name or prefix: the rest of a query may say
+# which offer it is.
+TRACKING_PARAMETERS = {"trk", "trackingid", "refid", "gclid", "fbclid", "mc_cid", "mc_eid"}
+TRACKING_PREFIXES = ("utm_",)
 
 
 class MailError(Exception):
@@ -167,15 +173,21 @@ def read_alerts(engine: Engine, mailbox: Mailbox, user_id: int = LOCAL_USER_ID) 
             source = SOURCES[alert.sender]
             record = MailRead(user_id=user_id, message_id=alert.message_id, sender=alert.sender,
                               received_at=alert.received_at)  # fmt: skip
+            problems: list[str] = []
             try:
                 offers = read_alert(source, mailbox.html(alert))
             except AlertError as error:
-                record.error = str(error)
-                reading.errors.append(f"{alert.sender}: {error}")
+                problems.append(str(error))
                 offers = []
             for offer in offers:
-                link = mailbox.where_leads(offer.link) if source in REDIRECTED else offer.link
-                url = urlunsplit(urlsplit(link)._replace(query="", fragment=""))  # no tracking
+                try:
+                    link = mailbox.where_leads(offer.link) if source in REDIRECTED else offer.link
+                except httpx2.HTTPError as error:  # a redirect loop, a mailto:, a dead domain
+                    problems.append(f"a link of {urlsplit(offer.link).netloc}: {_name(error)}")
+                    continue
+                # The path names the offer in an alert's own links; where a redirect leads, the
+                # site is not known, and its query may be what names the offer.
+                url = _without_tracking(link, whole_query=source not in REDIRECTED)
                 if url not in known:
                     known.add(url)
                     session.add(Offer(
@@ -184,6 +196,9 @@ def read_alerts(engine: Engine, mailbox: Mailbox, user_id: int = LOCAL_USER_ID) 
                         received_at=alert.received_at,
                     ))  # fmt: skip
                     reading.offers += 1
+            if problems:
+                record.error = "; ".join(problems)
+                reading.errors.append(f"{alert.sender}: {record.error}")
             session.add(record)
             session.commit()
             read.add(alert.message_id)
@@ -196,6 +211,27 @@ def _sender(message: dict[str, Any]) -> str:
     sender: dict[str, Any] = message.get("from") or {}
     address: dict[str, Any] = sender.get("emailAddress") or {}
     return str(address.get("address") or "").lower()
+
+
+def _without_tracking(link: str, whole_query: bool) -> str:
+    """The link without its fragment and its tracking: the whole query, or only the parameters
+    that follow the click."""
+    url = urlsplit(link)
+    kept = (
+        []
+        if whole_query
+        else [
+            (name, value)
+            for name, value in parse_qsl(url.query, keep_blank_values=True)
+            if name.lower() not in TRACKING_PARAMETERS
+            and not name.lower().startswith(TRACKING_PREFIXES)
+        ]
+    )
+    return urlunsplit(url._replace(query=urlencode(kept), fragment=""))
+
+
+def _name(error: Exception) -> str:
+    return type(error).__name__  # a message may hold the link, which may hold a token
 
 
 def _utc(moment: datetime) -> datetime:
