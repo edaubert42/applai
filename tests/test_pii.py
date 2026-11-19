@@ -73,3 +73,13 @@ def test_main_reports_without_values(tmp_path: Path, capsys: pytest.CaptureFixtu
     assert f"{leaked}:1: e-mail address" in out
     assert f"{cv}: binary or document file" in out
     assert "someone" not in out
+
+
+def test_pii_script_starts_with_a_comment_naming_the_ci_job_that_runs_it():
+    root = Path(__file__).parent.parent
+    first_line = (root / "tools" / "pii.py").read_text().splitlines()[0]
+    assert first_line.startswith("#")
+    job = first_line.split("`")[1]
+    ci_text = (root / ".github" / "workflows" / "ci.yml").read_text()
+    assert f"\n  {job}:" in ci_text
+    assert "python3 tools/pii.py" in ci_text.split(f"\n  {job}:")[1]
