@@ -1,5 +1,3 @@
-# The frontend's checks. Agents cannot push workflows: the owner moves this file
-# to .github/workflows/frontend-ci.yml (or this job into ci.yml).
 name: Frontend
 
 on:
