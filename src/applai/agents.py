@@ -13,6 +13,7 @@ nor what the CLI printed, which may quote it.
 import json
 import subprocess
 import threading
+import time
 from collections import deque
 from collections.abc import Iterable
 from contextlib import suppress
@@ -21,6 +22,9 @@ from typing import Annotated, Any, Protocol
 
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from sqlalchemy import Engine
+
+from applai.trace import OK, UNEXPECTED, Run, record_run, utc_now
 
 MAX_PARALLEL_AGENTS = 3
 CLI_TIMEOUT_S = 600.0
@@ -91,7 +95,63 @@ class AgentRunner:
         self.max_parallel_agents = max_parallel_agents
         self._slots = threading.BoundedSemaphore(max_parallel_agents)
 
-    def run_agent(self, spec: AgentSpec) -> AgentResult:
+    def run_agent(
+        self,
+        spec: AgentSpec,
+        *,
+        database: Engine | None = None,
+        offer_id: int | None = None,
+        application_id: int | None = None,
+    ) -> AgentResult:
+        """Run the agent. Given the database and the offer it works on, record the run.
+
+        The run is recorded whether it succeeds or fails (see applai.trace). Without them
+        nothing is recorded.
+        """
+        if (database is None) != (offer_id is None):
+            raise ValueError("run_agent takes the database and offer_id together, or neither")
+        if database is None or offer_id is None:
+            return self._run(spec)
+        started_at, clock = utc_now(), time.monotonic()
+        try:
+            result = self._run(spec)
+        except Exception as error:
+            outcome = error.kind.value if isinstance(error, AgentError) else UNEXPECTED
+            record_run(
+                database,
+                offer_id=offer_id,
+                application_id=application_id,
+                run=Run(
+                    agent=spec.name,
+                    model=spec.model,
+                    started_at=started_at,
+                    duration_ms=round((time.monotonic() - clock) * 1000),
+                    input_tokens=None,
+                    output_tokens=None,
+                    cost_usd=None,
+                    outcome=outcome,
+                ),
+            )
+            raise
+        usage = result.usage
+        record_run(
+            database,
+            offer_id=offer_id,
+            application_id=application_id,
+            run=Run(
+                agent=spec.name,
+                model=usage.model,
+                started_at=started_at,
+                duration_ms=usage.duration_ms,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cost_usd=usage.cost_usd,
+                outcome=OK,
+            ),
+        )
+        return result
+
+    def _run(self, spec: AgentSpec) -> AgentResult:
         with self._slots:
             result = self.backend.run(spec)
         # Checked here, not in each backend, so no backend can return what the schema refuses.

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from applai.database import BUSY_TIMEOUT_MS, DatabaseError, open_database
 from applai.models import Application, Base, Offer
 
-TABLES = {"offers", "applications", "state_changes"}
+TABLES = {"offers", "applications", "state_changes", "agent_runs"}
 OFFER_URL = "https://jobs.example.org/brindille-logistique/data-engineer"
 
 type Opener = Callable[..., Engine]
@@ -222,3 +222,25 @@ def test_models_and_migrations_agree(tmp_path: Path, open_db: Opener):
             connection, opts={"compare_type": True, "compare_server_default": True}
         )
         assert compare_metadata(context, Base.metadata) == []
+
+
+def test_the_agent_runs_migration_only_adds_its_table(tmp_path: Path, open_db: Opener):
+    with open_db(tmp_path).begin() as connection:
+        command.downgrade(_alembic(connection), "0001")
+    with closing(sqlite3.connect(tmp_path / "applai.db")) as connection, connection:
+        connection.execute(
+            "INSERT INTO offers (user_id, url, title, company, state, created_at, updated_at)"
+            " VALUES (1, ?, 'Data engineer', 'Brindille Logistique', 'new', '2026-11-19', ?)",
+            (OFFER_URL, "2026-11-19"),
+        )
+        before = {name for (name,) in connection.execute("SELECT name FROM sqlite_master")}
+    assert "agent_runs" not in before
+
+    engine = open_db(tmp_path)
+
+    assert _revision(tmp_path / "applai.db") == _head()
+    after = set(inspect(engine).get_table_names())
+    assert {"agent_runs"} <= after
+    assert after - {"agent_runs"} <= before  # nothing else is new
+    with Session(engine) as session:
+        assert session.scalars(select(Offer.url)).all() == [OFFER_URL]

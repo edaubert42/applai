@@ -97,6 +97,28 @@ class StateChange(Base):
     changed_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
+class AgentRun(Base):
+    """One agent call, as the trace of its offer keeps it (applai.trace).
+
+    outcome is "ok", or the kind of the error. A failed run has no tokens and no cost.
+    """
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"), index=True)
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("applications.id"))
+    agent: Mapped[str]
+    model: Mapped[str]  # the model that ran, or the spec's when the run failed
+    started_at: Mapped[datetime]
+    duration_ms: Mapped[int]
+    input_tokens: Mapped[int | None]  # cached input included
+    output_tokens: Mapped[int | None]
+    cost_usd: Mapped[float | None]  # estimated at API list price
+    outcome: Mapped[str]
+
+
 @event.listens_for(Offer, "before_update")
 @event.listens_for(Application, "before_update")
 def _refuse_a_state_set_by_hand(_: Mapper[Any], __: Connection, item: Offer | Application) -> None:
