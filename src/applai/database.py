@@ -5,7 +5,8 @@ leaves the database as it was. Before changing a database that holds anything, i
 it to applai.db.bak-<its revision>, or bak-base if it has none.
 
 A new migration goes in migrations/versions, after the last one. tests/test_database.py
-fails until the models and the migrations describe the same tables.
+fails until the models and the migrations describe the same tables. Foreign keys stay on
+while migrating, so a migration that rebuilds a table others reference must allow for it.
 """
 
 import os
