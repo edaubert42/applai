@@ -1,0 +1,37 @@
+# Triage bench, started by hand: it spends the owner's Claude subscription, so it never runs on
+# a PR. The report goes to the run's job summary, and the run is red when recall is under 90 %.
+# Agents may not write workflows: the owner moves this file to .github/workflows/bench.yml.
+name: Bench
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - run: uv sync --locked
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # The CLI has no lockfile here; pin its version (`@x.y.z`) to measure one fixed CLI.
+      - name: Install the Claude CLI
+        run: npm install --global @anthropic-ai/claude-code # zizmor: ignore[adhoc-packages]
+      - name: Triage bench
+        # bash with pipefail: the step fails when the bench does, after tee wrote the report.
+        shell: bash
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: uv run python -m applai.bench triage | tee -a "$GITHUB_STEP_SUMMARY"
