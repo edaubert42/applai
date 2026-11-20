@@ -5,6 +5,7 @@ links. A sender's reader picks its cards and says which text is which, as the al
 it. Outlook wraps every link in Safe Links: a card keeps the link Safe Links wraps.
 """
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -139,7 +140,9 @@ def _google(card: _Card) -> AlertOffer:
 
 def _google_card(tag: str, attributes: dict[str, str]) -> bool:
     # The offers are the cells with a bottom border; the header and the footer have none.
-    return tag == "td" and "border-bottom: 1px solid #E5E5E5" in attributes.get("style", "")
+    # Graph returns the styles without the space the alert's own HTML has after the colon.
+    style = re.sub(r":\s+", ":", attributes.get("style", ""))
+    return tag == "td" and "border-bottom:1px solid #E5E5E5" in style
 
 
 _READERS: dict[str, tuple[_IsCard, Callable[[_Card], AlertOffer]]] = {
