@@ -416,3 +416,25 @@ def test_a_google_alert_is_read_as_graph_returns_it_without_spaces_in_its_styles
     read_alerts(engine, _signed_in(tmp_path, microsoft))
 
     assert len(_offers(engine)) == 4
+
+
+def test_a_jobteaser_offer_without_a_company_line_is_read_with_an_empty_company(
+    tmp_path: Path, microsoft: FakeMicrosoft, engine: Engine
+):
+    alert = _alert("jobteaser")
+    company = re.compile(r'<span class="t-subhead[^>]*>Logipass</span>')
+    assert len(company.findall(alert.html)) == 1
+    microsoft.mails.append(replace(alert, html=company.sub("", alert.html)))
+
+    read_alerts(engine, _signed_in(tmp_path, microsoft))
+
+    offers = _offers(engine)
+    assert len(offers) == EXPECTED["jobteaser"][0]
+    without = offers[0]
+    assert (without.title, without.company, without.location, without.contract) == (
+        "Sales Development Intern, Services",
+        "",
+        "Paris (France)",
+        "Stage",
+    )
+    assert offers[1].company == "Batiroc Travaux"

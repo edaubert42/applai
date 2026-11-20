@@ -119,6 +119,18 @@ def _company_title_contract_location(card: _Card) -> AlertOffer:
     return AlertOffer(card.links[0], card.texts[1], card.texts[0], location, contract)
 
 
+def _jobteaser(card: _Card) -> AlertOffer:
+    # By class, as a card may have no company line, or a line after the location (a school).
+    around = card.classes
+    title_at = next(i for i, classes in enumerate(around) if "t-head" in classes)
+    subheads = [i for i, classes in enumerate(around) if "t-subhead" in classes]
+    before = [i for i in subheads if i < title_at]
+    after = [i for i in subheads if i > title_at]
+    contract, location = card.texts[after[0]].split(" - ", 1)
+    company = card.texts[before[-1]] if before else ""
+    return AlertOffer(card.links[0], " ".join(card.texts_in("t-head")), company, location, contract)
+
+
 def _hellowork(card: _Card) -> AlertOffer:
     location, contract = card.texts_in("bg-dark-tags")[:2]  # then the salary, if given
     return AlertOffer(card.links[0], card.texts[0], card.texts[1], location, contract)
@@ -149,7 +161,7 @@ _READERS: dict[str, tuple[_IsCard, Callable[[_Card], AlertOffer]]] = {
     "alert_linkedin": (_with("data-test-id", "job-card"), _linkedin),
     "alert_wttj": (_with("class", "job-item"), _company_title_contract_location),
     "alert_hellowork": (_with("class", "bg-dark-cards"), _hellowork),
-    "alert_jobteaser": (_with("class", "card-content"), _company_title_contract_location),
+    "alert_jobteaser": (_with("class", "card-content"), _jobteaser),
     "alert_lesjeudis": (
         lambda tag, attributes: (
             tag == "a" and "lesjeudis.com/offers/" in attributes.get("href", "")
