@@ -50,6 +50,7 @@ def _offer(
     rule: str | None = None,
     day: int = 1,
     user_id: int = 1,
+    source: str | None = None,
 ) -> int:
     """Store an offer of the fictional Pivoine Analytics, with a Triage card if it has a score."""
     with Session(engine) as session, session.begin():
@@ -61,6 +62,7 @@ def _offer(
             state=state,
             screened_rule=rule,
             logo=LOGO,
+            source=source,
             created_at=datetime(2026, 11, day, 8, 30),
         )
         session.add(offer)
@@ -123,7 +125,7 @@ def test_to_review_lists_the_triaged_offers_at_the_threshold_best_first(
 
 
 def test_a_card_has_the_triage_result_and_the_logo(engine: Engine, client: TestClient):
-    offer_id = _offer(engine, "data-engineer", "triaged", score=82)
+    offer_id = _offer(engine, "data-engineer", "triaged", score=82, source="alert_linkedin")
 
     [card] = client.get("/api/review", params={"view": "to_review"}).json()
 
@@ -133,11 +135,27 @@ def test_a_card_has_the_triage_result_and_the_logo(engine: Engine, client: TestC
         "title": "Data engineer",
         "company": "Pivoine Analytics",
         "logo": LOGO,
+        "source": "alert_linkedin",
         "state": "triaged",
         "score": 82,
         "rule": None,
         **CARD,
     }
+
+
+def test_each_card_of_every_view_has_its_offers_source(engine: Engine, client: TestClient):
+    _offer(engine, "data-engineer", "triaged", score=82, source="alert_wttj")
+    _offer(engine, "data-analyst", "later", source="alert_google")
+    _offer(engine, "sales-engineer", "screened_out", rule="contract", source="alert_hellowork")
+    _offer(engine, "data-steward", "triaged", score=30)
+
+    def sources(view: str) -> list[str | None]:
+        cards = client.get("/api/review", params={"view": view}).json()
+        return [card["source"] for card in cards]
+
+    assert sources("to_review") == ["alert_wttj"]
+    assert sources("later") == ["alert_google"]
+    assert sources("screened_out") == ["alert_hellowork", None]
 
 
 def test_later_lists_the_offers_kept_for_later_newest_label_first(

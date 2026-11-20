@@ -90,3 +90,52 @@ def test_the_built_frontend_is_served_only_when_it_exists(tmp_path: Path):
     with TestClient(create_app(tmp_path, frontend_dir=tmp_path / "missing")) as client:
         assert client.get("/").status_code == 404
         assert client.get("/api/health").status_code == 200
+
+
+def test_a_logo_of_the_data_directory_is_served_with_its_image_type(
+    tmp_path: Path, client: TestClient
+):
+    (tmp_path / "logos").mkdir()
+    (tmp_path / "logos" / "pivoine-analytics.png").write_bytes(b"\x89PNG\r\n\x1a\nfictional")
+    (tmp_path / "logos" / "brindille-logistique.ico").write_bytes(b"\x00\x00\x01\x00fictional")
+
+    png = client.get("/api/logos/pivoine-analytics.png")
+    ico = client.get("/api/logos/brindille-logistique.ico")
+
+    assert (png.status_code, png.headers["content-type"]) == (200, "image/png")
+    assert png.content == b"\x89PNG\r\n\x1a\nfictional"
+    assert (ico.status_code, ico.headers["content-type"]) == (200, "image/x-icon")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "..",
+        ".",
+        "..%2Fsecret.png",
+        "%2E%2E%2Fsecret.png",
+        "sub%2Fnested.png",
+        "unknown.png",
+        "a%00.png",
+    ],
+)
+def test_a_logo_name_that_is_not_a_file_of_logos_is_a_404(
+    tmp_path: Path, client: TestClient, name: str
+):
+    (tmp_path / "logos" / "sub").mkdir(parents=True)
+    (tmp_path / "logos" / "sub" / "nested.png").write_bytes(b"\x89PNG")
+    (tmp_path / "secret.png").write_bytes(b"\x89PNG")
+
+    assert client.get(f"/api/logos/{name}").status_code == 404
+
+
+def test_a_logo_that_is_a_link_out_of_logos_or_not_an_image_is_a_404(
+    tmp_path: Path, client: TestClient
+):
+    (tmp_path / "logos").mkdir()
+    (tmp_path / "secret.png").write_bytes(b"\x89PNG")
+    (tmp_path / "logos" / "link.png").symlink_to(tmp_path / "secret.png")
+    (tmp_path / "logos" / "script.svg").write_text("<svg onload='alert(1)'/>")
+
+    assert client.get("/api/logos/link.png").status_code == 404
+    assert client.get("/api/logos/script.svg").status_code == 404

@@ -86,6 +86,7 @@ class Card(BaseModel):
     title: str
     company: str
     logo: str | None  # a file name in the data directory's logos/ (applai.details)
+    source: str | None  # where the watch found the offer: alert_linkedin…
     state: OfferState
     score: int | None = None
     tags: dict[str, Any] | None = None

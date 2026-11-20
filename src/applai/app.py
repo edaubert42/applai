@@ -14,12 +14,14 @@ from typing import Annotated, Literal
 
 from alembic.runtime.migration import MigrationContext
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from applai.database import open_database
+from applai.details import IMAGE_TYPES, LOGOS_DIR
 from applai.models import LOCAL_USER_ID, Offer, OfferState
 from applai.orchestrator import TransitionError
 from applai.review import Card, DecisionRequest, OfferNotFound, View, cards, decide
@@ -113,6 +115,25 @@ def decision(
         raise HTTPException(status_code=404, detail="no such offer") from None
     except TransitionError as error:
         raise HTTPException(status_code=409, detail=str(error)) from None
+
+
+# The type a logo is served with, by file extension; the first type of an extension wins.
+_LOGO_TYPES = {suffix: kind for kind, suffix in reversed(IMAGE_TYPES.items())}
+
+
+@api.get("/logos/{name}")
+def logo(name: str, request: Request) -> FileResponse:
+    """A company's logo, a file of the data directory's logos/; any other name is a 404."""
+    logos = (request.app.state.data_dir / LOGOS_DIR).resolve()
+    try:
+        path = (logos / name).resolve()  # a link out of logos/ ends up outside it
+        is_logo = path.parent == logos and path.is_file()
+    except (OSError, ValueError):
+        raise HTTPException(status_code=404, detail="no such logo") from None
+    kind = _LOGO_TYPES.get(path.suffix.lower())
+    if not is_logo or kind is None:
+        raise HTTPException(status_code=404, detail="no such logo")
+    return FileResponse(path, media_type=kind)
 
 
 class ScanStarted(BaseModel):

@@ -145,6 +145,7 @@ class ScanStatus(BaseModel):
     running: bool
     last_scan: LastScan | None
     next_slot: datetime | None
+    manual_scan_in_s: int | None  # seconds before a scan by hand is allowed; none: now
     linkedin_reads_today: int
     linkedin_reads_per_day: int
 
@@ -232,6 +233,7 @@ class Scanner:
                     by_hand=last.by_hand, new_offers=last.new_offers, errors=last.errors,
                 ),
                 next_slot=min(self._slots(self._clock(), before=False), default=None),
+                manual_scan_in_s=_cooldown_left(last, _utc(self._clock())),
                 linkedin_reads_today=0,  # nothing reads LinkedIn before #72
                 linkedin_reads_per_day=LINKEDIN_READS_PER_DAY,
             )  # fmt: skip
@@ -278,16 +280,22 @@ class Scanner:
             self._running.release()
 
 
-def _refuse_if_too_soon(last: Scan | None, now: datetime) -> None:
+def _cooldown_left(last: Scan | None, now: datetime) -> int | None:
+    """The seconds before a scan by hand is allowed, as the database keeps times; none: now."""
     if last is None or last.finished_at is None or last.errors:
-        return
+        return None
     left = COOLDOWN - (now - last.finished_at)
-    if left > timedelta(0):
-        ago = math.floor((now - last.finished_at).total_seconds() / 60)
+    return math.ceil(left.total_seconds()) if left > timedelta(0) else None
+
+
+def _refuse_if_too_soon(last: Scan | None, now: datetime) -> None:
+    seconds_left = _cooldown_left(last, now)
+    if seconds_left is not None:
+        ago = (int(COOLDOWN.total_seconds()) - seconds_left) // 60
         raise ScanRefused(
             f"The last scan ended {ago} minutes ago, without errors: the next one can start"
-            f" in {math.ceil(left.total_seconds() / 60)} minutes.",
-            seconds_left=math.ceil(left.total_seconds()),
+            f" in {math.ceil(seconds_left / 60)} minutes.",
+            seconds_left=seconds_left,
         )
 
 

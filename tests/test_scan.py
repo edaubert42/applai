@@ -178,6 +178,30 @@ def test_a_scan_by_hand_10_minutes_after_a_clean_scan_is_refused_with_the_time_l
     assert len(_scans(data_dir)) == 1
 
 
+def test_right_after_a_clean_scan_the_status_gives_the_seconds_before_a_manual_scan(
+    data_dir: Path, app: FastAPI, clock: Clock
+):
+    _seed(data_dir, _scan(NOON - timedelta(minutes=15)))  # ended at 11:50
+
+    with TestClient(app) as client:
+        _scanner(client).wait()
+        in_20_minutes = client.get("/api/scan").json()["manual_scan_in_s"]
+        clock.now = NOON + timedelta(minutes=20, seconds=1)
+        over = client.get("/api/scan").json()["manual_scan_in_s"]
+
+    assert (in_20_minutes, over) == (1200, None)
+
+
+def test_after_a_scan_with_errors_the_status_allows_a_manual_scan_now(data_dir: Path, app: FastAPI):
+    _seed(data_dir, _scan(NOON - timedelta(minutes=15), ["Outlook connection expired."]))
+
+    with TestClient(app) as client:
+        _scanner(client).wait()
+        status = client.get("/api/scan").json()
+
+    assert status["manual_scan_in_s"] is None
+
+
 def test_a_scan_by_hand_after_a_scan_with_an_error_starts(data_dir: Path, app: FastAPI):
     _seed(data_dir, _scan(NOON - timedelta(minutes=15), ["Outlook connection expired."]))
 
