@@ -101,6 +101,20 @@ class MailRead(Base):
     read_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
+class LinkedInRead(Base):
+    """One call to get_job_details on the candidate's LinkedIn MCP server (applai.linkedin).
+
+    Counted per UTC day against the daily limit, failed calls included.
+    """
+
+    __tablename__ = "linkedin_reads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"))
+    read_at: Mapped[datetime] = mapped_column(index=True)
+
+
 class Application(Base):
     __tablename__ = "applications"
 
@@ -179,6 +193,26 @@ class Triage(Base):
             "pros": self.pros,
             "cons": self.cons,
         }
+
+
+class Label(Base):
+    """A decision the candidate recorded at a gate, with its reasons (GLOSSARY: label).
+
+    level is "offer" for now. correction says the decision went against the agents'
+    proposal (applai.review). reasons is a list, empty unless the offer was declined.
+    """
+
+    __tablename__ = "labels"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"), index=True)
+    level: Mapped[str]
+    decision: Mapped[str]
+    reasons: Mapped[list[str]] = mapped_column(JSON)
+    note: Mapped[str | None]
+    correction: Mapped[bool]
+    created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
 @event.listens_for(Offer, "before_update")
