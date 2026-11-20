@@ -31,3 +31,21 @@ The light theme keeps the dark theme's hues. Every text token reaches 4.5:1 on e
 - **Pages**: À revoir / To review, Candidatures / Applications, Contrôle / Control. Each has its title and, for now, an empty card.
 - **Settings**: dark and French by default; the candidate's choice is kept in `localStorage`.
 - **Strings**: all in `frontend/src/locales/{fr,en}.json`; the lint fails on a literal string in JSX.
+
+## To review screen
+
+From top to bottom, in a `max-width` column on `background`:
+
+- **Scan status bar**, a `surface` block (`rounded-block`): a dot (green after a clean scan, red after one with errors), the last scan's time, the number of new offers, the next scan's time and the LinkedIn reads left today; the errors in `minus`, with a link when the fix is the candidate's (reconnect the mailbox). On the right, the pill button "Chercher les offres": outlined and disabled with the time left ("dans 18 min") after a clean scan, `primary` and enabled otherwise.
+- **Views**: three pill tabs on a `surface` track, the current one in `primary`, each with its count ("À revoir · 7", "Plus tard · 2", "Écartées · 23"); on the right, "7 offres, triées par score" in `muted`.
+- **Cards**, one scrolling column at most 860 px wide, 28 px apart. A card is a `surface` block (`rounded-card`, 28 px padding) holding, 22 px apart:
+  - a **header frame** on `raised` with a `border` line (radius 22 px): the logo, or the company's initials on a pastel square (56 px, radius 16 px); the job title (24 px, semibold) and under it the company in `link`; the score on the right, a `primary` pill. Under them the tags as small pills on `background`, each with its mark and the colours of its kind: `+` in `plus`, `−` in `minus`, `?` in `unknown`. Last line, in `muted`: "Vue dans une alerte WTTJ, il y a 2 jours · Voir l'offre d'origine" (a link).
+  - **L'entreprise**: an uppercase `muted` label (13 px), then a paragraph.
+  - **La mission**: the same label, then a bulleted list.
+  - **Pour** and **Contre** side by side, each `flex: 1 1 280px` so they stack on a phone: Pour on `plus-bg` with a `plus-border` line, title "+ Pour" in `plus`; Contre on `minus-bg` with a `minus-border` line, title "− Contre" in `minus`, each point led by its mark (`−` in `minus`, `?` in `unknown`).
+  - **Three buttons** on one row that wraps, 52 px high: "← Pas intéressé" outlined, "↓ Plus tard" on `raised`, "Intéressé →" in `primary`.
+- Under the cards, centred in `muted`: "Clavier : → intéressé · ← pas intéressé · ↓ plus tard · 1 à 7 pour la raison".
+
+**Not interested** turns the card into: the header frame, smaller; "Pas intéressé : pourquoi ?" and "Une raison au moins. C'est elle qui apprend quelque chose au Triage."; the seven reasons as pill toggles, each with its key (1 Entreprise, 2 Mission, 3 Expérience, 4 Compétences, 5 Salaire, 6 Lieu, 7 Autre), a chosen one in `primary`; a labelled text area "Préciser (facultatif)"; "Annuler" as a link-coloured text button and "Enregistrer · Entrée" in `primary`, disabled until a reason is chosen. Below: "Touches 1 à 7 : choisir une raison · Entrée : enregistrer · Échap : annuler".
+
+**Écartées** lists one row per offer on `surface` (`rounded-block`): the initials (40 px, on `raised`), the title and under it "company · place · contract · source" in `muted`, the rule or the score as a `raised` pill ("Premier tri : « Senior » dans le titre", "Score 28 : …"), and an outlined "Repêcher" button in `link`. Above the list: the title "Offres écartées" and "Par le premier tri ou par un score bas. Repêcher une offre, c'est corriger le Triage."
