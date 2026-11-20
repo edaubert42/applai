@@ -83,14 +83,15 @@ def _location_rules(profile: Profile) -> str:
     if profile.targets.locations:
         rules.append(f'{_places(profile.targets.locations)}: the location is "{PLUS}".')
     if profile.triage.stretch_locations:
+        stretch = _places(profile.triage.stretch_locations)
+        # A fully remote offer stays marked down unless a target location names remote.
+        if not any(fold("remote") in fold(place) for place in profile.targets.locations):
+            stretch += " or fully remote"
         rules.append(
-            f'{_places(profile.triage.stretch_locations)}: the location is "{MINUS}",'
+            f'{stretch}: the location is "{MINUS}",'
             " and the offer scores 70 or more only when everything else fits."
         )
-    rules.append(
-        "Any other place is judged against the targets, as the other tags are."
-        " A fully remote offer fits only a location that names remote."
-    )
+    rules.append("Any other place is judged against the targets, as the other tags are.")
     return "\n".join(
         textwrap.fill(
             rule,

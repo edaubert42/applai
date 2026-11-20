@@ -227,10 +227,7 @@ def _location_rules(profile: Profile) -> list[str]:
     return [" ".join(rule.split()) for rule in re.split(r"^- ", section, flags=re.M) if rule]
 
 
-OTHER_PLACES = (
-    "Any other place is judged against the targets, as the other tags are."
-    " A fully remote offer fits only a location that names remote."
-)
+OTHER_PLACES = "Any other place is judged against the targets, as the other tags are."
 STRETCH = "and the offer scores 70 or more only when everything else fits."
 
 
@@ -252,7 +249,7 @@ def test_a_profile_in_paris_gives_the_rules_the_prompt_used_to_hard_code(profile
     assert _location_rules(in_paris) == [
         "Paris, Petite Couronne (Hauts-de-Seine, Seine-Saint-Denis, Val-de-Marne):"
         ' the location is "+".',
-        "Grande Couronne (Seine-et-Marne, Yvelines, Essonne, Val-d'Oise):"
+        "Grande Couronne (Seine-et-Marne, Yvelines, Essonne, Val-d'Oise) or fully remote:"
         f' the location is "\N{MINUS SIGN}", {STRETCH}',
         OTHER_PLACES,
     ]
