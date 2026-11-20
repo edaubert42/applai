@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from applai.database import BUSY_TIMEOUT_MS, DatabaseError, open_database
 from applai.models import Application, Base, Offer
 
-TABLES = {"offers", "applications", "state_changes", "agent_runs", "triages"}
+TABLES = {"offers", "applications", "state_changes", "agent_runs", "triages", "mails_read"}
 OFFER_URL = "https://jobs.example.org/brindille-logistique/data-engineer"
 
 type Opener = Callable[..., Engine]
@@ -227,7 +227,7 @@ def test_the_agent_runs_migration_only_adds_its_table(tmp_path: Path, open_db: O
     assert _revision(tmp_path / "applai.db") == _head()
     after = set(inspect(engine).get_table_names())
     assert {"agent_runs"} <= after
-    assert after - {"agent_runs", "triages"} <= before  # nothing else is new; triages is 0003's
+    assert after - {"agent_runs", "triages", "mails_read"} <= before  # later migrations add these
     with Session(engine) as session:
         assert session.scalars(select(Offer.url)).all() == [OFFER_URL]
 
@@ -249,7 +249,7 @@ def test_the_triages_migration_keeps_every_offer_with_no_description(
     engine = open_db(tmp_path)
 
     after = set(inspect(engine).get_table_names())
-    assert after - {"triages"} <= before
+    assert after - {"triages", "mails_read"} <= before  # mails_read comes from 0004
     with Session(engine) as session:
         offer = session.scalars(select(Offer)).one()
         assert (offer.url, offer.state, offer.description) == (OFFER_URL, "described", None)
