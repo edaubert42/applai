@@ -61,6 +61,10 @@ jobs:
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh issue view:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh run view:*),Bash(gh run list:*),Bash(npm ci:*),Bash(npm run:*),Bash(npm test:*)"
 
   on-ci-failure:
+    # CI and Frontend can both fail on one push: one fixer at a time per branch.
+    concurrency:
+      group: agent-fixer-ci-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
     if: >-
       github.event_name == 'workflow_run'
       && github.event.workflow_run.conclusion == 'failure'

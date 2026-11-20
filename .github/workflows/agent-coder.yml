@@ -103,14 +103,14 @@ jobs:
 
       # A coder that ends with neither a PR nor a comment would leave the issue waiting in silence.
       - name: Say so when the coder stopped without a PR or questions
-        if: steps.ready.outputs.go == 'true'
+        if: ${{ !cancelled() && steps.ready.outputs.go == 'true' }}  # also after max turns or an error
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ steps.ready.outputs.issue }}
           STARTED: ${{ steps.ready.outputs.started }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          pr=$(gh pr list --state open --json headRefName --jq "any(.[]; .headRefName | startswith(\"agent/issue-$ISSUE-\"))")
+          pr=$(gh pr list --state open --limit 200 --json headRefName --jq "any(.[]; .headRefName | startswith(\"agent/issue-$ISSUE-\"))")
           said=$(gh issue view "$ISSUE" --json comments --jq "any(.comments[]; .createdAt >= \"$STARTED\")")
           if [ "$pr" = false ] && [ "$said" = false ]; then
             gh issue comment "$ISSUE" --body "Coder: stopped without a PR or questions ($RUN)."
