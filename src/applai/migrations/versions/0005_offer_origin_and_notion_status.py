@@ -2,15 +2,15 @@
 
 Offers already in the database were all found by ApplAI: they get origin applai.
 
-Revision ID: 0003
-Revises: 0002
+Revision ID: 0005
+Revises: 0004
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0003"
-down_revision: str | None = "0002"
+revision = "0005"
+down_revision: str | None = "0004"
 branch_labels: str | None = None
 depends_on: str | None = None
 
