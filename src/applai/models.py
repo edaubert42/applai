@@ -72,6 +72,9 @@ class Offer(Base):
     source: Mapped[str | None]  # where the watch found it: alert_linkedin…
     received_at: Mapped[datetime | None]  # when the job alert listing it was received
     description: Mapped[str | None]  # the offer's text; Triage refuses an offer without it
+    salary: Mapped[str | None]  # as the offer's page gives it
+    logo: Mapped[str | None]  # a file name in the data directory's logos/; none: initials
+    detail_error: Mapped[str | None]  # why the offer's page could not be read (applai.details)
     state: Mapped[str] = mapped_column(server_default="new")
     origin: Mapped[str] = mapped_column(server_default=OfferOrigin.APPLAI)
     # The row's status in the old workflow's Notion database, as text: never a state.
@@ -176,6 +179,26 @@ class Triage(Base):
             "pros": self.pros,
             "cons": self.cons,
         }
+
+
+class Label(Base):
+    """A decision the candidate recorded at a gate, with its reasons (GLOSSARY: label).
+
+    level is "offer" for now. correction says the decision went against the agents'
+    proposal (applai.review). reasons is a list, empty unless the offer was declined.
+    """
+
+    __tablename__ = "labels"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"), index=True)
+    level: Mapped[str]
+    decision: Mapped[str]
+    reasons: Mapped[list[str]] = mapped_column(JSON)
+    note: Mapped[str | None]
+    correction: Mapped[bool]
+    created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
 @event.listens_for(Offer, "before_update")
