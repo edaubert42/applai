@@ -89,7 +89,7 @@ def describe_offers(
     ).all()
     with nullcontext(http) if http else watch_client() as client:
         for offer in offers:
-            if (urlsplit(offer.url).hostname or "").endswith("linkedin.com"):
+            if on_linkedin(offer.url):
                 continue
             offer_id = offer.id
             try:
@@ -99,6 +99,11 @@ def describe_offers(
                 describing.errors.append(f"offer {offer_id}: {error}")
             session.commit()
     return describing
+
+
+def on_linkedin(url: str) -> bool:
+    """Whether an offer is LinkedIn's, which this module leaves to its own reader."""
+    return (urlsplit(url).hostname or "").endswith("linkedin.com")
 
 
 def describe_offer(session: Session, offer: Offer, data_dir: Path, http: httpx2.Client) -> None:
