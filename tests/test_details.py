@@ -2,8 +2,8 @@ import json
 import threading
 import time
 from collections.abc import Iterator
-from importlib.metadata import version
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -24,15 +24,16 @@ POSTING: dict[str, Any] = {
     "title": "Data engineer",
     "description": "<p>Pivoine Analytics aide les bibliothèques.</p><ul><li>Python</li></ul>",
     "hiringOrganization": {"@type": "Organization", "name": "Pivoine Analytics", "logo": "/logo"},
-    "jobLocation": {"@type": "Place", "address": {"addressLocality": "Paris", "postalCode": "75011"}},
+    "jobLocation": {"address": {"addressLocality": "Paris", "postalCode": "75011"}},
     "employmentType": "CDI",
     "baseSalary": {"currency": "EUR", "value": {"minValue": 48000, "maxValue": 55000}},
 }
 
 
-def _posting_page(posting: dict[str, Any] = POSTING) -> str:
-    script = f'<script type="application/ld+json">{json.dumps(posting)}</script>'
-    return f"<html><head>{script}</head><body><p>Autre texte</p></body></html>"
+POSTING_PAGE = (
+    f'<html><head><script type="application/ld+json">{json.dumps(POSTING)}</script></head>'
+    "<body><p>Autre texte</p></body></html>"
+)
 
 
 class Site:
@@ -56,14 +57,14 @@ class Site:
                 self.end_headers()
                 self.wfile.write(body)
 
-            def log_message(self, *_: object) -> None:
+            def log_message(self, format: str, *args: Any) -> None:
                 pass
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
-    def page(self, path: str, html: str, status: int = 200) -> str:
-        self.pages[path] = (status, "text/html; charset=utf-8", html.encode())
+    def page(self, path: str, html: str) -> str:
+        self.pages[path] = (200, "text/html; charset=utf-8", html.encode())
         return self.url + path
 
     def paths(self) -> list[str]:
@@ -109,16 +110,16 @@ def _get(engine: Engine, offer_id: int) -> Offer:
 def test_a_posting_gives_the_offer_its_text_details_and_logo(
     engine: Engine, tmp_path: Path, site: Site
 ):
-    offer_id = _offer(engine, site.page("/jobs/1", _posting_page()), company="")
+    offer_id = _offer(engine, site.page("/jobs/1", POSTING_PAGE), company="")
 
     assert _describe(engine, tmp_path) == []
 
     offer = _get(engine, offer_id)
     assert offer.state == "described"
     assert offer.description == "Pivoine Analytics aide les bibliothèques.\nPython"
-    assert (offer.company, offer.location, offer.contract) == ("Pivoine Analytics", "Paris 75011", "CDI")
-    assert offer.salary == "48000-55000 EUR"
-    assert offer.detail_error is None
+    assert (offer.company, offer.location, offer.contract, offer.salary, offer.detail_error) == (
+        "Pivoine Analytics", "Paris 75011", "CDI", "48000-55000 EUR", None
+    )  # fmt: skip
     assert (tmp_path / LOGOS_DIR / str(offer.logo)).read_bytes() == PNG
     with Session(engine) as session:
         change = session.scalars(select(StateChange).where(StateChange.offer_id == offer_id)).one()
@@ -161,9 +162,9 @@ def test_without_a_posting_logo_the_page_image_or_the_site_icon_is_the_logo(
 
 
 def test_a_logo_is_downloaded_once_per_company(engine: Engine, tmp_path: Path, site: Site):
-    first = _offer(engine, site.page("/jobs/4", _posting_page()))
+    first = _offer(engine, site.page("/jobs/4", POSTING_PAGE))
     _describe(engine, tmp_path)
-    second = _offer(engine, site.page("/jobs/5", _posting_page()))
+    second = _offer(engine, site.page("/jobs/5", POSTING_PAGE))
     _describe(engine, tmp_path)
 
     assert _get(engine, first).logo == _get(engine, second).logo == "pivoine-analytics.png"
@@ -200,7 +201,7 @@ def test_a_page_that_fails_records_its_error_and_leaves_the_offer_new(
 
 
 def test_http_calls_send_a_generic_user_agent(engine: Engine, tmp_path: Path, site: Site):
-    _offer(engine, site.page("/jobs/6", _posting_page()))
+    _offer(engine, site.page("/jobs/6", POSTING_PAGE))
 
     _describe(engine, tmp_path)
 
