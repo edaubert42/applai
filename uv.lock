@@ -59,6 +59,7 @@ version = "0.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
+    { name = "anyio" },
     { name = "fastapi" },
     { name = "httpx2" },
     { name = "jsonschema" },
@@ -84,6 +85,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.20.1" },
+    { name = "anyio", specifier = ">=4.16.0" },
     { name = "fastapi", specifier = ">=0.165.0" },
     { name = "httpx2", specifier = ">=2.16.2" },
     { name = "jsonschema", specifier = ">=4.26.0" },
