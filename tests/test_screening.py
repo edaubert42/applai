@@ -101,6 +101,9 @@ def test_a_commune_of_ile_de_france_passes_found_by_postcode_or_by_name(
 
 
 def test_a_commune_of_the_grande_couronne_passes_and_is_noted(engine: Engine, profile: Profile):
+    # The demo candidate lives in Lyon: this one stretches to the Grande Couronne.
+    rules = profile.triage.model_copy(update={"stretch_locations": ("Grande Couronne",)})
+    profile = profile.model_copy(update={"triage": rules})
     by_name = _screen(engine, profile, location="Versailles", work_mode="hybrid")
     by_postcode = _screen(engine, profile, location="91000", work_mode="hybrid")
     near = _screen(engine, profile, location="Paris - 75", work_mode="hybrid")
