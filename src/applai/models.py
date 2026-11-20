@@ -69,6 +69,7 @@ class Offer(Base):
     years_required: Mapped[int | None]
     screened_rule: Mapped[str | None]  # the rule that set it aside (applai.screening)
     screen_note: Mapped[str | None]  # remote or grande_couronne: Triage marks it down
+    logo_url: Mapped[str | None]  # the company's logo, as the source gives it
     source: Mapped[str | None]  # where the watch found it: alert_linkedin…
     received_at: Mapped[datetime | None]  # when the job alert listing it was received
     description: Mapped[str | None]  # the offer's text; Triage refuses an offer without it
@@ -176,6 +177,26 @@ class Triage(Base):
             "pros": self.pros,
             "cons": self.cons,
         }
+
+
+class Label(Base):
+    """A decision the candidate recorded at a gate, with its reasons (GLOSSARY: label).
+
+    level is "offer" for now. correction says the decision went against the agents'
+    proposal (applai.review). reasons is a list, empty unless the offer was declined.
+    """
+
+    __tablename__ = "labels"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"), index=True)
+    level: Mapped[str]
+    decision: Mapped[str]
+    reasons: Mapped[list[str]] = mapped_column(JSON)
+    note: Mapped[str | None]
+    correction: Mapped[bool]
+    created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
 @event.listens_for(Offer, "before_update")
