@@ -101,6 +101,20 @@ class MailRead(Base):
     read_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
+class LinkedInRead(Base):
+    """One call to get_job_details on the candidate's LinkedIn MCP server (applai.linkedin).
+
+    Counted per UTC day against the daily limit, failed calls included.
+    """
+
+    __tablename__ = "linkedin_reads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"))
+    read_at: Mapped[datetime] = mapped_column(index=True)
+
+
 class Application(Base):
     __tablename__ = "applications"
 
