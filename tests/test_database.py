@@ -202,6 +202,20 @@ def test_every_connection_enforces_foreign_keys_uses_wal_and_waits_when_busy(
             session.commit()
 
 
+def test_an_offer_older_than_the_notion_sync_is_one_applai_found(tmp_path: Path, open_db: Opener):
+    with open_db(tmp_path).begin() as connection:
+        command.downgrade(_alembic(connection), "0001")
+        connection.exec_driver_sql(
+            "INSERT INTO offers (user_id, url, title, company, created_at, updated_at)"
+            f" VALUES (1, '{OFFER_URL}', 'Data engineer', 'Brindille Logistique',"
+            " '2026-11-19 09:00:00', '2026-11-19 09:00:00')"
+        )
+
+    with Session(open_db(tmp_path)) as session:
+        offer = session.scalars(select(Offer)).one()
+        assert (offer.url, offer.origin, offer.notion_status) == (OFFER_URL, "applai", None)
+
+
 def test_models_and_migrations_agree(tmp_path: Path, open_db: Opener):
     with open_db(tmp_path).connect() as connection:
         context = MigrationContext.configure(
