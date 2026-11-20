@@ -5,10 +5,11 @@ import email
 import email.policy
 import hashlib
 import json
+import re
 import stat
 import time
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -404,3 +405,14 @@ def test_two_google_offers_with_the_same_title_and_company_in_two_places_stay_tw
         ("Data Engineer Streaming - Paris (H/F)", "Nanterre, France"),
     ]
     assert same[0].url != same[1].url
+
+
+def test_a_google_alert_is_read_as_graph_returns_it_without_spaces_in_its_styles(
+    tmp_path: Path, microsoft: FakeMicrosoft, engine: Engine
+):
+    alert = _alert("google")
+    microsoft.mails.append(replace(alert, html=re.sub(r":\s+", ":", alert.html)))
+
+    read_alerts(engine, _signed_in(tmp_path, microsoft))
+
+    assert len(_offers(engine)) == 4
