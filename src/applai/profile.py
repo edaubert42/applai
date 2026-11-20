@@ -107,6 +107,14 @@ class Targets(_Section):
     salary: Salary
 
 
+class TriageRules(_Section):
+    """What the first screening, by code, sets aside (applai.screening)."""
+
+    exclude_title_words: tuple[str, ...]  # a word or a phrase of the title, whole
+    max_years_required: int
+    stretch_locations: tuple[str, ...]  # pass, and Triage marks them down
+
+
 class Fact(_Section):
     id: Annotated[str, Field(pattern=r"^F[1-9][0-9]*$")]  # cited as #F12 (ADR 0008)
     text: str
@@ -124,6 +132,7 @@ class Profile(_Section):
         WrapSerializer(_dumped_as_dict),
     ]
     targets: Targets
+    triage: TriageRules
     facts: tuple[Fact, ...]
 
     @model_validator(mode="after")

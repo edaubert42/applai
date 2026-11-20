@@ -19,6 +19,7 @@ from applai.profile import (
     ProfileError,
     Salary,
     Targets,
+    TriageRules,
     load_profile,
 )
 
@@ -84,6 +85,11 @@ def test_the_fictional_candidates_profile_is_read_as_a_typed_profile():
         contracts=("permanent", "freelance"),
         locations=("Lyon", "Remote in France"),
         salary=Salary(minimum=52000, currency="EUR"),
+    )
+    assert profile.triage == TriageRules(
+        exclude_title_words=("Senior", "Lead", "Staff", "Data Scientist", "MLOps", "Research"),
+        max_years_required=3,
+        stretch_locations=("Grande Couronne",),
     )
     assert [(fact.id, fact.status, fact.diffusion) for fact in profile.facts] == [
         ("F1", FactStatus.VALIDATED, Diffusion.ANYWHERE),
@@ -159,6 +165,10 @@ def test_without_APPLAI_DATA_DIR_the_error_names_it(
     [
         pytest.param(("identity", "email"), REMOVE, "identity.email", id="missing field"),
         pytest.param(("targets",), REMOVE, "targets", id="missing section"),
+        pytest.param(("triage",), REMOVE, "triage", id="missing triage section"),
+        pytest.param(
+            ("triage", "max_years_required"), "three", "triage.max_years_required", id="years"
+        ),
         pytest.param(("facts", 1, "text"), REMOVE, "facts[1].text", id="missing fact text"),
         pytest.param(("facts", 2, "status"), "approved", "facts[2].status", id="unknown status"),
         pytest.param(
