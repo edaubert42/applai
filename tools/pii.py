@@ -33,6 +33,7 @@ _ALLOWED_EMAILS = {
     "alerte@emails.hellowork.com",
     "no-reply@notification.prod.jobteaser.net",
     "emploi@alertes.lesjeudis.com",
+    "notify-noreply@google.com",
 }
 
 _PHONE = re.compile(r"(?<![\w+])(?:\+33[\s.-]?|0)([1-9](?:[\s.-]?\d{2}){4})(?!\w)")

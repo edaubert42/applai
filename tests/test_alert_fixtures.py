@@ -38,6 +38,11 @@ SENDERS = {
         "lesjeudis.com/offers/",
         ["Nébulix IA", "Octaval Conseil"],
     ),
+    "google": (
+        "notify-noreply@google.com",
+        "notifications.googleapis.com/email/redirect",
+        ["Héron Data", "Pinson Médias"],
+    ),
 }
 
 
