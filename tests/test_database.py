@@ -273,7 +273,7 @@ def test_the_triages_migration_keeps_every_offer_with_no_description(
     engine = open_db(tmp_path)
 
     after = set(inspect(engine).get_table_names())
-    assert after - {"triages", "mails_read", "labels"} <= before  # these come from 0004, 0007
+    assert after - {"triages", "mails_read", "labels"} <= before  # these come from 0004, 0008
     with Session(engine) as session:
         offer = session.scalars(select(Offer)).one()
         assert (offer.url, offer.state, offer.description) == (OFFER_URL, "described", None)

@@ -26,7 +26,7 @@ CARD: dict[str, Any] = {
     "pros": ["Data engineering au cœur du poste", "CDI"],
     "cons": [{"text": "Salaire non précisé", "verdict": "?"}],
 }
-LOGO = "https://logos.example.org/pivoine.png"
+LOGO = "pivoine-analytics.png"
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ def _offer(
             company="Pivoine Analytics",
             state=state,
             screened_rule=rule,
-            logo_url=LOGO,
+            logo=LOGO,
             created_at=datetime(2026, 11, day, 8, 30),
         )
         session.add(offer)
@@ -122,7 +122,7 @@ def test_to_review_lists_the_triaged_offers_at_the_threshold_best_first(
     ]
 
 
-def test_a_card_has_the_triage_result_and_the_logo_url(engine: Engine, client: TestClient):
+def test_a_card_has_the_triage_result_and_the_logo(engine: Engine, client: TestClient):
     offer_id = _offer(engine, "data-engineer", "triaged", score=82)
 
     [card] = client.get("/api/review", params={"view": "to_review"}).json()
@@ -132,7 +132,7 @@ def test_a_card_has_the_triage_result_and_the_logo_url(engine: Engine, client: T
         "url": "https://jobs.example.org/pivoine-analytics/data-engineer",
         "title": "Data engineer",
         "company": "Pivoine Analytics",
-        "logo_url": LOGO,
+        "logo": LOGO,
         "state": "triaged",
         "score": 82,
         "rule": None,
@@ -172,7 +172,7 @@ def test_screened_out_lists_the_rule_screened_then_the_offers_below_the_threshol
     ]
     assert [card["rule"] for card in cards] == ["contract", "title_word:sales", None, None]
     assert [card["score"] for card in cards] == [None, None, 35, 30]
-    assert cards[0]["logo_url"] == LOGO
+    assert cards[0]["logo"] == LOGO
 
 
 def test_the_threshold_is_the_review_min_score_setting_read_at_each_request(

@@ -85,7 +85,7 @@ class Card(BaseModel):
     url: str
     title: str
     company: str
-    logo_url: str | None
+    logo: str | None  # a file name in the data directory's logos/ (applai.details)
     state: OfferState
     score: int | None = None
     tags: dict[str, Any] | None = None

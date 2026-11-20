@@ -69,7 +69,6 @@ class Offer(Base):
     years_required: Mapped[int | None]
     screened_rule: Mapped[str | None]  # the rule that set it aside (applai.screening)
     screen_note: Mapped[str | None]  # remote or grande_couronne: Triage marks it down
-    logo_url: Mapped[str | None]  # the company's logo, as the source gives it
     source: Mapped[str | None]  # where the watch found it: alert_linkedin…
     received_at: Mapped[datetime | None]  # when the job alert listing it was received
     description: Mapped[str | None]  # the offer's text; Triage refuses an offer without it
