@@ -22,7 +22,7 @@ Read before working:
 
 ## Checks
 
-The gates are the steps of `.github/workflows/ci.yml`; run them locally and have them green before opening a PR. Before any push, also run `python3 tools/denylist.py` with `APPLAI_DATA_DIR` set (the candidate's own terms) and `python3 tools/pii.py` (any real-looking e-mail, phone number or document). Both fail without printing the value. Fictional contact details use `example.org` and phone numbers ending in `00 00 00 00`. Agents running in GitHub Actions have no `APPLAI_DATA_DIR`: they skip the denylist, which CI runs on their PR.
+The gates are the steps of `.github/workflows/ci.yml` and, for `frontend/`, of `frontend-ci.yml`; run them locally and have them green before opening a PR. Before any push, also run `python3 tools/denylist.py` with `APPLAI_DATA_DIR` set (the candidate's own terms) and `python3 tools/pii.py` (any real-looking e-mail, phone number or document). Both fail without printing the value. Fictional contact details use `example.org` and phone numbers ending in `00 00 00 00`. Agents running in GitHub Actions have no `APPLAI_DATA_DIR`: they skip the denylist, which CI runs on their PR.
 
 ## Agents that build ApplAI
 

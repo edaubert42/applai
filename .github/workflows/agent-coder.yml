@@ -54,7 +54,7 @@ jobs:
           fi
           reason=$(python3 tools/blockers.py check "$ISSUE")
           hard=$(gh issue view "$ISSUE" --json labels --jq 'any(.labels[]; .name == "hard")')
-          { echo "issue=$ISSUE"; echo "hard=$hard"; } >> "$GITHUB_OUTPUT"
+          { echo "issue=$ISSUE"; echo "hard=$hard"; echo "started=$(date -u +%FT%TZ)"; } >> "$GITHUB_OUTPUT"
           case "$reason" in
             ready) echo "go=true" >> "$GITHUB_OUTPUT" ;;
             waiting*) gh issue comment "$ISSUE" --body "Coder: $reason; it starts when they are closed." ;;
@@ -62,6 +62,12 @@ jobs:
           esac
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         if: steps.ready.outputs.go == 'true'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.ready.outputs.go == 'true'
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - uses: anthropics/claude-code-action@e5812cd75691ca7bbfc57c0ecf4441db3a1ab7dd # v1.0.281
         if: steps.ready.outputs.go == 'true'
         with:
@@ -75,7 +81,7 @@ jobs:
             --model ${{ steps.ready.outputs.hard == 'true' && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
             --effort high
             --max-turns 120
-            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr view:*)"
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(npm ci:*),Bash(npm run:*),Bash(npm test:*)"
           prompt: |
             You are the coder agent of ${{ github.repository }}. Build issue #${{ steps.ready.outputs.issue }}.
 
@@ -91,7 +97,24 @@ jobs:
             5. Push the branch and open a PR with `gh pr create`, filling .github/pull_request_template.md (150 words at most),
                with `Closes #${{ steps.ready.outputs.issue }}`${{ steps.ready.outputs.hard == 'true' && ' and `--label hard`' || '' }}.
                Done when the PR is open and every gate passed locally.
+            The frontend's gates are the steps of .github/workflows/frontend-ci.yml, run in `frontend/`
+            (`npm ci`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`). A new npm dependency
+            is a question for the owner: `npm install` is not one of your tools.
 
+      # A coder that ends with neither a PR nor a comment would leave the issue waiting in silence.
+      - name: Say so when the coder stopped without a PR or questions
+        if: ${{ !cancelled() && steps.ready.outputs.go == 'true' }}  # also after max turns or an error
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.ready.outputs.issue }}
+          STARTED: ${{ steps.ready.outputs.started }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          pr=$(gh pr list --state open --limit 200 --json headRefName --jq "any(.[]; .headRefName | startswith(\"agent/issue-$ISSUE-\"))")
+          said=$(gh issue view "$ISSUE" --json comments --jq "any(.comments[]; .createdAt >= \"$STARTED\")")
+          if [ "$pr" = false ] && [ "$said" = false ]; then
+            gh issue comment "$ISSUE" --body "Coder: stopped without a PR or questions ($RUN)."
+          fi
       - name: What comes next on the coder's questions
         id: after
         if: steps.ready.outputs.go == 'true'
