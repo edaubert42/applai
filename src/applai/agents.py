@@ -79,6 +79,7 @@ class Usage(_Frozen):
 class AgentResult(_Frozen):
     output: dict[str, Any]  # the parsed JSON, matching the spec's schema
     usage: Usage
+    run_id: int | None = None  # the agent_runs row run_agent recorded, if it recorded one
 
 
 class Backend(Protocol):
@@ -105,8 +106,8 @@ class AgentRunner:
     ) -> AgentResult:
         """Run the agent. Given the database and the offer it works on, record the run.
 
-        The run is recorded whether it succeeds or fails (see applai.trace). Without them
-        nothing is recorded.
+        The run is recorded whether it succeeds or fails (see applai.trace), and the result
+        holds the id of its row. Without them nothing is recorded.
         """
         if (database is None) != (offer_id is None):
             raise ValueError("run_agent takes the database and offer_id together, or neither")
@@ -134,7 +135,7 @@ class AgentRunner:
             )
             raise
         usage = result.usage
-        record_run(
+        run_id = record_run(
             database,
             offer_id=offer_id,
             application_id=application_id,
@@ -149,7 +150,7 @@ class AgentRunner:
                 outcome=OK,
             ),
         )
-        return result
+        return result.model_copy(update={"run_id": run_id})
 
     def _run(self, spec: AgentSpec) -> AgentResult:
         with self._slots:
