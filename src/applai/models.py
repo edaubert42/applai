@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import Connection, ForeignKey, MetaData, UniqueConstraint, event, inspect
+from sqlalchemy import JSON, Connection, ForeignKey, MetaData, UniqueConstraint, event, inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, Mapper, mapped_column
 
 LOCAL_USER_ID = 1  # the one candidate of a local ApplAI, until accounts come
@@ -60,6 +60,7 @@ class Offer(Base):
     contract: Mapped[str | None]
     source: Mapped[str | None]  # where the watch found it: alert_linkedin…
     received_at: Mapped[datetime | None]  # when the job alert listing it was received
+    description: Mapped[str | None]  # the offer's text; Triage refuses an offer without it
     state: Mapped[str] = mapped_column(server_default="new")
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=_utc_now, onupdate=_utc_now)
@@ -129,6 +130,38 @@ class AgentRun(Base):
     output_tokens: Mapped[int | None]
     cost_usd: Mapped[float | None]  # estimated at API list price
     outcome: Mapped[str]
+
+
+class Triage(Base):
+    """The card the Triage agent wrote for one offer, and the agent run that wrote it.
+
+    Its fields are those of applai.triage.CARD_SCHEMA, which the card was checked against.
+    """
+
+    __tablename__ = "triages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"), unique=True)
+    agent_run_id: Mapped[int] = mapped_column(ForeignKey("agent_runs.id"))
+    score: Mapped[int]
+    tags: Mapped[dict[str, Any]] = mapped_column(JSON)
+    about: Mapped[str]
+    mission: Mapped[list[str]] = mapped_column(JSON)
+    pros: Mapped[list[str]] = mapped_column(JSON)
+    cons: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=_utc_now)
+
+    def card(self) -> dict[str, Any]:
+        """The card as the agent wrote it."""
+        return {
+            "score": self.score,
+            "tags": self.tags,
+            "about": self.about,
+            "mission": self.mission,
+            "pros": self.pros,
+            "cons": self.cons,
+        }
 
 
 @event.listens_for(Offer, "before_update")
