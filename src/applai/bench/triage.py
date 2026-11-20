@@ -6,8 +6,9 @@ a run that fails counts as score 0 and the bench goes on. The offer is proposed 
 median score is at least the threshold, review_min_score unless --min-score overrides it.
 
 Recall is the share of wanted offers that are proposed, and the bench fails under
-RECALL_THRESHOLD; precision is the share of proposed offers that are wanted; cost is what
-every successful run cost, at API list price.
+RECALL_THRESHOLD, or when no case is wanted, as it then measures nothing; precision is the
+share of proposed offers that are wanted; cost is what every successful run cost, at API list
+price.
 
 The public bench reads the demo candidate and bench/triage/ in this repository. The private
 bench reads the candidate's data directory and prints only totals: no title, company, text

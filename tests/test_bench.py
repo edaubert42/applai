@@ -61,9 +61,7 @@ def _case(data_dir: Path, name: str, expected: str, **fields: str) -> None:
     path.write_text(yaml.safe_dump(case, allow_unicode=True), encoding="utf-8")
 
 
-def _bench(
-    capsys: pytest.CaptureFixture[str], backend: FakeBackend, *argv: str
-) -> tuple[int, str]:
+def _bench(capsys: pytest.CaptureFixture[str], backend: FakeBackend, *argv: str) -> tuple[int, str]:
     """Run the Triage bench; its exit code and everything it printed."""
     try:
         main(["triage", *argv], backend=backend)
@@ -97,7 +95,7 @@ def test_recall_precision_and_cost_match_a_hand_count(
 
     assert "Recall: 50.0 % (1 of 2 wanted offers proposed)" in out
     assert "Precision: 50.0 % (1 of 2 proposed offers wanted)" in out
-    # 3 × 0.01 + 3 × 0.02 + 3 × 0.005 + 3 × 0.001 = 0.108, over 4 cases
+    # 3 * 0.01 + 3 * 0.02 + 3 * 0.005 + 3 * 0.001 = 0.108, over 4 cases
     assert "Cost: $0.1080 in all, $0.0270 per case" in out
     assert code == 1  # recall under 90 %
 

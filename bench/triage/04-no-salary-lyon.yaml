@@ -1,0 +1,9 @@
+title: Data engineer
+company: Pépinière Numérique
+description: >-
+  Pépinière Numérique édite un logiciel de gestion pour les jardineries. CDI à Lyon 7e, en
+  hybride avec deux jours de télétravail. Vous reprendrez nos chargements de données et
+  mettrez en place des chargements incrémentaux en Python et PostgreSQL. Deux ans
+  d'expérience minimum. Le salaire n'est pas indiqué.
+expected: accept
+trap: missing salary
