@@ -150,7 +150,8 @@ def test_private_output_holds_no_title_company_or_text_of_a_case(
         description="Zéphyrine Cartographie dessine des cartes marines. Poste à Lyon.",
     )
     _case(data_dir, "quenouille", "decline")
-    backend = FakeBackend([_result(run) for run in [FAILED, 80, 80, 10, 10, 10]])
+    # In file-name order: quenouille, then zephyrine-cartographie.
+    backend = FakeBackend([_result(run) for run in [10, 10, 10, FAILED, 80, 80]])
 
     code, out = _bench(capsys, backend, "--private")
 
