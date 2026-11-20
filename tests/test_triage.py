@@ -235,7 +235,7 @@ def test_the_demo_candidates_places_are_the_prompts_location_rules(profile: Prof
     prompt = triage_spec(TITLE, COMPANY, DESCRIPTION, profile).system_prompt
 
     assert _location_rules(profile) == [
-        'Lyon, Remote in France: the location is "+".',
+        'Lyon and Remote in France: the location is "+".',
         f'Saint-Étienne: the location is "\N{MINUS SIGN}", {STRETCH}',
         OTHER_PLACES,
     ]
@@ -243,16 +243,20 @@ def test_the_demo_candidates_places_are_the_prompts_location_rules(profile: Prof
         assert elsewhere not in prompt
 
 
+# The location section the prompt hard-coded before #75, word for word.
+HARD_CODED_RULES = """\
+- Paris and the Petite Couronne (Hauts-de-Seine, Seine-Saint-Denis, Val-de-Marne), hybrid
+  or on site: the location is "+".
+- The Grande Couronne (Seine-et-Marne, Yvelines, Essonne, Val-d'Oise) or fully remote: the
+  location is "\N{MINUS SIGN}", and the offer scores 70 or more only when everything else fits.
+"""
+
+
 def test_a_profile_in_paris_gives_the_rules_the_prompt_used_to_hard_code(profile: Profile):
     in_paris = _with_locations(profile, ("Paris", "Petite Couronne"), ("Grande Couronne",))
+    prompt = triage_spec(TITLE, COMPANY, DESCRIPTION, in_paris).system_prompt
 
-    assert _location_rules(in_paris) == [
-        "Paris, Petite Couronne (Hauts-de-Seine, Seine-Saint-Denis, Val-de-Marne):"
-        ' the location is "+".',
-        "Grande Couronne (Seine-et-Marne, Yvelines, Essonne, Val-d'Oise) or fully remote:"
-        f' the location is "\N{MINUS SIGN}", {STRETCH}',
-        OTHER_PLACES,
-    ]
+    assert f"\nLocation:\n{HARD_CODED_RULES}- {OTHER_PLACES}\n\n" in prompt
 
 
 def test_a_profile_with_no_stretch_location_gives_no_minus_location_rule(profile: Profile):

@@ -65,37 +65,44 @@ CARD_SCHEMA: dict[str, Any] = {
 
 # Plain geography, so a profile can name these areas of Île-de-France.
 _AREAS = {
-    fold("Petite Couronne"): "Hauts-de-Seine, Seine-Saint-Denis, Val-de-Marne",
-    fold("Grande Couronne"): "Seine-et-Marne, Yvelines, Essonne, Val-d'Oise",
+    fold("Petite Couronne"): (
+        "the Petite Couronne (Hauts-de-Seine, Seine-Saint-Denis, Val-de-Marne)"
+    ),
+    fold("Grande Couronne"): (
+        "the Grande Couronne (Seine-et-Marne, Yvelines, Essonne, Val-d'Oise)"
+    ),
 }
 
 
 def _places(locations: tuple[str, ...]) -> str:
-    return ", ".join(
-        f"{place} ({_AREAS[fold(place)]})" if fold(place) in _AREAS else place
-        for place in locations
-    )
+    """The places in words: "Paris and the Petite Couronne (...)"."""
+    named = [_AREAS.get(fold(place), place) for place in locations]
+    listed = " and ".join([", ".join(named[:-1]), named[-1]] if len(named) > 1 else named)
+    return listed[0].upper() + listed[1:]
 
 
 def _location_rules(profile: Profile) -> str:
     """The prompt's location rules: the targets fit, the stretch locations are marked down."""
+    # A fully remote offer is marked down with the stretch locations, unless a target names
+    # remote; then a target fits only hybrid or on site.
+    remote_marked_down = bool(profile.triage.stretch_locations) and not any(
+        fold("remote") in fold(place) for place in profile.targets.locations
+    )
     rules: list[str] = []
     if profile.targets.locations:
-        rules.append(f'{_places(profile.targets.locations)}: the location is "{PLUS}".')
+        on_site = ", hybrid or on site" if remote_marked_down else ""
+        rules.append(f'{_places(profile.targets.locations)}{on_site}: the location is "{PLUS}".')
     if profile.triage.stretch_locations:
-        stretch = _places(profile.triage.stretch_locations)
-        # A fully remote offer stays marked down unless a target location names remote.
-        if not any(fold("remote") in fold(place) for place in profile.targets.locations):
-            stretch += " or fully remote"
+        remote = " or fully remote" if remote_marked_down else ""
         rules.append(
-            f'{stretch}: the location is "{MINUS}",'
+            f'{_places(profile.triage.stretch_locations)}{remote}: the location is "{MINUS}",'
             " and the offer scores 70 or more only when everything else fits."
         )
     rules.append("Any other place is judged against the targets, as the other tags are.")
     return "\n".join(
         textwrap.fill(
             rule,
-            width=92,
+            width=90,
             initial_indent="- ",
             subsequent_indent="  ",
             break_long_words=False,
