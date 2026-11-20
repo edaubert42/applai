@@ -139,8 +139,11 @@ def app(data_dir: Path, network: Network, clock: Clock, backend: FakeBackend) ->
     yield create_app(data_dir, frontend_dir=data_dir / "no-frontend", watch=watch, clock=clock)
 
 
-def test_at_startup_after_a_missed_slot_one_scan_runs(data_dir: Path, app: FastAPI):
-    _seed(data_dir, _scan(datetime(2026, 11, 19, 17, 30, tzinfo=PARIS)))  # not today's 08:30
+@pytest.mark.parametrize("cut_off", [False, True], ids=["yesterday", "cut-off-by-a-stop"])
+def test_at_startup_after_a_missed_slot_one_scan_runs(data_dir: Path, app: FastAPI, cut_off: bool):
+    last = _scan(datetime(2026, 11, 20 if cut_off else 19, 8, 35, tzinfo=PARIS))
+    last.finished_at = None if cut_off else last.finished_at  # ApplAI stopped during it
+    _seed(data_dir, last)
 
     with TestClient(app) as client:
         _scanner(client).wait()

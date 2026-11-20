@@ -1,17 +1,19 @@
 """ApplAI's web app: the API under /api, and the built frontend at / when there is one.
 
-The app opens the candidate's database when it starts, and closes it when it stops.
+The app opens the candidate's database when it starts, and closes it when it stops; given
+a watch, it also runs the scan's schedule meanwhile.
 There is no authentication: applai serve listens on 127.0.0.1 only, for one local
 candidate, whose rows carry LOCAL_USER_ID.
 """
 
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Annotated, Literal
 
 from alembic.runtime.migration import MigrationContext
-from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
@@ -19,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from applai.database import open_database
 from applai.models import LOCAL_USER_ID, Offer, OfferState
+from applai.scan import Clock, Scanner, ScanRefused, ScanStatus, Watch, local_now, run_scan
 
 # Where the frontend's build lands in a checkout of this repository.
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -66,16 +69,61 @@ def offers(state: OfferState, session: _Session) -> list[OfferSummary]:
     return [OfferSummary.model_validate(row) for row in rows]
 
 
-def create_app(data_dir: Path, frontend_dir: Path = FRONTEND_DIR) -> FastAPI:
-    """The app on the database in data_dir, serving frontend_dir if it exists."""
+class ScanStarted(BaseModel):
+    scan_id: int
+
+
+def _scanner(request: Request) -> Scanner:
+    scanner: Scanner | None = request.app.state.scanner
+    if scanner is None:
+        raise HTTPException(503, "The watch is off: ApplAI was started without it.")
+    return scanner
+
+
+_Scanner = Annotated[Scanner, Depends(_scanner)]
+
+
+@api.get("/scan")
+def scan_status(scanner: _Scanner) -> ScanStatus:
+    return scanner.status()
+
+
+@api.post("/scan", status_code=202)
+def start_scan(scanner: _Scanner) -> ScanStarted:
+    """Start a scan by hand: 409 while one runs, 429 too soon after one without errors."""
+    try:
+        return ScanStarted(scan_id=scanner.start())
+    except ScanRefused as refused:
+        if refused.seconds_left is None:
+            raise HTTPException(409, str(refused)) from None
+        retry = {"Retry-After": str(refused.seconds_left)}
+        raise HTTPException(429, str(refused), headers=retry) from None
+
+
+def create_app(
+    data_dir: Path,
+    frontend_dir: Path = FRONTEND_DIR,
+    watch: Watch | None = None,
+    clock: Clock = local_now,
+) -> FastAPI:
+    """The app on the database in data_dir, serving frontend_dir if it exists.
+
+    Given a watch, it scans on schedule and by hand (applai.scan), at the time clock gives.
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        app.state.engine = open_database(data_dir)
+        app.state.engine = engine = open_database(data_dir)
+        app.state.scanner = None
+        if watch is not None:
+            app.state.scanner = Scanner(engine, partial(run_scan, engine, data_dir, watch), clock)
+            app.state.scanner.start_schedule()
         try:
             yield
         finally:
-            app.state.engine.dispose()
+            if app.state.scanner is not None:
+                app.state.scanner.stop_schedule()
+            engine.dispose()
 
     app = FastAPI(title="ApplAI", lifespan=lifespan)
     app.include_router(api)
