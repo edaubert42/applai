@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -206,6 +207,60 @@ def test_only_validated_facts_whose_diffusion_is_not_never_reach_the_prompt(prof
     ]
     for left_out in facts[2:]:
         assert left_out.text not in spec.input + spec.system_prompt
+
+
+def _with_locations(profile: Profile, locations: tuple[str, ...], stretch: tuple[str, ...]
+) -> Profile:
+    return profile.model_copy(
+        update={
+            "targets": profile.targets.model_copy(update={"locations": locations}),
+            "triage": profile.triage.model_copy(update={"stretch_locations": stretch}),
+        }
+    )
+
+
+def _location_rules(profile: Profile) -> list[str]:
+    """The rules of the prompt's location section, each on one line."""
+    prompt = triage_spec(TITLE, COMPANY, DESCRIPTION, profile).system_prompt
+    section = prompt.split("\nLocation:\n", 1)[1].split("\n\n", 1)[0]
+    return [" ".join(rule.split()) for rule in re.split(r"^- ", section, flags=re.M) if rule]
+
+
+OTHER_PLACES = (
+    "Any other place is judged against the targets, as the other tags are."
+    " A fully remote offer fits only a location that names remote."
+)
+STRETCH = "and the offer scores 70 or more only when everything else fits."
+
+
+def test_the_demo_candidates_places_are_the_prompts_location_rules(profile: Profile):
+    prompt = triage_spec(TITLE, COMPANY, DESCRIPTION, profile).system_prompt
+
+    assert _location_rules(profile) == [
+        'Lyon, Remote in France: the location is "+".',
+        f'Saint-Étienne: the location is "\N{MINUS SIGN}", {STRETCH}',
+        OTHER_PLACES,
+    ]
+    for elsewhere in ("Paris", "Couronne"):
+        assert elsewhere not in prompt
+
+
+def test_a_profile_in_paris_gives_the_rules_the_prompt_used_to_hard_code(profile: Profile):
+    in_paris = _with_locations(profile, ("Paris", "Petite Couronne"), ("Grande Couronne",))
+
+    assert _location_rules(in_paris) == [
+        "Paris, Petite Couronne (Hauts-de-Seine, Seine-Saint-Denis, Val-de-Marne):"
+        ' the location is "+".',
+        "Grande Couronne (Seine-et-Marne, Yvelines, Essonne, Val-d'Oise):"
+        f' the location is "\N{MINUS SIGN}", {STRETCH}',
+        OTHER_PLACES,
+    ]
+
+
+def test_a_profile_with_no_stretch_location_gives_no_minus_location_rule(profile: Profile):
+    no_stretch = _with_locations(profile, ("Lyon",), ())
+
+    assert _location_rules(no_stretch) == ['Lyon: the location is "+".', OTHER_PLACES]
 
 
 @pytest.mark.usefixtures("logged_in_claude")
