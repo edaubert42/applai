@@ -72,6 +72,9 @@ class Offer(Base):
     source: Mapped[str | None]  # where the watch found it: alert_linkedin…
     received_at: Mapped[datetime | None]  # when the job alert listing it was received
     description: Mapped[str | None]  # the offer's text; Triage refuses an offer without it
+    salary: Mapped[str | None]  # as the offer's page gives it
+    logo: Mapped[str | None]  # a file name in the data directory's logos/; none: initials
+    detail_error: Mapped[str | None]  # why the offer's page could not be read (applai.details)
     state: Mapped[str] = mapped_column(server_default="new")
     origin: Mapped[str] = mapped_column(server_default=OfferOrigin.APPLAI)
     # The row's status in the old workflow's Notion database, as text: never a state.
