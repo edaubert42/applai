@@ -32,7 +32,7 @@ targets:
 triage:
   exclude_title_words: [Senior, Lead, Staff, Data Scientist, MLOps, Research]
   max_years_required: 3
-  stretch_locations: [Grande Couronne]  # passes; Triage marks it down
+  stretch_locations: [Saint-Étienne]  # passes; Triage marks it down
 
 # status: validated, to_confirm or forbidden.
 # diffusion: anywhere, applications_only or never.
