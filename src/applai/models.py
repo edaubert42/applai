@@ -115,6 +115,24 @@ class LinkedInRead(Base):
     read_at: Mapped[datetime] = mapped_column(index=True)
 
 
+class Scan(Base):
+    """One run of the watch (applai.scan): the new offers it found and each step's error.
+
+    finished_at stays none while it runs, or if ApplAI stopped during it. Its times are the
+    scan's clock's.
+    """
+
+    __tablename__ = "scans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    by_hand: Mapped[bool]  # else at a slot of the schedule
+    started_at: Mapped[datetime]
+    finished_at: Mapped[datetime | None]
+    new_offers: Mapped[int] = mapped_column(default=0)
+    errors: Mapped[list[str]] = mapped_column(JSON, default=list)  # in plain words
+
+
 class Application(Base):
     __tablename__ = "applications"
 

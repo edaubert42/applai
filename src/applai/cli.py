@@ -1,6 +1,7 @@
 """The applai command.
 
-applai serve runs ApplAI at http://127.0.0.1:8000 until stopped. applai mail login signs
+applai serve runs ApplAI at http://127.0.0.1:8000 until stopped, and the scan with it
+(applai.scan). applai mail login signs
 in to the candidate's mailbox once; applai mail read records the offers of new job alerts.
 """
 
@@ -13,10 +14,13 @@ from pathlib import Path
 import httpx2
 import uvicorn
 
+from applai.agents import AgentRunner, ClaudeCLI
 from applai.app import create_app
 from applai.database import DatabaseError, open_database
-from applai.mail import Mailbox, MailError, read_alerts
+from applai.details import watch_client
+from applai.mail import CLIENT_ID_VARIABLE, Mailbox, MailError, read_alerts
 from applai.profile import DATA_DIR_VARIABLE
+from applai.scan import Watch
 
 BACKUP_DIR_VARIABLE = "APPLAI_BACKUP_DIR"
 HOST = "127.0.0.1"  # this machine only: the app has no authentication
@@ -74,5 +78,10 @@ def server(port: int = DEFAULT_PORT) -> uvicorn.Server:
     ]
     if missing:
         raise SystemExit("\n".join(missing))
-    app = create_app(Path(os.environ[DATA_DIR_VARIABLE]))
+    watch = Watch(
+        http=watch_client(),
+        runner=AgentRunner(ClaudeCLI()),
+        ms_client_id=os.environ.get(CLIENT_ID_VARIABLE),
+    )
+    app = create_app(Path(os.environ[DATA_DIR_VARIABLE]), watch=watch)
     return uvicorn.Server(uvicorn.Config(app, host=HOST, port=port))
