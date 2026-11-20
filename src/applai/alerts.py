@@ -17,9 +17,10 @@ SOURCES = {
     "alerte@emails.hellowork.com": "alert_hellowork",
     "no-reply@notification.prod.jobteaser.net": "alert_jobteaser",
     "emploi@alertes.lesjeudis.com": "alert_lesjeudis",
+    "notify-noreply@google.com": "alert_google",
 }
 # Sources whose links are click-tracking redirects: the offer is where they lead.
-REDIRECTED = {"alert_wttj", "alert_hellowork", "alert_jobteaser"}
+REDIRECTED = {"alert_wttj", "alert_hellowork", "alert_jobteaser", "alert_google"}
 
 _VOID = {
     "area",
@@ -127,6 +128,20 @@ def _lesjeudis(card: _Card) -> AlertOffer:
     return AlertOffer(card.links[0], card.texts[0], company, location, None)
 
 
+def _google(card: _Card) -> AlertOffer:
+    # Title, company, location, then "via <job board>"; a logo may add a letter before them.
+    via = next(i for i, text in enumerate(card.texts) if text.startswith("via "))
+    if via < 3:
+        raise ValueError("title, company or location missing")
+    title, company, location = card.texts[via - 3 : via]
+    return AlertOffer(card.links[0], title, company, location, None)
+
+
+def _google_card(tag: str, attributes: dict[str, str]) -> bool:
+    # The offers are the cells with a bottom border; the header and the footer have none.
+    return tag == "td" and "border-bottom: 1px solid #E5E5E5" in attributes.get("style", "")
+
+
 _READERS: dict[str, tuple[_IsCard, Callable[[_Card], AlertOffer]]] = {
     "alert_linkedin": (_with("data-test-id", "job-card"), _linkedin),
     "alert_wttj": (_with("class", "job-item"), _company_title_contract_location),
@@ -138,6 +153,7 @@ _READERS: dict[str, tuple[_IsCard, Callable[[_Card], AlertOffer]]] = {
         ),
         _lesjeudis,
     ),
+    "alert_google": (_google_card, _google),
 }
 
 
