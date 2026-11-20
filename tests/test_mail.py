@@ -59,6 +59,10 @@ EXPECTED = {
         ("https://lesjeudis.com/offers/0000x00x-0x00-000x-x00x-00xxxx364517",
          "Consultant junior AI Engineer - F/H/N", "Octaval Conseil", "Paris", None),
     ]),
+    "google": (4, [
+        (None, "Data Engineer Junior - Plateforme Média F/H", "Héron Data", "Paris, France", None),
+        (None, "Analytics Engineer", "Banque Ortolan", "Île-de-France, France", None),
+    ]),
 }  # fmt: skip
 
 
@@ -385,3 +389,18 @@ def test_offers_that_differ_only_by_their_query_stay_two_offers_without_the_trac
     assert len(urls) == 2
     assert all(url.startswith(f"https://{OFFER_SITE}/offer?id=") for url in urls)
     assert all("utm_source" not in url and "#" not in url for url in urls)
+
+
+def test_two_google_offers_with_the_same_title_and_company_in_two_places_stay_two_offers(
+    tmp_path: Path, microsoft: FakeMicrosoft, engine: Engine
+):
+    microsoft.mails.append(_alert("google"))
+
+    read_alerts(engine, _signed_in(tmp_path, microsoft))
+
+    same = [offer for offer in _offers(engine) if offer.company == "Pinson Médias"]
+    assert [(offer.title, offer.location) for offer in same] == [
+        ("Data Engineer Streaming - Paris (H/F)", "Saint-Denis, France"),
+        ("Data Engineer Streaming - Paris (H/F)", "Nanterre, France"),
+    ]
+    assert same[0].url != same[1].url

@@ -21,7 +21,10 @@ from sqlalchemy.orm import Session
 
 from applai.database import open_database
 from applai.models import LOCAL_USER_ID, Offer, OfferState
+from applai.orchestrator import TransitionError
+from applai.review import Card, DecisionRequest, OfferNotFound, View, cards, decide
 from applai.scan import Clock, Scanner, ScanRefused, ScanStatus, Watch, local_now, run_scan
+from applai.settings import SettingsError, review_min_score
 
 # Where the frontend's build lands in a checkout of this repository.
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -40,6 +43,18 @@ class OfferSummary(BaseModel):
     title: str
     company: str
     state: OfferState
+
+
+class LabelRecorded(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    offer_id: int
+    level: str
+    decision: str
+    reasons: list[str]
+    note: str | None
+    correction: bool
 
 
 def _session(request: Request) -> Iterator[Session]:
@@ -67,6 +82,37 @@ def offers(state: OfferState, session: _Session) -> list[OfferSummary]:
         .order_by(Offer.created_at.desc(), Offer.id.desc())
     )
     return [OfferSummary.model_validate(row) for row in rows]
+
+
+def _min_score(request: Request) -> int:
+    try:
+        return review_min_score(request.app.state.data_dir)
+    except SettingsError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from None
+
+
+_MinScore = Annotated[int, Depends(_min_score)]
+
+
+@api.get("/review")
+def review(view: View, session: _Session, min_score: _MinScore) -> list[Card]:
+    """The cards of one view of the To review screen."""
+    return cards(session, LOCAL_USER_ID, view, min_score)
+
+
+@api.post("/offers/{offer_id}/decision", status_code=201)
+def decision(
+    offer_id: int, body: DecisionRequest, session: _Session, min_score: _MinScore
+) -> LabelRecorded:
+    """Record the candidate's decision on an offer as a label, and move the offer."""
+    try:
+        with session.begin():
+            label = decide(session, LOCAL_USER_ID, offer_id, body, min_score)
+            return LabelRecorded.model_validate(label)
+    except OfferNotFound:
+        raise HTTPException(status_code=404, detail="no such offer") from None
+    except TransitionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
 
 
 class ScanStarted(BaseModel):
@@ -113,6 +159,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+        app.state.data_dir = data_dir
         app.state.engine = engine = open_database(data_dir)
         app.state.scanner = None
         if watch is not None:
