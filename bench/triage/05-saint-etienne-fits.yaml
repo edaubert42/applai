@@ -1,0 +1,9 @@
+title: Data engineer
+company: Ardoise Mobilité
+description: >-
+  Ardoise Mobilité gère des flottes de vélos en libre-service. CDI à Saint-Étienne, deux
+  jours de télétravail par semaine. Vous construirez les pipelines qui suivent les trajets
+  et la maintenance des vélos, en Python et SQL sur Airflow. Trois ans d'expérience.
+  Salaire : 57 000 € brut par an.
+expected: accept
+trap: stretch location
