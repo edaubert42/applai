@@ -10,6 +10,7 @@ dependencies = [
     "fastapi>=0.165.0",
     "httpx2>=2.16.2",
     "jsonschema>=4.26.0",
+    "mcp>=2.3.0",
     "msal>=1.39.0",
     "pydantic>=2.14.3",
     "pyyaml>=6.0.3",
