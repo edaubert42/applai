@@ -237,6 +237,29 @@ def test_each_steps_error_is_recorded_and_returned_and_the_other_offers_go_on(
     assert states == {broken: "new", kept: "triaged"}
 
 
+def test_a_triage_error_is_recorded_and_the_other_offers_go_on(
+    data_dir: Path, network: Network, app: FastAPI
+):
+    page = f'<script type="application/ld+json">{json.dumps(POSTING)}</script>'
+    network.pages[f"{SITE}/first"] = (200, page)
+    network.pages[f"{SITE}/second"] = (200, page)
+    first, second = _seed(data_dir, _offer("first"), _offer("second"))  # one card is scripted
+
+    with TestClient(app) as client:
+        _scanner(client).wait()
+        status = client.get("/api/scan").json()
+
+    errors = status["last_scan"]["errors"]
+    assert len(errors) == 2  # Outlook is not set up, and the second offer's triage
+    assert errors[1].startswith(f"Offer {second} was not triaged: ")
+    assert _scans(data_dir)[0].errors == errors
+    engine = open_database(data_dir)
+    with Session(engine) as session:
+        states = {offer.id: offer.state for offer in session.scalars(select(Offer))}
+    engine.dispose()
+    assert states == {first: "triaged", second: "described"}
+
+
 def test_the_slots_follow_the_clock_given_without_sleeping(
     data_dir: Path, clock: Clock, app: FastAPI
 ):
