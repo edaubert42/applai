@@ -271,3 +271,10 @@ def test_the_triages_migration_keeps_every_offer_with_no_description(
     with Session(engine) as session:
         offer = session.scalars(select(Offer)).one()
         assert (offer.url, offer.state, offer.description) == (OFFER_URL, "described", None)
+
+
+def test_migrations_head_names_the_last_migration():
+    # Two PRs that each add a migration both edit this file, so Git shows the second one
+    # in conflict instead of letting both merge into two heads.
+    written = (Path(__file__).parents[1] / "src/applai/migrations/HEAD").read_text().strip()
+    assert written == _head(), f"Write {_head()} in src/applai/migrations/HEAD"
