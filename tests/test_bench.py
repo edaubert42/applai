@@ -130,10 +130,10 @@ def test_the_threshold_comes_from_the_settings_and_min_score_overrides_it(
         [line] = [line for line in out.splitlines() if "Recall:" in line]
         return line
 
-    assert "100.0 %" in recall()  # 50 passes the default, 40
+    assert "Recall: 100.0 %" in recall()  # 50 passes the default, 40
     (data_dir / "settings.yaml").write_text("review_min_score: 60\n")
-    assert "0.0 %" in recall()
-    assert "100.0 %" in recall("--min-score", "45")
+    assert "Recall: 0.0 %" in recall()
+    assert "Recall: 100.0 %" in recall("--min-score", "45")
 
 
 def test_private_output_holds_no_title_company_or_text_of_a_case(
