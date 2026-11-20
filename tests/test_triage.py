@@ -209,7 +209,8 @@ def test_only_validated_facts_whose_diffusion_is_not_never_reach_the_prompt(prof
         assert left_out.text not in spec.input + spec.system_prompt
 
 
-def _with_locations(profile: Profile, locations: tuple[str, ...], stretch: tuple[str, ...]
+def _with_locations(
+    profile: Profile, locations: tuple[str, ...], stretch: tuple[str, ...]
 ) -> Profile:
     return profile.model_copy(
         update={
