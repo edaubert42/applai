@@ -35,7 +35,7 @@ TIMEOUT = 20.0  # seconds
 USER_AGENT = f"ApplAI/{version('applai')}"
 MAX_LOGO_BYTES = 1_000_000
 # Raster images only: an SVG can hold scripts.
-_IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
+IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
                 "image/webp": ".webp", "image/x-icon": ".ico",
                 "image/vnd.microsoft.icon": ".ico"}  # fmt: skip
 _SKIPPED = {"head", "script", "style", "noscript", "template", "svg", "nav", "header", "footer"}
@@ -175,10 +175,10 @@ def _logo(http: httpx2.Client, company: str, candidates: list[str], logos: Path)
             continue
         kind = response.headers.get("content-type", "").split(";")[0].strip().lower()
         size = len(response.content)
-        if response.is_success and kind in _IMAGE_TYPES and 0 < size <= MAX_LOGO_BYTES:
+        if response.is_success and kind in IMAGE_TYPES and 0 < size <= MAX_LOGO_BYTES:
             logos.mkdir(parents=True, exist_ok=True)
-            (logos / f"{stem}{_IMAGE_TYPES[kind]}").write_bytes(response.content)
-            return f"{stem}{_IMAGE_TYPES[kind]}"
+            (logos / f"{stem}{IMAGE_TYPES[kind]}").write_bytes(response.content)
+            return f"{stem}{IMAGE_TYPES[kind]}"
     return None
 
 
