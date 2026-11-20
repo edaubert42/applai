@@ -65,6 +65,10 @@ class Offer(Base):
     company: Mapped[str]
     location: Mapped[str | None]  # this and contract as the source gives them
     contract: Mapped[str | None]
+    work_mode: Mapped[str | None]  # remote, hybrid or onsite; none when unknown
+    years_required: Mapped[int | None]
+    screened_rule: Mapped[str | None]  # the rule that set it aside (applai.screening)
+    screen_note: Mapped[str | None]  # remote or grande_couronne: Triage marks it down
     source: Mapped[str | None]  # where the watch found it: alert_linkedin…
     received_at: Mapped[datetime | None]  # when the job alert listing it was received
     description: Mapped[str | None]  # the offer's text; Triage refuses an offer without it
