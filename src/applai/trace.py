@@ -49,17 +49,19 @@ def record_run(
     offer_id: int,
     application_id: int | None,
     run: Run,
-) -> None:
+) -> int:
+    """Record the run and return the id of its row."""
     with Session(database) as session, session.begin():
         user_id = session.scalars(select(Offer.user_id).where(Offer.id == offer_id)).one()
-        session.add(
-            AgentRun(
-                user_id=user_id,
-                offer_id=offer_id,
-                application_id=application_id,
-                **run.model_dump(),
-            )
+        row = AgentRun(
+            user_id=user_id,
+            offer_id=offer_id,
+            application_id=application_id,
+            **run.model_dump(),
         )
+        session.add(row)
+        session.flush()
+        return row.id
 
 
 def trace(database: Engine, offer_id: int) -> Trace:

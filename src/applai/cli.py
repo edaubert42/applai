@@ -1,13 +1,21 @@
-"""The applai command. applai serve runs ApplAI at http://127.0.0.1:8000 until stopped."""
+"""The applai command.
+
+applai serve runs ApplAI at http://127.0.0.1:8000 until stopped. applai mail login signs
+in to the candidate's mailbox once; applai mail read records the offers of new job alerts.
+"""
 
 import argparse
 import os
 from collections.abc import Sequence
+from contextlib import nullcontext
 from pathlib import Path
 
+import httpx2
 import uvicorn
 
 from applai.app import create_app
+from applai.database import DatabaseError, open_database
+from applai.mail import Mailbox, MailError, read_alerts
 from applai.profile import DATA_DIR_VARIABLE
 
 BACKUP_DIR_VARIABLE = "APPLAI_BACKUP_DIR"
@@ -20,13 +28,41 @@ _DIRECTORIES = {
 }
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(argv: Sequence[str] | None = None, http: httpx2.Client | None = None) -> None:
+    """Run the command argv names; http, the client for the network, is for tests."""
     parser = argparse.ArgumentParser(prog="applai")
     commands = parser.add_subparsers(dest="command", required=True)
     serve = commands.add_parser("serve", help=f"run ApplAI on {HOST}")
     serve.add_argument("--port", type=int, default=DEFAULT_PORT)
+    mail = commands.add_parser("mail", help="the mailbox of job alerts, read-only")
+    mail_commands = mail.add_subparsers(dest="mail_command", required=True)
+    mail_commands.add_parser("login", help="sign in to the Outlook.com mailbox once")
+    mail_commands.add_parser("read", help="record the offers of the alerts not read yet")
     arguments = parser.parse_args(argv)
-    server(arguments.port).run()
+    if arguments.command == "serve":
+        server(arguments.port).run()
+        return
+    try:
+        with httpx2.Client() if http is None else nullcontext(http) as client:
+            _mail(arguments.mail_command, client)
+    except (MailError, DatabaseError) as error:
+        raise SystemExit(str(error)) from None
+
+
+def _mail(command: str, http: httpx2.Client) -> None:
+    mailbox = Mailbox.from_environment(http)
+    if command == "login":
+        mailbox.login(print)
+        print("Signed in: ApplAI can now read the job alerts.")
+        return
+    engine = open_database()
+    try:
+        reading = read_alerts(engine, mailbox)
+    finally:
+        engine.dispose()
+    print(f"{reading.offers} new offers from {reading.alerts} job alerts.")
+    for error in reading.errors:
+        print(f"Not read: {error}")
 
 
 def server(port: int = DEFAULT_PORT) -> uvicorn.Server:

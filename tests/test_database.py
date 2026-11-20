@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from applai.database import BUSY_TIMEOUT_MS, DatabaseError, open_database
 from applai.models import Application, Base, Offer
 
-TABLES = {"offers", "applications", "state_changes", "agent_runs"}
+TABLES = {"offers", "applications", "state_changes", "agent_runs", "triages", "mails_read"}
 OFFER_URL = "https://jobs.example.org/brindille-logistique/data-engineer"
 
 type Opener = Callable[..., Engine]
@@ -241,6 +241,29 @@ def test_the_agent_runs_migration_only_adds_its_table(tmp_path: Path, open_db: O
     assert _revision(tmp_path / "applai.db") == _head()
     after = set(inspect(engine).get_table_names())
     assert {"agent_runs"} <= after
-    assert after - {"agent_runs"} <= before  # nothing else is new
+    assert after - {"agent_runs", "triages", "mails_read"} <= before  # later migrations add these
     with Session(engine) as session:
         assert session.scalars(select(Offer.url)).all() == [OFFER_URL]
+
+
+def test_the_triages_migration_keeps_every_offer_with_no_description(
+    tmp_path: Path, open_db: Opener
+):
+    with open_db(tmp_path).begin() as connection:
+        command.downgrade(_alembic(connection), "0002")
+    with closing(sqlite3.connect(tmp_path / "applai.db")) as connection, connection:
+        connection.execute(
+            "INSERT INTO offers (user_id, url, title, company, state, created_at, updated_at)"
+            " VALUES (1, ?, 'Data engineer', 'Brindille Logistique', 'described', ?, ?)",
+            (OFFER_URL, "2026-11-19", "2026-11-19"),
+        )
+        before = {name for (name,) in connection.execute("SELECT name FROM sqlite_master")}
+    assert "triages" not in before
+
+    engine = open_db(tmp_path)
+
+    after = set(inspect(engine).get_table_names())
+    assert after - {"triages", "mails_read"} <= before  # mails_read comes from 0004
+    with Session(engine) as session:
+        offer = session.scalars(select(Offer)).one()
+        assert (offer.url, offer.state, offer.description) == (OFFER_URL, "described", None)
