@@ -2,9 +2,10 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
+from typing import Any
 
 import pytest
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, bindparam, func, select, update
 from sqlalchemy.orm import Session
 
 from applai.database import open_database
@@ -169,6 +170,7 @@ def test_no_agent_actor_can_reach_a_gate_state(engine: Engine, kind: str):
                         move(session, item, gate, actor)
 
                     assert _stored_state(session, item) == origin
+                    assert session.scalar(select(func.count()).select_from(StateChange)) == 0
 
 
 @pytest.mark.parametrize("origin", ["triaged", "later", "screened_out"])
@@ -263,3 +265,51 @@ def test_a_state_assigned_outside_move_is_refused_at_flush(engine: Engine):
         session.rollback()
 
         assert _stored_state(session, offer) == "triaged"
+
+
+def _core_update(item: Item, form: str, run: str, column: str, value: object) -> tuple[Any, Any]:
+    """A Core UPDATE of item that sets column to value, and the parameters to run it with.
+
+    form "values" sets it in the statement; "parameters" in the parameters it runs with.
+    """
+    model = type(item)
+    if form == "values":
+        return update(model).where(model.id == item.id).values({column: value}), None
+    if run == "session":  # the ORM's bulk update by primary key
+        return update(model), [{"id": item.id, column: value}]
+    statement = update(model).where(model.id == bindparam("item_id"))
+    return statement, [{"item_id": item.id, column: value}]
+
+
+@pytest.mark.parametrize(
+    ("kind", "origin", "gate"),
+    [("offer", "triaged", "accepted"), ("application", "drafted", "sent")],
+)
+@pytest.mark.parametrize("form", ["values", "parameters"])
+@pytest.mark.parametrize("run", ["session", "connection"])
+def test_a_core_update_setting_a_state_outside_move_is_refused(
+    engine: Engine, kind: str, origin: str, gate: str, form: str, run: str
+):
+    with Session(engine) as session:
+        item = _item(session, kind, origin)
+        session.commit()
+        model, item_id = type(item), item.id
+
+        def execute(column: str, value: object) -> None:
+            statement, parameters = _core_update(item, form, run, column, value)
+            if run == "session":
+                session.execute(statement, parameters)
+            else:
+                session.connection().execute(statement, parameters)
+
+        with pytest.raises(ValueError, match="move"):
+            execute("state", gate)
+        session.rollback()
+
+        assert _stored_state(session, item) == origin
+        assert session.scalar(select(func.count()).select_from(StateChange)) == 0
+
+        # The guard is about the state: the same UPDATE of another column goes through.
+        execute("user_id", 2)
+        session.commit()
+        assert session.scalar(select(model.user_id).where(model.id == item_id)) == 2
