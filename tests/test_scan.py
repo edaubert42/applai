@@ -145,7 +145,7 @@ def test_at_startup_after_a_missed_slot_one_scan_runs(data_dir: Path, app: FastA
     last.finished_at = None if cut_off else last.finished_at  # ApplAI stopped during it
     _seed(data_dir, last)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         _scanner(client).wait()
 
     scans = _scans(data_dir)
@@ -157,7 +157,7 @@ def test_at_startup_after_a_missed_slot_one_scan_runs(data_dir: Path, app: FastA
 def test_at_startup_after_a_slot_already_done_no_scan_runs(data_dir: Path, app: FastAPI):
     _seed(data_dir, _scan(datetime(2026, 11, 20, 8, 31, tzinfo=PARIS)))
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         _scanner(client).wait()
         assert client.get("/api/scan").json()["running"] is False
 
@@ -169,7 +169,7 @@ def test_a_scan_by_hand_10_minutes_after_a_clean_scan_is_refused_with_the_time_l
 ):
     _seed(data_dir, _scan(NOON - timedelta(minutes=15)))  # ended at 11:50
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.post("/api/scan")
 
     assert response.status_code == 429
@@ -183,7 +183,7 @@ def test_right_after_a_clean_scan_the_status_gives_the_seconds_before_a_manual_s
 ):
     _seed(data_dir, _scan(NOON - timedelta(minutes=15)))  # ended at 11:50
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         _scanner(client).wait()
         in_20_minutes = client.get("/api/scan").json()["manual_scan_in_s"]
         clock.now = NOON + timedelta(minutes=20, seconds=1)
@@ -195,7 +195,7 @@ def test_right_after_a_clean_scan_the_status_gives_the_seconds_before_a_manual_s
 def test_after_a_scan_with_errors_the_status_allows_a_manual_scan_now(data_dir: Path, app: FastAPI):
     _seed(data_dir, _scan(NOON - timedelta(minutes=15), ["Outlook connection expired."]))
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         _scanner(client).wait()
         status = client.get("/api/scan").json()
 
@@ -205,7 +205,7 @@ def test_after_a_scan_with_errors_the_status_allows_a_manual_scan_now(data_dir: 
 def test_a_scan_by_hand_after_a_scan_with_an_error_starts(data_dir: Path, app: FastAPI):
     _seed(data_dir, _scan(NOON - timedelta(minutes=15), ["Outlook connection expired."]))
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.post("/api/scan")
         _scanner(client).wait()
 
@@ -215,11 +215,24 @@ def test_a_scan_by_hand_after_a_scan_with_an_error_starts(data_dir: Path, app: F
     assert scans[1].by_hand and scans[1].finished_at is not None
 
 
+def test_a_scan_by_hand_posted_from_another_site_is_refused(data_dir: Path, app: FastAPI):
+    _seed(data_dir, _scan(NOON - timedelta(minutes=15), ["Outlook connection expired."]))
+
+    with TestClient(app, base_url="http://localhost:8000") as client:
+        response = client.post("/api/scan", headers={"Origin": "https://evil.example"})
+        _scanner(client).wait()
+
+    assert response.status_code == 403
+    assert len(_scans(data_dir)) == 1
+
+
 def test_a_second_scan_is_refused_while_one_runs(data_dir: Path, network: Network, app: FastAPI):
     _seed(data_dir, _offer("data-engineer"))
     network.held.add(f"{SITE}/data-engineer")
 
-    with TestClient(app) as client:  # the startup scan reaches the offer's page and waits
+    with TestClient(
+        app, base_url="http://127.0.0.1"
+    ) as client:  # the startup scan reaches the offer's page and waits
         assert network.reached.wait(10)
         refused = client.post("/api/scan")
         running = client.get("/api/scan").json()["running"]
@@ -242,7 +255,7 @@ def test_each_steps_error_is_recorded_and_returned_and_the_other_offers_go_on(
     network.pages[f"{SITE}/data-engineer"] = (200, page)
     broken, kept = _seed(data_dir, _offer("broken"), _offer("data-engineer"))
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         _scanner(client).wait()
         status = client.get("/api/scan").json()
 
@@ -269,7 +282,7 @@ def test_a_triage_error_is_recorded_and_the_other_offers_go_on(
     network.pages[f"{SITE}/second"] = (200, page)
     first, second = _seed(data_dir, _offer("first"), _offer("second"))  # one card is scripted
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         _scanner(client).wait()
         status = client.get("/api/scan").json()
 
@@ -290,7 +303,7 @@ def test_the_slots_follow_the_clock_given_without_sleeping(
     clock.now = datetime(2026, 11, 20, 8, 0, tzinfo=PARIS)
     _seed(data_dir, _scan(datetime(2026, 11, 19, 17, 31, tzinfo=PARIS)))
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.get("/api/scan").json()["next_slot"] == "2026-11-20T08:30:00+01:00"
         assert _scanner(client).tick() is None  # 08:30 has not come yet
         clock.now = datetime(2026, 11, 20, 8, 30, tzinfo=PARIS)
@@ -304,7 +317,7 @@ def test_the_slots_follow_the_clock_given_without_sleeping(
 
 
 def test_the_status_gives_the_linkedin_reads_of_the_day_and_their_limit(app: FastAPI):
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         _scanner(client).wait()
         status = client.get("/api/scan").json()
 
@@ -312,6 +325,7 @@ def test_the_status_gives_the_linkedin_reads_of_the_day_and_their_limit(app: Fas
 
 
 def test_without_a_watch_the_app_does_not_scan(tmp_path: Path):
-    with TestClient(create_app(tmp_path, frontend_dir=tmp_path / "none")) as client:
+    app = create_app(tmp_path, frontend_dir=tmp_path / "none")
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.post("/api/scan").status_code == 503
         assert client.get("/api/scan").status_code == 503

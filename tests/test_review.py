@@ -38,7 +38,8 @@ def engine(tmp_path: Path) -> Iterator[Engine]:
 
 @pytest.fixture
 def client(tmp_path: Path, engine: Engine) -> Iterator[TestClient]:
-    with TestClient(create_app(tmp_path, frontend_dir=tmp_path / "no-frontend")) as client:
+    app = create_app(tmp_path, frontend_dir=tmp_path / "no-frontend")
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         yield client
 
 
