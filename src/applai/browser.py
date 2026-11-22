@@ -7,13 +7,11 @@ routes (applai.app.SameOriginWrites). A page received describes its offer as a p
 HTTP would, then the offer is triaged in the background, not at the next scan.
 """
 
-from collections.abc import Iterator
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -45,14 +43,6 @@ class BrowserStatus(BaseModel):
     last_asked_at: datetime | None
 
 
-def _session(request: Request) -> Iterator[Session]:
-    with Session(request.app.state.engine) as session:
-        yield session
-
-
-_Session = Annotated[Session, Depends(_session)]
-
-
 def _waiting(offer: Offer) -> bool:
     return (
         offer.user_id == LOCAL_USER_ID
@@ -63,36 +53,36 @@ def _waiting(offer: Offer) -> bool:
 
 
 @router.get("/pages")
-def pages(request: Request, session: _Session) -> list[PageToRead]:
+def pages(request: Request) -> list[PageToRead]:
     """The pages waiting for the extension; the time of this ask is kept for the status."""
     request.app.state.extension_asked_at = request.app.state.clock()
-    new = session.scalars(select(Offer).where(Offer.state == OfferState.NEW).order_by(Offer.id))
-    return [PageToRead(offer_id=offer.id, url=offer.url) for offer in new if _waiting(offer)]
+    with Session(request.app.state.engine) as session:
+        new = session.scalars(select(Offer).where(Offer.state == OfferState.NEW).order_by(Offer.id))
+        return [PageToRead(offer_id=offer.id, url=offer.url) for offer in new if _waiting(offer)]
 
 
 @router.post("/pages/{offer_id}", status_code=204)
-def page_sent(
-    offer_id: int, body: PageSent, request: Request, session: _Session, later: BackgroundTasks
-) -> None:
+def page_sent(offer_id: int, body: PageSent, request: Request, later: BackgroundTasks) -> None:
     """Describe a waiting offer from its page's HTML, then triage it in the background."""
     watch: Watch | None = request.app.state.watch
     if watch is None:
         raise HTTPException(503, "The watch is off: ApplAI was started without it.")
-    offer = session.get(Offer, offer_id)
-    if offer is None or offer.user_id != LOCAL_USER_ID:
-        raise HTTPException(404, "no such offer")
-    if not _waiting(offer):
-        raise HTTPException(409, f"Offer {offer_id} is not waiting for its page.")
-    data_dir: Path = request.app.state.data_dir
-    try:
-        describe_offer(session, offer, data_dir, watch.http, body.html)
-    except PageError as error:
-        session.commit()  # the error, kept on the offer
-        raise HTTPException(422, f"The page was not read: {error}.") from None
-    except TransitionError as error:  # a scan set it aside meanwhile
-        raise HTTPException(409, str(error)) from None
-    session.commit()
-    later.add_task(_triage, request.app.state.engine, data_dir, watch.runner, offer_id)
+    engine, data_dir = request.app.state.engine, request.app.state.data_dir
+    with Session(engine) as session:
+        offer = session.get(Offer, offer_id)
+        if offer is None or offer.user_id != LOCAL_USER_ID:
+            raise HTTPException(404, "no such offer")
+        if not _waiting(offer):
+            raise HTTPException(409, f"Offer {offer_id} is not waiting for its page.")
+        try:
+            describe_offer(session, offer, data_dir, watch.http, body.html)
+        except PageError as error:
+            session.commit()  # the error, kept on the offer
+            raise HTTPException(422, f"The page was not read: {error}.") from None
+        except TransitionError as error:  # a scan set it aside meanwhile
+            raise HTTPException(409, str(error)) from None
+        session.commit()
+    later.add_task(_triage, engine, data_dir, watch.runner, offer_id)
 
 
 def _triage(engine: Engine, data_dir: Path, runner: AgentRunner, offer_id: int) -> None:
@@ -107,5 +97,5 @@ def status(request: Request) -> BrowserStatus:
     asked: datetime | None = request.app.state.extension_asked_at
     if asked is None:
         return BrowserStatus(connected=False, last_asked_at=None)
-    connected = request.app.state.clock() - asked <= CONNECTED_FOR
-    return BrowserStatus(connected=connected, last_asked_at=asked.astimezone(UTC))
+    lately = request.app.state.clock() - asked <= CONNECTED_FOR
+    return BrowserStatus(connected=lately, last_asked_at=asked.astimezone(UTC))

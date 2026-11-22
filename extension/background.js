@@ -5,13 +5,8 @@
 export const APPLAI = "http://127.0.0.1:8000"; // applai serve's address
 const READ = "read-pages";
 
-// The sites it reads; the manifest's host permissions give no other one.
-function readable(url) {
-  const { protocol, hostname } = new URL(url);
-  return protocol === "https:" && (hostname === "jobteaser.com" || hostname.endsWith(".jobteaser.com"));
-}
-
 // Ask ApplAI for the pages to read, fetch each with the browser's cookies, send back its HTML.
+// Only JobTeaser's, as the manifest's host permissions.
 // A page that fails is asked for again at the next minute.
 export async function readPages(fetch = globalThis.fetch) {
   let pages;
@@ -24,7 +19,8 @@ export async function readPages(fetch = globalThis.fetch) {
   }
   for (const { offer_id, url } of pages) {
     try {
-      if (!readable(url)) continue;
+      const { protocol, hostname } = new URL(url);
+      if (protocol !== "https:" || !`.${hostname}`.endsWith(".jobteaser.com")) continue;
       const page = await fetch(url, { credentials: "include" });
       if (!page.ok) continue;
       await fetch(`${APPLAI}/api/browser/pages/${offer_id}`, {

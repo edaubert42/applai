@@ -1,4 +1,4 @@
-// The extension's loop, run by `node --test extension/` with fetch mocked.
+// The extension's loop with fetch mocked, run by Node's test runner (tests/test_extension.py).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -6,40 +6,29 @@ import { APPLAI, readPages } from "./background.js";
 
 const OFFER = "https://ecole-des-tilleuls.jobteaser.com/fr/job-offers/4521-data-engineer";
 
-function network(pages) {
+async function readWith(pages) {
   const calls = [];
-  const fetch = async (url, options = {}) => {
+  await readPages(async (url, options) => {
     calls.push([url, options]);
     if (url === `${APPLAI}/api/browser/pages`) return Response.json(pages);
-    if (url.startsWith(APPLAI)) return new Response(null, { status: 204 });
-    return new Response(`<html>${url}</html>`);
-  };
-  return { calls, fetch };
+    return new Response(url.startsWith(APPLAI) ? null : `<html>${url}</html>`);
+  });
+  return calls;
 }
 
 test("it asks ApplAI, fetches each page with the browser's session, and posts its HTML", async () => {
-  const { calls, fetch } = network([{ offer_id: 7, url: OFFER }]);
+  const html = JSON.stringify({ html: `<html>${OFFER}</html>` });
+  const headers = { "Content-Type": "application/json" };
 
-  await readPages(fetch);
-
-  assert.deepEqual(calls, [
+  assert.deepEqual(await readWith([{ offer_id: 7, url: OFFER }]), [
     [`${APPLAI}/api/browser/pages`, {}],
     [OFFER, { credentials: "include" }],
-    [
-      `${APPLAI}/api/browser/pages/7`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: `<html>${OFFER}</html>` }),
-      },
-    ],
+    [`${APPLAI}/api/browser/pages/7`, { method: "POST", headers, body: html }],
   ]);
 });
 
 test("it fetches no page outside JobTeaser, whatever ApplAI asks", async () => {
-  const { calls, fetch } = network([{ offer_id: 8, url: "https://jobs.example.org/8" }]);
-
-  await readPages(fetch);
+  const calls = await readWith([{ offer_id: 8, url: "https://jobs.example.org/8" }]);
 
   assert.deepEqual(calls, [[`${APPLAI}/api/browser/pages`, {}]]);
 });

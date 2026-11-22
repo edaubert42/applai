@@ -2,7 +2,6 @@
 
 import json
 import shutil
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -48,26 +47,6 @@ CARD = {
 }  # fmt: skip
 
 
-class Clock:
-    def __init__(self, now: datetime) -> None:
-        self.now = now
-
-    def __call__(self) -> datetime:
-        return self.now
-
-
-class Network:
-    """Every page serves PAGE; the URLs asked for are kept."""
-
-    def __init__(self) -> None:
-        self.asked: list[str] = []
-        self.client = httpx2.Client(transport=httpx2.MockTransport(self._handle))
-
-    def _handle(self, request: httpx2.Request) -> httpx2.Response:
-        self.asked.append(str(request.url))
-        return httpx2.Response(200, text=PAGE, headers={"Content-Type": "text/html"})
-
-
 @pytest.fixture
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     shutil.copy(DEMO_DIR / "profile.yaml", tmp_path)
@@ -77,21 +56,28 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def network() -> Network:
-    return Network()
+def asked() -> list[str]:
+    """The URLs ApplAI asks the network for; every one answers PAGE."""
+    return []
 
 
 @pytest.fixture
-def clock() -> Clock:
-    return Clock(NOON)
+def now() -> list[datetime]:
+    """The time the app sees, now[0], moved by a test."""
+    return [NOON]
 
 
 @pytest.fixture
-def app(data_dir: Path, network: Network, clock: Clock) -> Iterator[FastAPI]:
+def app(data_dir: Path, asked: list[str], now: list[datetime]) -> FastAPI:
+    def serve(request: httpx2.Request) -> httpx2.Response:
+        asked.append(str(request.url))
+        return httpx2.Response(200, text=PAGE, headers={"Content-Type": "text/html"})
+
     usage = Usage(model=TRIAGE_MODEL, input_tokens=900, output_tokens=300)
     runner = AgentRunner(FakeBackend([AgentResult(output=CARD, usage=usage)]))
-    watch = Watch(http=network.client, runner=runner, ms_client_id=None)
-    yield create_app(data_dir, frontend_dir=data_dir / "none", watch=watch, clock=clock)
+    http = httpx2.Client(transport=httpx2.MockTransport(serve))
+    watch = Watch(http=http, runner=runner, ms_client_id=None)
+    return create_app(data_dir, frontend_dir=data_dir / "none", watch=watch, clock=lambda: now[0])
 
 
 def _seed(data_dir: Path, *urls: str, state: str = "new", scanned: bool = True) -> list[int]:
@@ -120,7 +106,7 @@ def _offers(data_dir: Path) -> dict[int, Offer]:
 
 
 def test_a_scan_leaves_a_jobteaser_offer_new_unread_and_lists_it_for_the_extension(
-    data_dir: Path, network: Network, app: FastAPI
+    data_dir: Path, asked: list[str], app: FastAPI
 ):
     jobteaser, other = _seed(data_dir, JOBTEASER, SITE, scanned=False)
 
@@ -128,16 +114,15 @@ def test_a_scan_leaves_a_jobteaser_offer_new_unread_and_lists_it_for_the_extensi
         app.state.scanner.wait()
         pages = client.get("/api/browser/pages", headers=EXTENSION)
 
-    assert JOBTEASER not in network.asked
-    assert SITE in network.asked
+    assert JOBTEASER not in asked
+    assert SITE in asked
     states = {id_: offer.state for id_, offer in _offers(data_dir).items()}
     assert states == {jobteaser: "new", other: "triaged"}
-    assert pages.status_code == 200
     assert pages.json() == [{"offer_id": jobteaser, "url": JOBTEASER}]
 
 
 def test_a_page_sent_by_the_extension_describes_the_offer_then_triages_it(
-    data_dir: Path, network: Network, app: FastAPI
+    data_dir: Path, asked: list[str], app: FastAPI
 ):
     (offer_id,) = _seed(data_dir, JOBTEASER)
 
@@ -145,7 +130,7 @@ def test_a_page_sent_by_the_extension_describes_the_offer_then_triages_it(
         sent = client.post(f"/api/browser/pages/{offer_id}", json={"html": PAGE}, headers=EXTENSION)
 
     assert sent.status_code == 204
-    assert JOBTEASER not in network.asked
+    assert JOBTEASER not in asked
     offer = _offers(data_dir)[offer_id]
     assert offer.description == "Givre Énergie mesure ses réseaux de chaleur. Python et SQL."
     assert (offer.location, offer.contract) == ("Paris", "FULL_TIME")
@@ -185,16 +170,16 @@ def test_a_page_for_an_offer_that_is_not_waiting_is_refused(
 
 
 def test_the_extension_is_connected_within_5_minutes_of_its_last_ask(
-    data_dir: Path, app: FastAPI, clock: Clock
+    data_dir: Path, app: FastAPI, now: list[datetime]
 ):
     _seed(data_dir)
 
     with TestClient(app, base_url="http://127.0.0.1") as client:
         before = client.get("/api/browser/status").json()
         client.get("/api/browser/pages", headers=EXTENSION)
-        clock.now = NOON + timedelta(minutes=5)
+        now[0] = NOON + timedelta(minutes=5)
         within = client.get("/api/browser/status").json()
-        clock.now = NOON + timedelta(minutes=5, seconds=1)
+        now[0] = NOON + timedelta(minutes=5, seconds=1)
         after = client.get("/api/browser/status").json()
 
     assert before == {"connected": False, "last_asked_at": None}
