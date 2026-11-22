@@ -83,6 +83,7 @@ class Offer(Base):
     screened_rule: Mapped[str | None]  # the rule that set it aside (applai.screening)
     screen_note: Mapped[str | None]  # remote or grande_couronne: Triage marks it down
     source: Mapped[str | None]  # where the watch found it: alert_linkedin…
+    board: Mapped[str | None]  # the job board its alert says it comes via (Google's)
     received_at: Mapped[datetime | None]  # when the job alert listing it was received
     description: Mapped[str | None]  # the offer's text; Triage refuses an offer without it
     salary: Mapped[str | None]  # as the offer's page gives it

@@ -50,6 +50,7 @@ class AlertOffer:
     company: str
     location: str | None
     contract: str | None
+    board: str | None = None  # the job board an alert says it comes via
 
 
 @dataclass
@@ -147,7 +148,8 @@ def _google(card: _Card) -> AlertOffer:
     if via < 3:
         raise ValueError("title, company or location missing")
     title, company, location = card.texts[via - 3 : via]
-    return AlertOffer(card.links[0], title, company, location, None)
+    board = card.texts[via].removeprefix("via ").strip() or None
+    return AlertOffer(card.links[0], title, company, location, None, board)
 
 
 def _google_card(tag: str, attributes: dict[str, str]) -> bool:

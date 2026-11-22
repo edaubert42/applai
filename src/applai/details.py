@@ -38,6 +38,9 @@ MAX_LOGO_BYTES = 1_000_000
 IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
                 "image/webp": ".webp", "image/x-icon": ".ico",
                 "image/vnd.microsoft.icon": ".ico"}  # fmt: skip
+# How Google's consent page opens, in lowercase, in the languages of the candidate's alerts.
+_CONSENT_WALLS = ("before you continue to google", "avant d'accéder à google",
+                  "avant de continuer sur google")  # fmt: skip
 _SKIPPED = {"head", "script", "style", "noscript", "template", "svg", "nav", "header", "footer"}
 _BLOCKS = {"br", "p", "div", "li", "tr", "section", "article", "main", "blockquote", "pre",
            "h1", "h2", "h3", "h4", "h5", "h6"}  # fmt: skip
@@ -157,7 +160,15 @@ def _read(http: httpx2.Client, url: str) -> tuple[str, Details]:
     details = read_page(response.text)
     if not details.description:
         raise PageError("the page has no text")
+    if _is_consent_wall(details.description):
+        raise PageError("Google's consent page, not the offer")
     return str(response.url), details
+
+
+def _is_consent_wall(text: str) -> bool:
+    """Whether text is Google's consent page, which a request without cookies gets."""
+    text = text.replace("\N{RIGHT SINGLE QUOTATION MARK}", "'").lower()
+    return any(opening in text for opening in _CONSENT_WALLS)
 
 
 def _logo(http: httpx2.Client, company: str, candidates: list[str], logos: Path) -> str | None:

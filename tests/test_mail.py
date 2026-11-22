@@ -12,7 +12,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 import httpx2
 import pytest
@@ -98,6 +98,7 @@ class FakeMicrosoft:
         self.revoked = False
         self.redirects_loop = False  # a click-tracking link that never leads anywhere
         self.offers_by_query = False  # the offer's site tells its offers apart by the query
+        self.consent_targets: list[str] | None = None  # Google sends clicks to its consent page
         self.filters: list[str] = []  # of each listing of the mailbox
         self.bodies_read: list[str] = []
         self.client = httpx2.Client(transport=httpx2.MockTransport(self._handle))
@@ -109,6 +110,14 @@ class FakeMicrosoft:
             return self._graph(request)
         if request.url.host == OFFER_SITE:
             return httpx2.Response(200, text="<h1>Offre</h1>")
+        if (request.url.host or "").startswith("consent.google."):
+            return httpx2.Response(200, text="<h1>Avant d'accéder à Google</h1>")
+        if self.consent_targets is not None and (request.url.host or "").endswith("googleapis.com"):
+            where = hashlib.sha256(str(request.url).encode()).hexdigest()[:12]
+            target = f"https://www.google.com/search?q=Offre+H%C3%A9ron&udm=8&htidocid={where}"
+            self.consent_targets.append(target)
+            consent = f"https://consent.google.fr/ml?continue={quote(target, safe='')}&gl=FR&hl=fr"
+            return httpx2.Response(302, headers={"Location": consent})
         if self.redirects_loop:
             return httpx2.Response(302, headers={"Location": str(request.url)})
         where = hashlib.sha256(str(request.url).encode()).hexdigest()[:12]
@@ -254,6 +263,7 @@ def test_each_senders_alert_yields_its_offers(
     assert len({offer.url for offer in offers}) == count
     for offer in offers:
         assert (offer.source, offer.state) == (f"alert_{sender}", "new")
+        assert (offer.board is not None) == (sender == "google")  # only Google's names one
         assert offer.received_at == alert.received.replace(tzinfo=None)
 
 
@@ -405,6 +415,32 @@ def test_two_google_offers_with_the_same_title_and_company_in_two_places_stay_tw
         ("Data Engineer Streaming - Paris (H/F)", "Nanterre, France"),
     ]
     assert same[0].url != same[1].url
+
+
+def test_a_google_offer_behind_a_consent_page_has_googles_page_for_its_url(
+    tmp_path: Path, microsoft: FakeMicrosoft, engine: Engine
+):
+    targets: list[str] = []
+    microsoft.consent_targets = targets
+    microsoft.mails.append(_alert("google"))
+
+    read_alerts(engine, _signed_in(tmp_path, microsoft))
+
+    urls = [offer.url for offer in _offers(engine)]
+    assert len(targets) == 4
+    assert urls == targets
+    assert not any("consent" in url for url in urls)
+
+
+def test_an_offer_keeps_the_board_its_google_alert_names(
+    tmp_path: Path, microsoft: FakeMicrosoft, engine: Engine
+):
+    microsoft.mails.append(_alert("google"))
+
+    read_alerts(engine, _signed_in(tmp_path, microsoft))
+
+    boards = [offer.board for offer in _offers(engine)]
+    assert boards == ["WhatJobs", "Jobijoba", "Jobijoba", "Jobijoba"]
 
 
 def test_a_google_alert_is_read_as_graph_returns_it_without_spaces_in_its_styles(
