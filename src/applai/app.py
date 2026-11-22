@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from applai.applications import Board, board
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
 from applai.models import LOCAL_USER_ID, Offer, OfferState
@@ -84,6 +85,12 @@ def offers(state: OfferState, session: _Session) -> list[OfferSummary]:
         .order_by(Offer.created_at.desc(), Offer.id.desc())
     )
     return [OfferSummary.model_validate(row) for row in rows]
+
+
+@api.get("/applications")
+def applications(session: _Session) -> Board:
+    """The candidate's applications: in progress, waiting for them, sent and dropped."""
+    return board(session, LOCAL_USER_ID)
 
 
 def _min_score(request: Request) -> int:

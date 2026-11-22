@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import type { Card, ScanStatus } from "./api";
+import type { Applications, Card, Row, ScanStatus } from "./api";
 
 export interface Call {
   method: string;
@@ -62,6 +62,27 @@ export function aCard(overrides: Partial<Card> = {}): Card {
     rule: null,
     ...overrides,
   };
+}
+
+/** A fictional application's row of the Applications dashboard. */
+export function aRow(overrides: Partial<Row> = {}): Row {
+  return {
+    id: 1,
+    offer_id: 1,
+    url: "https://jobs.example.org/brindille-logistique/chef-de-quai",
+    title: "Chef de quai",
+    company: "Brindille Logistique",
+    state: "drafted",
+    origin: "applai",
+    changed_at: "2026-11-20T09:30:00Z",
+    ...overrides,
+  };
+}
+
+/** The routes of the Applications dashboard with these rows in each group. */
+export function applicationsRoutes(groups: Partial<Applications> = {}) {
+  const board: Applications = { in_progress: [], waiting: [], sent: [], dropped: [], ...groups };
+  return { "GET /api/applications": board };
 }
 
 /** The scan status after a clean scan that ended long ago. */

@@ -40,6 +40,24 @@ export interface Card {
   rule: string | null;
 }
 
+export const GROUPS = ["in_progress", "waiting", "sent", "dropped"] as const;
+export type Group = (typeof GROUPS)[number];
+
+/** One application of the dashboard, or an old-workflow offer, which has no application. */
+export interface Row {
+  id: number | null;
+  offer_id: number;
+  url: string;
+  title: string;
+  company: string;
+  /** The application's state, or the Notion status as written for an old-workflow offer. */
+  state: string | null;
+  origin: "applai" | "old_workflow";
+  changed_at: string;
+}
+
+export type Applications = Record<Group, Row[]>;
+
 export interface ScanStatus {
   running: boolean;
   last_scan: {
@@ -69,6 +87,7 @@ export const api = {
   cards: (view: View) => request<Card[]>("GET", `/api/review?view=${view}`),
   decide: (id: number, decision: Decision) =>
     request<unknown>("POST", `/api/offers/${id}/decision`, decision),
+  applications: () => request<Applications>("GET", "/api/applications"),
   scanStatus: () => request<ScanStatus>("GET", "/api/scan"),
   startScan: () => request<unknown>("POST", "/api/scan"),
 };
