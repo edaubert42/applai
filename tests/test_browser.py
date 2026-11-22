@@ -1,4 +1,4 @@
-"""JobTeaser's pages, read by the ApplAI extension in the candidate's Chrome, through the real app."""
+"""JobTeaser's pages, read by the ApplAI extension in the candidate's Chrome: the real app."""
 
 import json
 import shutil
@@ -42,7 +42,7 @@ CARD = {
     "tags": {tag: {"text": "Non précisé", "verdict": "?"}
              for tag in ("location", "work_mode", "contract", "experience", "salary")},
     "about": "Givre Énergie mesure ses réseaux de chaleur.",
-    "mission": ["Construire les pipelines de données"],
+    "mission": ["Construire les pipelines de données", "Écrire du Python et du SQL"],
     "pros": ["Data engineering"],
     "cons": [],
 }  # fmt: skip
@@ -148,7 +148,8 @@ def test_a_page_sent_by_the_extension_describes_the_offer_then_triages_it(
     assert JOBTEASER not in network.asked
     offer = _offers(data_dir)[offer_id]
     assert offer.description == "Givre Énergie mesure ses réseaux de chaleur. Python et SQL."
-    assert (offer.location, offer.contract, offer.salary) == ("Paris", "FULL_TIME", "45000-52000 EUR")
+    assert (offer.location, offer.contract) == ("Paris", "FULL_TIME")
+    assert offer.salary == "45000-52000 EUR"
     assert offer.state == "triaged"  # described, then triaged in the background
 
 
