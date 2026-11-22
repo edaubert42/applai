@@ -3,7 +3,8 @@
 The app opens the candidate's database when it starts, and closes it when it stops; given
 a watch, it also runs the scan's schedule meanwhile.
 There is no authentication: applai serve listens on 127.0.0.1 only, for one local
-candidate, whose rows carry LOCAL_USER_ID.
+candidate, whose rows carry LOCAL_USER_ID. A web page the candidate visits can still reach
+it, so the app answers only requests for its own host, and writes only from its own origin.
 """
 
 from collections.abc import AsyncGenerator, Iterator
@@ -14,11 +15,14 @@ from typing import Annotated, Literal
 
 from alembic.runtime.migration import MigrationContext
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.datastructures import Headers
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from applai.applications import Board, board
 from applai.database import open_database
@@ -174,6 +178,36 @@ def start_scan(scanner: _Scanner) -> ScanStarted:
         raise HTTPException(429, str(refused), headers=retry) from None
 
 
+# The names applai serve is reached by, on any port: the bind address already limits who connects.
+# Any other Host is a page that renamed itself to the app (DNS rebinding), refused with a 400.
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+
+# The methods that only read: a cross-site page can send them but cannot read the answer.
+_READ_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+class SameOriginWrites:
+    """Refuses with a 403 any write whose Origin is present and is not http:// + its Host.
+
+    A browser sends Origin on a cross-site POST, even from a plain form with no script, so
+    another site, or another local server on another port, cannot start a scan or decide on
+    an offer. A write without Origin is not from a browser page (curl, tests) and goes through.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] not in _READ_METHODS:
+            headers = Headers(scope=scope)
+            origin = headers.get("origin")
+            if origin is not None and origin.lower() != f"http://{headers.get('host', '')}".lower():
+                refused = JSONResponse({"detail": "Refused: sent by another site."}, 403)
+                await refused(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 def create_app(
     data_dir: Path,
     frontend_dir: Path = FRONTEND_DIR,
@@ -201,6 +235,9 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(title="ApplAI", lifespan=lifespan)
+    # The last added runs first: a request for another host is refused before its Origin is read.
+    app.add_middleware(SameOriginWrites)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.include_router(api)
     # Mounted last: the API's routes come first.
     if frontend_dir.is_dir():
