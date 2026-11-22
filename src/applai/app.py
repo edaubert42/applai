@@ -225,7 +225,9 @@ def create_app(
         app.state.engine = engine = open_database(data_dir)
         app.state.scanner = None
         if watch is not None:
-            app.state.scanner = Scanner(engine, partial(run_scan, engine, data_dir, watch), clock)
+            app.state.scanner = Scanner(
+                engine, partial(run_scan, engine, data_dir, watch, clock=clock), clock
+            )
             app.state.scanner.start_schedule()
         try:
             yield

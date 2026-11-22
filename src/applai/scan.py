@@ -1,7 +1,9 @@
 """The scan: the watch finding new offers without the candidate asking.
 
 run_scan() reads the job alerts (applai.mail), then screens each new offer and reads its
-page (applai.screening, applai.details), then triages each described offer (applai.triage).
+page (applai.screening, applai.details), reads one screened LinkedIn offer through the
+candidate's LinkedIn MCP server within its pacing (applai.linkedin), then triages each
+described offer (applai.triage).
 A failure is recorded in plain words and the scan goes on: one offer's never stops the
 others. Without the profile nothing is screened, so nothing is read or triaged unscreened.
 
@@ -24,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner
 from applai.details import PageError, describe_offer, on_linkedin
+from applai.linkedin import MAX_READS_PER_DAY, describe_linkedin_offers, reads_today
 from applai.mail import CLIENT_ID_VARIABLE, MailAuthError, Mailbox, MailError, read_alerts
 from applai.models import LOCAL_USER_ID, Offer, OfferOrigin, OfferState, Scan
 from applai.orchestrator import TransitionError
@@ -33,7 +36,6 @@ from applai.triage import TriageError, triage_offer
 
 SCAN_TIMES = ("08:30", "17:30")  # the candidate's local time
 COOLDOWN = timedelta(minutes=30)
-LINKEDIN_READS_PER_DAY = 30  # LinkedIn's offers are read, and their reads counted, by #72
 CHECK_EVERY_S = 300.0  # after the machine slept, a missed slot runs this late at most
 # Errors whose message is written for the candidate; another one is named by its type only.
 _PLAIN = (MailError, PageError, TriageError, AgentError, TransitionError)
@@ -61,7 +63,13 @@ class Found:
     errors: list[str] = field(default_factory=list[str])
 
 
-def run_scan(engine: Engine, data_dir: Path, watch: Watch, user_id: int = LOCAL_USER_ID) -> Found:
+def run_scan(
+    engine: Engine,
+    data_dir: Path,
+    watch: Watch,
+    user_id: int = LOCAL_USER_ID,
+    clock: Clock = local_now,
+) -> Found:
     """Find the new offers, and take each as far as Triage; return what the scan found."""
     found = Found()
     found.new_offers = _read_mail(engine, data_dir, watch, user_id, found.errors)
@@ -82,6 +90,7 @@ def run_scan(engine: Engine, data_dir: Path, watch: Watch, user_id: int = LOCAL_
                 session.rollback()
                 found.errors.append(f"Offer {offer_id} was not screened nor read: {_plain(error)}.")
             session.commit()
+    _read_linkedin(engine, user_id, clock, found.errors)
     for offer_id in _offers(engine, OfferState.DESCRIBED, user_id):
         try:
             triage_offer(watch.runner, engine, offer_id, profile)
@@ -111,6 +120,17 @@ def _read_mail(
         return 0
     errors.extend(f"A job alert was not read: {error}." for error in reading.errors)
     return reading.offers
+
+
+def _read_linkedin(engine: Engine, user_id: int, clock: Clock, errors: list[str]) -> None:
+    """Read a screened LinkedIn offer, if the reader's pacing allows; it reads one per run."""
+    try:
+        with Session(engine) as session:
+            describing = describe_linkedin_offers(session, _utc(clock()), user_id)
+    except Exception as error:
+        errors.append(f"LinkedIn: no offer was read: {_plain(error)}.")
+        return
+    errors.extend(f"LinkedIn: {error}." for error in describing.errors)
 
 
 def _offers(engine: Engine, state: OfferState, user_id: int) -> list[int]:
@@ -234,8 +254,8 @@ class Scanner:
                 ),
                 next_slot=min(self._slots(self._clock(), before=False), default=None),
                 manual_scan_in_s=_cooldown_left(last, _utc(self._clock())),
-                linkedin_reads_today=0,  # nothing reads LinkedIn before #72
-                linkedin_reads_per_day=LINKEDIN_READS_PER_DAY,
+                linkedin_reads_today=reads_today(session, _utc(self._clock()), self._user_id),
+                linkedin_reads_per_day=MAX_READS_PER_DAY,
             )  # fmt: skip
 
     def _keep_schedule(self) -> None:
