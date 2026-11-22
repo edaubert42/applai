@@ -80,11 +80,17 @@ def app(data_dir: Path, asked: list[str], now: list[datetime]) -> FastAPI:
     return create_app(data_dir, frontend_dir=data_dir / "none", watch=watch, clock=lambda: now[0])
 
 
-def _seed(data_dir: Path, *urls: str, state: str = "new", scanned: bool = True) -> list[int]:
+def _seed(
+    data_dir: Path,
+    *urls: str,
+    state: str = "new",
+    scanned: bool = True,
+    title: str = "Data engineer",
+) -> list[int]:
     """Offers at urls; scanned: today's 08:30 scan is done, so none runs at startup."""
     engine = open_database(data_dir)
     with Session(engine) as session:
-        offers = [Offer(user_id=1, url=url, title="Data engineer", company="Givre Énergie",
+        offers = [Offer(user_id=1, url=url, title=title, company="Givre Énergie",
                         state=state) for url in urls]  # fmt: skip
         session.add_all(offers)
         if scanned:
@@ -167,6 +173,30 @@ def test_a_page_for_an_offer_that_is_not_waiting_is_refused(
 
     assert (sent.status_code, missing.status_code) == (409, 404)
     assert _offers(data_dir)[offer_id].state == state
+
+
+def test_an_offer_screening_sets_aside_is_neither_listed_nor_read(data_dir: Path, app: FastAPI):
+    (offer_id,) = _seed(data_dir, JOBTEASER, title="Senior data engineer")  # an excluded word
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        listed = client.get("/api/browser/pages", headers=EXTENSION).json()
+        sent = client.post(f"/api/browser/pages/{offer_id}", json={"html": PAGE}, headers=EXTENSION)
+
+    assert (listed, sent.status_code) == ([], 409)
+    offer = _offers(data_dir)[offer_id]
+    assert (offer.state, offer.description) == ("screened_out", None)
+
+
+def test_without_the_profile_no_page_is_listed_nor_read(data_dir: Path, app: FastAPI):
+    (offer_id,) = _seed(data_dir, JOBTEASER)
+    (data_dir / "profile.yaml").unlink()  # nothing can be screened
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        listed = client.get("/api/browser/pages", headers=EXTENSION).json()
+        sent = client.post(f"/api/browser/pages/{offer_id}", json={"html": PAGE}, headers=EXTENSION)
+
+    assert (listed, sent.status_code) == ([], 409)
+    assert _offers(data_dir)[offer_id].state == "new"
 
 
 def test_the_extension_is_connected_within_5_minutes_of_its_last_ask(

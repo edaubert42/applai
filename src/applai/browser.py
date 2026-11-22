@@ -3,7 +3,8 @@
 Those sites refuse ApplAI's requests, so the scan leaves their offers new (EXTENSION_SITES in
 applai.details). Every minute the extension (extension/) asks for them, fetches each page with
 the browser's session and sends its HTML back. Only the extension's origin reaches the pages
-routes (applai.app.SameOriginWrites). A page received describes its offer as a page read over
+routes (applai.app.SameOriginWrites). Each offer is screened first, as the scan screens it;
+without the profile none is listed. A page received describes its offer as a page read over
 HTTP would, then the offer is triaged in the background, not at the next scan. A page that
 fails, reported by the extension or with no text, is asked for again only after the next scan;
 after MAX_PAGE_FAILURES the offer is described from its alert's fields, then triaged.
@@ -23,8 +24,9 @@ from applai.agents import AgentRunner
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
 from applai.models import LOCAL_USER_ID, Offer, OfferOrigin, OfferState, Scan
 from applai.orchestrator import Actor, TransitionError, move
-from applai.profile import load_profile
+from applai.profile import ProfileError, load_profile
 from applai.scan import Watch
+from applai.screening import screen_offer
 from applai.triage import triage_offer
 
 CONNECTED_FOR = timedelta(minutes=5)  # after the extension's last ask
@@ -72,10 +74,17 @@ def _last_scan(session: Session) -> datetime | None:
 def pages(request: Request) -> list[PageToRead]:
     """The pages waiting for the extension; the time of this ask is kept for the status."""
     request.app.state.extension_asked_at = request.app.state.clock()
+    try:
+        profile = load_profile(request.app.state.data_dir)
+    except ProfileError:  # nothing is read unscreened (applai.scan)
+        return []
     with Session(request.app.state.engine) as session:
         last_scan = _last_scan(session)
         new = session.scalars(select(Offer).where(Offer.state == OfferState.NEW).order_by(Offer.id))
-        return [PageToRead(offer_id=o.id, url=o.url) for o in new if _waiting(o, last_scan)]
+        listed = [o for o in new if _waiting(o, last_scan)]
+        waiting = [o for o in listed if not screen_offer(session, o, profile)]
+        session.commit()  # the offers screening set aside
+        return [PageToRead(offer_id=o.id, url=o.url) for o in waiting]
 
 
 @router.post("/pages/{offer_id}", status_code=204)
@@ -120,6 +129,13 @@ def _receive(
             raise HTTPException(404, "no such offer")
         if not _waiting(offer, _last_scan(session)):
             raise HTTPException(409, f"Offer {offer_id} is not waiting for its page.")
+        try:
+            set_aside = screen_offer(session, offer, load_profile(data_dir))
+        except ProfileError as error:
+            raise HTTPException(409, f"Offer {offer_id} was not screened: {error}") from None
+        if set_aside:
+            session.commit()
+            raise HTTPException(409, f"Offer {offer_id} was set aside by screening.")
         try:
             described = read(session, offer, watch)
         except TransitionError as error:  # a scan set it aside meanwhile
