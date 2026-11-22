@@ -25,6 +25,30 @@ jobs:
       - run: uv run actionlint
       - run: uv run zizmor --offline .github/workflows
 
+  size:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Labels are read live, so after labeling `big-ok` the owner only re-runs this job.
+      - name: Size of the PR, unless the owner labeled it big-ok
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels -q '.labels[].name' | grep -qx big-ok; then
+            echo "Labeled big-ok: size not checked."
+          else
+            python3 tools/pr_size.py "$BASE"
+          fi
+
   privacy:
     runs-on: ubuntu-latest
     steps:
