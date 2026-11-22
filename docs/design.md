@@ -49,3 +49,9 @@ From top to bottom, in a `max-width` column on `background`:
 **Not interested** turns the card into: the header frame, smaller; "Pas intéressé : pourquoi ?" and "Une raison au moins. C'est elle qui apprend quelque chose au Triage."; the seven reasons as pill toggles, each with its key (1 Entreprise, 2 Mission, 3 Expérience, 4 Compétences, 5 Salaire, 6 Lieu, 7 Autre), a chosen one in `primary`; a labelled text area "Préciser (facultatif)"; "Annuler" as a link-coloured text button and "Enregistrer · Entrée" in `primary`, disabled until a reason is chosen. Below: "Touches 1 à 7 : choisir une raison · Entrée : enregistrer · Échap : annuler".
 
 **Écartées** lists one row per offer on `surface` (`rounded-block`): the initials (40 px, on `raised`), the title and under it "company · place · contract · source" in `muted`, the rule or the score as a `raised` pill ("Premier tri : « Senior » dans le titre", "Score 28 : …"), and an outlined "Repêcher" button in `link`. Above the list: the title "Offres écartées" and "Par le premier tri ou par un score bas. Repêcher une offre, c'est corriger le Triage."
+
+## Applications screen
+
+One column in a `max-width` of 860 px, also at 390 px. Four groups, stacked: "En cours", "En attente de vous" (an application at a gate), "Envoyées", "Abandonnées". Each has a heading with its count ("En attente de vous · 2") and one row per application, the latest change first; an empty group says so in `muted`.
+
+A row is the **Écartées** row: a `surface` block (`rounded-block`) holding the company's initials (40 px), the job title and under it the company in `muted`, the state as a `raised` pill, the date of the last change in `muted`, and an outlined "Voir l'offre" link in `link`. An offer the old workflow handles has one row too, in "En cours", with a `muted` "Ancien workflow" pill and its Notion status as written in the state pill. The row wraps on a phone.

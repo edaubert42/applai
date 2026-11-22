@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ApplicationsScreen from "./ApplicationsScreen";
 import ReviewScreen from "./ReviewScreen";
 import { SettingsProvider, useSettings } from "./settings";
 
@@ -45,6 +46,8 @@ function Shell() {
         <h1 className="mb-4 text-2xl font-semibold">{t(`nav.${page}`)}</h1>
         {page === "review" ? (
           <ReviewScreen />
+        ) : page === "applications" ? (
+          <ApplicationsScreen />
         ) : (
           <section className="rounded-card border border-border bg-surface p-8 text-muted">
             {t("page.empty")}

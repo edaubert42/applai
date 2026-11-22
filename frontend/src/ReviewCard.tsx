@@ -20,7 +20,7 @@ function initials(company: string): string {
 }
 
 /** The company's logo, or its initials on a pastel square when it has none or it fails. */
-export function Logo({ card, className }: { card: Card; className: string }) {
+export function Logo({ card, className }: { card: Pick<Card, "company" | "logo">; className: string }) {
   const [broken, setBroken] = useState(false);
   if (card.logo && !broken) {
     return (
