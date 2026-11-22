@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ReviewScreen from "./ReviewScreen";
 import { SettingsProvider, useSettings } from "./settings";
 
 const pages = ["review", "applications", "control"] as const;
@@ -40,11 +41,15 @@ function Shell() {
         </nav>
         <Switches />
       </header>
-      <main className="mx-auto max-w-5xl p-6">
+      <main className="mx-auto min-w-0 max-w-5xl overflow-x-clip p-6">
         <h1 className="mb-4 text-2xl font-semibold">{t(`nav.${page}`)}</h1>
-        <section className="rounded-card border border-border bg-surface p-8 text-muted">
-          {t("page.empty")}
-        </section>
+        {page === "review" ? (
+          <ReviewScreen />
+        ) : (
+          <section className="rounded-card border border-border bg-surface p-8 text-muted">
+            {t("page.empty")}
+          </section>
+        )}
       </main>
     </div>
   );
