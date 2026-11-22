@@ -2,15 +2,28 @@
 
 Every row carries the user_id of the candidate it belongs to, ready for multi-user;
 there is no users table yet. States are plain text; applai.orchestrator.move() is the
-only way to change one, along its transition table. Times are UTC, stored without a
-time zone, which SQLite cannot keep.
+only way to change one, along its transition table: a state assigned on an object, or set
+by an UPDATE that move() did not mark with MOVE_OPTION, is refused. Times are UTC, stored
+without a time zone, which SQLite cannot keep.
 """
 
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, Connection, ForeignKey, MetaData, UniqueConstraint, event, inspect
+from sqlalchemy import (
+    JSON,
+    Connection,
+    Engine,
+    Executable,
+    ForeignKey,
+    MetaData,
+    UniqueConstraint,
+    Update,
+    event,
+    inspect,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Mapper, mapped_column
 
 LOCAL_USER_ID = 1  # the one candidate of a local ApplAI, until accounts come
@@ -233,12 +246,37 @@ class Label(Base):
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
+MOVE_OPTION = "applai_move"  # the execution option move() marks its own UPDATE with
+_REFUSED = "a state changes only through applai.orchestrator.move()."
+
+
 @event.listens_for(Offer, "before_update")
 @event.listens_for(Application, "before_update")
 def _refuse_a_state_set_by_hand(_: Mapper[Any], __: Connection, item: Offer | Application) -> None:
     # move() changes a state with its own UPDATE, never through an assigned attribute.
     if inspect(item).attrs.state.history.has_changes():
-        raise ValueError(
-            f"{type(item).__name__} {item.id}: a state changes only through"
-            " applai.orchestrator.move()."
-        )
+        raise ValueError(f"{type(item).__name__} {item.id}: {_REFUSED}")
+
+
+@event.listens_for(Engine, "before_execute")
+def _refuse_a_state_set_by_a_statement(
+    _: Connection,
+    statement: Executable,
+    multiparams: Sequence[Mapping[str, Any]],
+    params: Mapping[str, Any],
+    execution_options: Mapping[str, Any],
+) -> None:
+    # Every engine's statements come here, from a session or straight on a connection.
+    # Raw SQL strings do not, and ApplAI writes none.
+    if not isinstance(statement, Update) or execution_options.get(MOVE_OPTION):
+        return
+    table = getattr(statement.table, "name", None)
+    if table not in (Offer.__tablename__, Application.__tablename__):
+        return
+    # SQLAlchemy has no public way to read a statement's SET columns.
+    values = statement._values or {}  # pyright: ignore[reportPrivateUsage]
+    columns = {key if isinstance(key, str) else key.key for key in values}
+    for parameters in (params, *multiparams):  # an UPDATE also sets the columns these name
+        columns.update(parameters)
+    if "state" in columns:
+        raise ValueError(f"UPDATE of {table}: {_REFUSED}")

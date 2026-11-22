@@ -17,7 +17,7 @@ from typing import Any, cast
 from sqlalchemy import CursorResult, update
 from sqlalchemy.orm import Session
 
-from applai.models import Application, Offer, OfferState, StateChange
+from applai.models import MOVE_OPTION, Application, Offer, OfferState, StateChange
 
 
 class Actor(StrEnum):
@@ -114,7 +114,7 @@ def move(session: Session, item: Offer | Application, to_state: str, actor: str)
         update(model)
         .where(model.id == item.id, model.state == from_state)
         .values(state=str(to_state))
-        .execution_options(synchronize_session=False)
+        .execution_options(synchronize_session=False, **{MOVE_OPTION: True})
     )
     if cast(CursorResult[Any], result).rowcount != 1:
         raise StaleStateError(item, from_state, to_state, actor, f"it is no longer in {from_state}")
