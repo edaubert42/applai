@@ -38,6 +38,7 @@ export interface Card {
   pros: string[] | null;
   cons: Point[] | null;
   rule: string | null;
+  full_text_read: boolean; // false: described from its job alert only
 }
 
 export const GROUPS = ["in_progress", "waiting", "sent", "dropped"] as const;

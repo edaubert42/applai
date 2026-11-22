@@ -186,3 +186,29 @@ def test_the_extension_is_connected_within_5_minutes_of_its_last_ask(
     assert within == {"connected": True, "last_asked_at": "2026-11-20T11:00:00Z"}
     assert after["connected"] is False
     assert datetime.fromisoformat(after["last_asked_at"]) == NOON.astimezone(UTC)
+
+
+def test_a_failed_page_waits_for_the_next_scan_and_a_second_failure_triages_the_alert(
+    data_dir: Path, app: FastAPI, now: list[datetime]
+):
+    (offer_id,) = _seed(data_dir, JOBTEASER)
+    failure = f"/api/browser/pages/{offer_id}/failure"
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        first = client.post(failure, json={"status": 403}, headers=EXTENSION)
+        before_scan = client.get("/api/browser/pages", headers=EXTENSION).json()
+        now[0] = NOON + timedelta(minutes=1)
+        assert client.post("/api/scan").status_code == 202
+        app.state.scanner.wait()
+        after_scan = client.get("/api/browser/pages", headers=EXTENSION).json()
+        second = client.post(failure, json={"status": 403}, headers=EXTENSION)
+        review = client.get("/api/review", params={"view": "to_review"}).json()
+
+    assert (first.status_code, second.status_code) == (204, 204)
+    assert before_scan == []
+    assert after_scan == [{"offer_id": offer_id, "url": JOBTEASER}]
+    offer = _offers(data_dir)[offer_id]
+    assert offer.state == "triaged"  # from the alert's fields
+    assert offer.detail_error == "the page answered HTTP 403"
+    assert offer.description is not None and "Data engineer" in offer.description
+    assert [(card["id"], card["full_text_read"]) for card in review] == [(offer_id, False)]

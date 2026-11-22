@@ -36,6 +36,7 @@ TIMEOUT = 20.0  # seconds
 USER_AGENT = f"ApplAI/{version('applai')}"
 MAX_LOGO_BYTES = 1_000_000
 EXTENSION_SITES = ("jobteaser.com",)  # they refuse ApplAI's requests: Chrome reads them
+MAX_PAGE_FAILURES = 2  # then the extension's offer is described from its alert (applai.browser)
 # Raster images only: an SVG can hold scripts.
 IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
                 "image/webp": ".webp", "image/x-icon": ".ico",

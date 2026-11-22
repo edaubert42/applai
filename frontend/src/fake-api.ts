@@ -60,6 +60,7 @@ export function aCard(overrides: Partial<Card> = {}): Card {
       { text: "L’équipe compte trois personnes", verdict: "?" },
     ],
     rule: null,
+    full_text_read: true,
     ...overrides,
   };
 }

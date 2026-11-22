@@ -75,6 +75,11 @@ describe("a card", () => {
     expect(screen.getByText(fill(fr["card.seen"], { source: "alert_unheard_of" }))).toBeTruthy();
   });
 
+  it("says when the offer's full text was not read, only its alert", async () => {
+    await openScreen(reviewRoutes({ to_review: [aCard(), aCard({ id: 2, title: "Data engineer", full_text_read: false })] }));
+    expect(screen.getAllByText(fr["card.fullTextNotRead"])).toHaveLength(1);
+  });
+
   it("stacks Pour and Contre on a phone: they wrap, and nothing is wider than the screen", async () => {
     await openScreen();
     const pour = screen.getAllByText(fr["card.pros"])[0]?.closest("section");

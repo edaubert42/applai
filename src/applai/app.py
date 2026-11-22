@@ -189,7 +189,7 @@ _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 # The ApplAI extension's routes (applai.browser), whatever the method.
-_EXTENSION_PATHS = re.compile(r"/api/browser/pages(/[0-9]+)?")
+_EXTENSION_PATHS = re.compile(r"/api/browser/pages(/[0-9]+(/failure)?)?")
 
 
 class SameOriginWrites:

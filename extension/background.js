@@ -6,8 +6,8 @@ export const APPLAI = "http://127.0.0.1:8000"; // applai serve's address
 const READ = "read-pages";
 
 // Ask ApplAI for the pages to read, fetch each with the browser's cookies, send back its HTML.
-// Only JobTeaser's, as the manifest's host permissions.
-// A page that fails is asked for again at the next minute.
+// Only JobTeaser's, as the manifest's host permissions. A page that fails is reported: ApplAI
+// asks for it again only after its next scan, never every minute.
 export async function readPages(fetch = globalThis.fetch) {
   let pages;
   try {
@@ -18,19 +18,33 @@ export async function readPages(fetch = globalThis.fetch) {
     return; // ApplAI is not running
   }
   for (const { offer_id, url } of pages) {
+    if (!onJobTeaser(url)) continue;
+    let path = "", body;
     try {
-      const { protocol, hostname } = new URL(url);
-      if (protocol !== "https:" || !`.${hostname}`.endsWith(".jobteaser.com")) continue;
       const page = await fetch(url, { credentials: "include" });
-      if (!page.ok) continue;
-      await fetch(`${APPLAI}/api/browser/pages/${offer_id}`, {
+      if (page.ok) body = { html: await page.text() };
+      else [path, body] = ["/failure", { status: page.status }];
+    } catch {
+      [path, body] = ["/failure", {}]; // not fetched
+    }
+    try {
+      await fetch(`${APPLAI}/api/browser/pages/${offer_id}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: await page.text() }),
+        body: JSON.stringify(body),
       });
     } catch {
-      // unreachable or not a URL: the next minute's ask tries again
+      // ApplAI stopped meanwhile: it asks for the page again
     }
+  }
+}
+
+function onJobTeaser(url) {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "https:" && `.${hostname}`.endsWith(".jobteaser.com");
+  } catch {
+    return false; // not a URL
   }
 }
 
