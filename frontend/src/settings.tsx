@@ -14,7 +14,12 @@ interface Settings {
   setLanguage: (language: Language) => void;
   theme: ThemeName;
   setTheme: (theme: ThemeName) => void;
-  t: (key: MessageKey) => string;
+  /** A message, its {name} placeholders filled from values. */
+  t: (key: MessageKey, values?: Record<string, string | number>) => string;
+  /** The message of a key built at run time (a source's name), or undefined if there is none. */
+  lookup: (key: string) => string | undefined;
+  /** A date and time in the candidate's language, like "22 nov., 18:00". */
+  formatTime: (iso: string) => string;
 }
 
 const SettingsContext = createContext<Settings | null>(null);
@@ -40,9 +45,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [language]);
   useEffect(() => applyTheme(theme, document.documentElement), [theme]);
 
-  const t = (key: MessageKey) => messages[language][key];
+  const t: Settings["t"] = (key, values = {}) =>
+    messages[language][key].replace(/\{(\w+)\}/g, (_, name: string) => String(values[name] ?? ""));
+  const lookup: Settings["lookup"] = (key) =>
+    Object.hasOwn(messages[language], key) ? messages[language][key as MessageKey] : undefined;
+  const formatTime = (iso: string) =>
+    new Date(iso).toLocaleString(language, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   return (
-    <SettingsContext.Provider value={{ language, setLanguage, theme, setTheme, t }}>
+    <SettingsContext.Provider
+      value={{ language, setLanguage, theme, setTheme, t, lookup, formatTime }}
+    >
       {children}
     </SettingsContext.Provider>
   );

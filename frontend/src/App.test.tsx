@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { fakeApi, reviewRoutes } from "./fake-api";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
 import { themes } from "./theme";
@@ -22,19 +23,31 @@ function shownStrings(): string[] {
   return strings;
 }
 
+/** Whether a shown string is a message of the file, or one with its {placeholders} filled. */
+function isMessage(messages: string[], shown: string): boolean {
+  return messages.some((message) => {
+    const pattern = message.split(/\{\w+\}/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    return new RegExp(`^${pattern.join(".+")}$`).test(shown);
+  });
+}
+
+beforeEach(() => fakeApi(reviewRoutes()));
+afterEach(() => vi.unstubAllGlobals());
+
 function rootToken(name: string): string {
   return document.documentElement.style.getPropertyValue(`--ui-${name}`);
 }
 
 describe("the shell", () => {
-  it("renders in French, then in English, only from the translation files", () => {
+  it("renders in French, then in English, only from the translation files", async () => {
     render(<App />);
+    await screen.findByText(fr["review.empty"]);
     expect(document.documentElement.lang).toBe("fr");
     for (const label of [fr["nav.review"], fr["nav.applications"], fr["nav.control"]]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
-    const french = new Set(Object.values(fr));
-    expect(shownStrings().filter((s) => !french.has(s))).toEqual([]);
+    const french = Object.values(fr);
+    expect(shownStrings().filter((s) => !isMessage(french, s))).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
 
@@ -42,8 +55,8 @@ describe("the shell", () => {
     for (const label of [en["nav.review"], en["nav.applications"], en["nav.control"]]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
-    const english = new Set(Object.values(en));
-    expect(shownStrings().filter((s) => !english.has(s))).toEqual([]);
+    const english = Object.values(en);
+    expect(shownStrings().filter((s) => !isMessage(english, s))).toEqual([]);
   });
 
   it("has the same keys in every translation file", () => {
