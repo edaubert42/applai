@@ -89,6 +89,8 @@ class Offer(Base):
     salary: Mapped[str | None]  # as the offer's page gives it
     logo: Mapped[str | None]  # a file name in the data directory's logos/; none: initials
     detail_error: Mapped[str | None]  # why the offer's page could not be read (applai.details)
+    page_failures: Mapped[int] = mapped_column(server_default="0")  # by the extension
+    page_failed_at: Mapped[datetime | None]  # the last of them (applai.browser)
     state: Mapped[str] = mapped_column(server_default="new")
     origin: Mapped[str] = mapped_column(server_default=OfferOrigin.APPLAI)
     # The row's status in the old workflow's Notion database, as text: never a state.

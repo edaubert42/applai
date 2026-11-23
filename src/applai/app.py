@@ -7,6 +7,7 @@ candidate, whose rows carry LOCAL_USER_ID. A web page the candidate visits can s
 it, so the app answers only requests for its own host, and writes only from its own origin.
 """
 
+import re
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from functools import partial
@@ -24,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from applai import browser
 from applai.applications import Board, board
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
@@ -31,7 +33,7 @@ from applai.models import LOCAL_USER_ID, Offer, OfferState
 from applai.orchestrator import TransitionError
 from applai.review import Card, DecisionRequest, OfferNotFound, View, cards, decide
 from applai.scan import Clock, Scanner, ScanRefused, ScanStatus, Watch, local_now, run_scan
-from applai.settings import SettingsError, review_min_score
+from applai.settings import SettingsError, extension_id, review_min_score
 
 # Where the frontend's build lands in a checkout of this repository.
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -186,26 +188,47 @@ ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
+# The ApplAI extension's routes (applai.browser), whatever the method.
+_EXTENSION_PATHS = re.compile(r"/api/browser/pages(/[0-9]+(/failure)?)?")
+
+
 class SameOriginWrites:
     """Refuses with a 403 any write whose Origin is present and is not http:// + its Host.
 
     A browser sends Origin on a cross-site POST, even from a plain form with no script, so
     another site, or another local server on another port, cannot start a scan or decide on
     an offer. A write without Origin is not from a browser page (curl, tests) and goes through.
+    The extension's routes answer its origin only, chrome-extension:// + the id in settings.
     """
 
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
+    def __init__(self, app: ASGIApp, data_dir: Path) -> None:
+        self.app, self.data_dir = app, data_dir
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope["method"] not in _READ_METHODS:
+        refusal = None
+        if scope["type"] == "http":
             headers = Headers(scope=scope)
-            origin = headers.get("origin")
-            if origin is not None and origin.lower() != f"http://{headers.get('host', '')}".lower():
-                refused = JSONResponse({"detail": "Refused: sent by another site."}, 403)
-                await refused(scope, receive, send)
-                return
+            origin, host = headers.get("origin"), headers.get("host", "")
+            foreign = origin is not None and origin.lower() != f"http://{host}".lower()
+            if _EXTENSION_PATHS.fullmatch(scope["path"]):
+                refusal = self._extension_refusal(origin)
+            elif foreign and scope["method"] not in _READ_METHODS:
+                refusal = JSONResponse({"detail": "Refused: sent by another site."}, 403)
+        if refusal is not None:
+            await refusal(scope, receive, send)
+            return
         await self.app(scope, receive, send)
+
+    def _extension_refusal(self, origin: str | None) -> JSONResponse | None:
+        try:
+            extension = extension_id(self.data_dir)
+        except SettingsError as error:
+            return JSONResponse({"detail": str(error)}, 500)
+        if extension is None:
+            return JSONResponse({"detail": "Refused: set extension_id in settings.yaml."}, 403)
+        if origin != f"chrome-extension://{extension}":
+            return JSONResponse({"detail": "Refused: not sent by the ApplAI extension."}, 403)
+        return None
 
 
 def create_app(
@@ -224,6 +247,7 @@ def create_app(
         app.state.data_dir = data_dir
         app.state.engine = engine = open_database(data_dir)
         app.state.scanner = None
+        app.state.watch, app.state.clock, app.state.extension_asked_at = watch, clock, None
         if watch is not None:
             app.state.scanner = Scanner(engine, partial(run_scan, engine, data_dir, watch), clock)
             app.state.scanner.start_schedule()
@@ -236,9 +260,10 @@ def create_app(
 
     app = FastAPI(title="ApplAI", lifespan=lifespan)
     # The last added runs first: a request for another host is refused before its Origin is read.
-    app.add_middleware(SameOriginWrites)
+    app.add_middleware(SameOriginWrites, data_dir=data_dir)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.include_router(api)
+    app.include_router(browser.router)
     # Mounted last: the API's routes come first.
     if frontend_dir.is_dir():
         app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")

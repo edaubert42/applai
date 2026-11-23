@@ -69,6 +69,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - uses: anthropics/claude-code-action@e5812cd75691ca7bbfc57c0ecf4441db3a1ab7dd # v1.0.281
+        id: coder
         if: steps.ready.outputs.go == 'true'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -90,6 +91,8 @@ jobs:
                If the issue is still ambiguous, comment on it and stop. The comment starts with the line `Questions:`,
                then numbered questions, each with a recommended answer. Say so when the issue itself looks wrong
                (an invalid value, a contradiction, a missing file): the answerer leaves those to the owner.
+               Never end without a PR or a `Questions:` comment: a tool you need is denied, a gate cannot run,
+               or the code contradicts the issue (a missing transition, a rule it breaks)? Ask it there and stop.
             2. Create the branch `agent/issue-${{ steps.ready.outputs.issue }}-<short-slug>` from `main`.
             3. Work test first: one failing test per acceptance criterion, then the code that makes it pass.
             4. Run every gate listed in CLAUDE.md until all are green. Commit in small steps.
@@ -102,6 +105,7 @@ jobs:
             is a question for the owner: `npm install` is not one of your tools.
 
       # A coder that ends with neither a PR nor a comment would leave the issue waiting in silence.
+      # The log hides the transcript (public repository); the report keeps only the denials and the last message.
       - name: Say so when the coder stopped without a PR or questions
         if: ${{ !cancelled() && steps.ready.outputs.go == 'true' }}  # also after max turns or an error
         env:
@@ -109,11 +113,15 @@ jobs:
           ISSUE: ${{ steps.ready.outputs.issue }}
           STARTED: ${{ steps.ready.outputs.started }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EXECUTION_FILE: ${{ steps.coder.outputs.execution_file }}
         run: |
+          python3 tools/run_report.py "$EXECUTION_FILE" > "$RUNNER_TEMP/report.md"
+          cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
           pr=$(gh pr list --state open --limit 200 --json headRefName --jq "any(.[]; .headRefName | startswith(\"agent/issue-$ISSUE-\"))")
           said=$(gh issue view "$ISSUE" --json comments --jq "any(.comments[]; .createdAt >= \"$STARTED\")")
           if [ "$pr" = false ] && [ "$said" = false ]; then
-            gh issue comment "$ISSUE" --body "Coder: stopped without a PR or questions ($RUN)."
+            { echo "Coder: stopped without a PR or questions ($RUN)."; echo; cat "$RUNNER_TEMP/report.md"; } > "$RUNNER_TEMP/stop.md"
+            gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/stop.md"
           fi
       - name: What comes next on the coder's questions
         id: after
