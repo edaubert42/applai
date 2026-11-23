@@ -387,8 +387,9 @@ def test_an_offer_without_salary_is_not_screened_out_and_its_salary_tag_is_unkno
     [spec] = backend.specs
     assert "salary" not in json.loads(spec.input)["offer"]
     assert _read(engine, offer_id).state == "triaged"
-    [stored] = _triages(engine)
-    assert stored.tags["salary"]["verdict"] == "?"
+    # The salary tag is the agent's answer, which a fake cannot prove; what code owes it is
+    # the instruction, and the bench measures the answer.
+    assert '"?" when the offer does not say' in re.sub(r"\s+", " ", spec.system_prompt)
 
 
 @pytest.mark.usefixtures("logged_in_claude")
