@@ -85,6 +85,8 @@ describe("a card", () => {
 
   it("says when the offer's full text was not read, only its alert", async () => {
     await openScreen(reviewRoutes({ to_review: [aCard(), aCard({ id: 2, title: "Data engineer", full_text_read: false })] }));
+    expect(screen.queryByText(fr["card.fullTextNotRead"])).toBeNull();
+    fireEvent.click(rowOf(/Data engineer/));
     expect(screen.getAllByText(fr["card.fullTextNotRead"])).toHaveLength(1);
   });
 
