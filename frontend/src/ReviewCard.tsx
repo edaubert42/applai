@@ -119,9 +119,51 @@ export function Header({ card, compact = false }: { card: Card; compact?: boolea
           <a href={card.url} target="_blank" rel="noreferrer" className="text-link underline">
             {t("card.original")}
           </a>
+          {!card.full_text_read && " · "}
+          {!card.full_text_read && <span>{t("card.fullTextNotRead")}</span>}
         </p>
       )}
     </header>
+  );
+}
+
+/** An offer as a compact row: the logo, the title, the company, the score, the place and the work mode. */
+export function OfferRow({ card, onOpen }: { card: Card; onOpen: () => void }) {
+  const { t } = useSettings();
+  const tags = [card.tags?.location, card.tags?.work_mode].filter((tag) => tag !== undefined);
+  return (
+    <button
+      type="button"
+      data-row-id={card.id}
+      aria-expanded="false"
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault(); // the click a browser adds to Enter would open the card twice
+        onOpen();
+      }}
+      className={`flex min-h-11 w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-block bg-surface p-4 text-left hover:bg-raised ${focus}`}
+    >
+      <Logo card={card} className="size-10 shrink-0 rounded-xl" />
+      <span className="min-w-0 flex-1 basis-60">
+        <span className="block font-semibold [overflow-wrap:anywhere]">{card.title}</span>
+        <span className="block text-sm text-link [overflow-wrap:anywhere]">{card.company}</span>
+      </span>
+      {tags.map((tag) => (
+        <span
+          key={tag.text}
+          className={`flex gap-1.5 rounded-pill border bg-background px-3 py-1 text-sm ${MARKS[tag.verdict].frame}`}
+        >
+          <Mark verdict={tag.verdict} />
+          <span>{tag.text}</span>
+        </span>
+      ))}
+      {card.score !== null && (
+        <span className="rounded-pill bg-primary px-4 py-1 font-semibold text-on-primary">
+          {t("card.score", { n: card.score })}
+        </span>
+      )}
+    </button>
   );
 }
 

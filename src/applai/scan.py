@@ -3,7 +3,8 @@
 run_scan() reads the job alerts (applai.mail), then screens each new offer and reads its
 page (applai.screening, applai.details), reads one screened LinkedIn offer through the
 candidate's LinkedIn MCP server within its pacing (applai.linkedin), then triages each
-described offer (applai.triage).
+described offer (applai.triage). JobTeaser's pages are left to the ApplAI extension
+(applai.browser).
 A failure is recorded in plain words and the scan goes on: one offer's never stops the
 others. Without the profile nothing is screened, so nothing is read or triaged unscreened.
 
@@ -25,7 +26,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner
-from applai.details import PageError, describe_offer, on_linkedin
+from applai.details import PageError, describe_offer, on_linkedin, read_by_extension
 from applai.linkedin import MAX_READS_PER_DAY, describe_linkedin_offers, reads_today
 from applai.mail import CLIENT_ID_VARIABLE, MailAuthError, Mailbox, MailError, read_alerts
 from applai.models import LOCAL_USER_ID, Offer, OfferOrigin, OfferState, Scan
@@ -82,7 +83,10 @@ def run_scan(
         with Session(engine) as session:
             offer = session.get_one(Offer, offer_id)
             try:
-                if screen_offer(session, offer, profile) is None and not on_linkedin(offer.url):
+                url = offer.url  # LinkedIn's and the extension's have their own readers
+                if screen_offer(session, offer, profile) is None and not (
+                    on_linkedin(url) or read_by_extension(url)
+                ):
                     describe_offer(session, offer, data_dir, watch.http)
             except PageError as error:  # recorded on the offer too: committed below
                 found.errors.append(f"Offer {offer_id}: its page was not read: {error}.")

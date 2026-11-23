@@ -12,14 +12,23 @@ const fill = (template: string, values: Record<string, string | number>) =>
 
 const bob = aCard({ id: 2, title: "Développeuse web", company: "Globex Studio", logo: null, score: 74 });
 
-async function openScreen(routes = reviewRoutes({ to_review: [aCard(), bob] })) {
+/** The screen with its offers as rows; the first one opened unless told not to. */
+async function openScreen(routes = reviewRoutes({ to_review: [aCard(), bob] }), opened = true) {
   const calls = fakeApi({ ...routes, ...Object.fromEntries([1, 2, 3, 4].map((id) => [DECISION(id), {}])),
     "POST /api/scan": {},
   });
   render(<App />);
-  await screen.findByRole("heading", { name: "Ingénieur logiciel" });
+  const first = await screen.findByRole("button", { name: /Ingénieur logiciel|Offre 1(?!\d)/ });
+  if (opened) fireEvent.click(first);
   return calls;
 }
+
+const manyOffers = (n: number) =>
+  Array.from({ length: n }, (_, index) =>
+    aCard({ id: index + 1, title: `Offre ${index + 1}`, company: `Société ${index + 1}`, logo: null }),
+  );
+const rows = () => screen.queryAllByRole("button", { expanded: false });
+const rowOf = (title: RegExp | string) => screen.getByRole("button", { name: title });
 
 function decisions(calls: { method: string; path: string; body: unknown }[]) {
   return calls.filter((call) => call.path.endsWith("/decision")).map((c) => [c.path, c.body]);
@@ -60,8 +69,7 @@ describe("a card", () => {
 
   it("shows the company's initials when it has no logo, or its logo fails", async () => {
     await openScreen();
-    const second = within(screen.getByRole("article", { name: /Développeuse web/ }));
-    expect(second.getByText("GS")).toBeTruthy();
+    expect(within(rowOf(/Développeuse web/)).getByText("GS")).toBeTruthy();
 
     const first = within(screen.getByRole("article", { name: /Ingénieur logiciel/ }));
     fireEvent.error(first.getByRole("img", { hidden: true }));
@@ -75,6 +83,13 @@ describe("a card", () => {
     expect(screen.getByText(fill(fr["card.seen"], { source: "alert_unheard_of" }))).toBeTruthy();
   });
 
+  it("says when the offer's full text was not read, only its alert", async () => {
+    await openScreen(reviewRoutes({ to_review: [aCard(), aCard({ id: 2, title: "Data engineer", full_text_read: false })] }));
+    expect(screen.queryByText(fr["card.fullTextNotRead"])).toBeNull();
+    fireEvent.click(rowOf(/Data engineer/));
+    expect(screen.getAllByText(fr["card.fullTextNotRead"])).toHaveLength(1);
+  });
+
   it("stacks Pour and Contre on a phone: they wrap, and nothing is wider than the screen", async () => {
     await openScreen();
     const pour = screen.getAllByText(fr["card.pros"])[0]?.closest("section");
@@ -83,6 +98,109 @@ describe("a card", () => {
     for (const block of [pour, contre]) expect(block?.className).toMatch(/basis-70\b.*min-w-0/);
     expect(pour?.parentElement?.className).toMatch(/\bflex-wrap\b/);
     expect(screen.getByRole("main").className).toMatch(/\bmin-w-0\b|\boverflow-x-clip\b/);
+  });
+});
+
+describe("the list of offers", () => {
+  it("shows every offer as a row with its logo, title, company, score and tags, and no card open", async () => {
+    const more = manyOffers(18).map((card) => ({ ...card, id: card.id + 10, title: `Autre ${card.id}` }));
+    await openScreen(reviewRoutes({ to_review: [aCard(), bob, ...more] }), false);
+
+    expect(rows()).toHaveLength(20);
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Ingénieur logiciel" })).toBeNull();
+    const row = within(rowOf(/Ingénieur logiciel/));
+    for (const text of ["Acme Robotics", fill(fr["card.score"], { n: 87 }), "Paris 11e", "Hybride"]) {
+      expect(row.getByText(text)).toBeTruthy();
+    }
+    expect(row.queryByText("CDI")).toBeNull();
+    expect(row.getByRole("img", { hidden: true }).getAttribute("src")).toBe("/api/logos/acme-robotics.png");
+    expect(within(rowOf(/Développeuse web/)).getByText("GS")).toBeTruthy();
+  });
+
+  it("opens the card of a row by a click, and by Enter, in place of the row", async () => {
+    await openScreen(reviewRoutes({ to_review: [aCard(), bob] }), false);
+
+    fireEvent.click(rowOf(/Développeuse web/));
+    expect(within(screen.getByRole("article")).getByRole("button", { name: fr["card.interested"] })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Développeuse web" })).toBeTruthy();
+    expect(rows()).toHaveLength(1);
+
+    fireEvent.keyDown(rowOf(/Ingénieur logiciel/), { key: "Enter" });
+    expect(screen.getByRole("heading", { name: "Ingénieur logiciel" })).toBeTruthy();
+  });
+
+  it("keeps one card open: opening another closes the first, Escape closes it", async () => {
+    await openScreen(reviewRoutes({ to_review: [aCard(), bob] }), false);
+
+    fireEvent.click(rowOf(/Ingénieur logiciel/));
+    fireEvent.click(rowOf(/Développeuse web/));
+
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "Développeuse web" })).toBeTruthy();
+    expect(rows()).toHaveLength(1);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(rows()).toHaveLength(2);
+    expect(document.activeElement).toBe(rowOf(/Développeuse web/));
+  });
+
+  it("removes the row of a decision and opens the next one", async () => {
+    const calls = await openScreen(reviewRoutes({ to_review: manyOffers(3) }), false);
+    expect(rows()).toHaveLength(3);
+    fireEvent.click(rowOf(/Offre 2/));
+
+    fireEvent.click(within(screen.getByRole("article")).getByRole("button", { name: fr["card.later"] }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Offre 3" })).toBeTruthy());
+    expect(decisions(calls)).toEqual([["/api/offers/2/decision", { decision: "later" }]]);
+    expect(screen.queryByRole("button", { name: /Offre 2/ })).toBeNull();
+    expect(rows()).toHaveLength(1); // Offre 1 only: Offre 3 is the open card
+  });
+
+  it("opens the previous row when the last card is decided, and none when the list is empty", async () => {
+    await openScreen(reviewRoutes({ to_review: manyOffers(2) }), false);
+    fireEvent.click(rowOf(/Offre 2/));
+
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Offre 1" })).toBeTruthy());
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+
+    await waitFor(() => expect(screen.getByText(fr["review.empty"])).toBeTruthy());
+    expect(screen.queryByRole("article")).toBeNull();
+  });
+
+  it("moves the focus between rows with the up and down arrows, and does not decide", async () => {
+    const calls = await openScreen(reviewRoutes({ to_review: manyOffers(3) }), false);
+
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rowOf(/Offre 1/));
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rowOf(/Offre 2/));
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rowOf(/Offre 3/));
+    fireEvent.keyDown(document, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(rowOf(/Offre 2/));
+    fireEvent.keyDown(document, { key: "ArrowUp" });
+    fireEvent.keyDown(document, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(rowOf(/Offre 1/));
+
+    expect(decisions(calls)).toEqual([]);
+    expect(screen.queryByRole("article")).toBeNull();
+  });
+
+  it("decides only on an open card: the arrows do nothing on closed rows", async () => {
+    const calls = await openScreen(reviewRoutes({ to_review: manyOffers(2) }), false);
+
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+
+    expect(decisions(calls)).toEqual([]);
+    expect(screen.queryByText(fr["decline.title"])).toBeNull();
+    expect(rows()).toHaveLength(2);
   });
 });
 
@@ -116,7 +234,7 @@ describe("a decision", () => {
     ]);
   });
 
-  it("goes to the card the candidate scrolled to, not the first", async () => {
+  it("in the Later view, goes to the card the candidate scrolled to, not the first", async () => {
     let seen: (ids: string[]) => void = () => {};
     vi.stubGlobal(
       "IntersectionObserver",
@@ -133,19 +251,22 @@ describe("a decision", () => {
         disconnect() {}
       },
     );
-    const calls = await openScreen();
+    const parked = [aCard({ id: 3, title: "Plombier", state: "later" }), { ...bob, state: "later" }];
+    const calls = await openScreen(reviewRoutes({ to_review: [aCard()], later: parked }), false);
+    fireEvent.click(screen.getByRole("tab", { name: fill(fr["review.tab.later"], { n: 2 }) }));
 
     seen([screen.getByRole("article", { name: /Développeuse web/ }).id]);
-    fireEvent.keyDown(document, { key: "ArrowDown" });
+    fireEvent.keyDown(document, { key: "ArrowRight" });
 
     await waitFor(() => expect(decisions(calls)).toHaveLength(1));
     expect(decisions(calls)[0]?.[0]).toBe("/api/offers/2/decision");
+    expect(screen.getByRole("article", { name: /Plombier/ })).toBeTruthy();
   });
 
   it("keeps the card and says so when the API refuses", async () => {
     fakeApi({ ...reviewRoutes({ to_review: [aCard()] }), [DECISION(1)]: new Response("no", { status: 409 }) });
     render(<App />);
-    await screen.findByRole("heading", { name: "Ingénieur logiciel" });
+    fireEvent.click(await screen.findByRole("button", { name: /Ingénieur logiciel/ }));
 
     fireEvent.keyDown(document, { key: "ArrowRight" });
 

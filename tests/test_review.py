@@ -140,6 +140,7 @@ def test_a_card_has_the_triage_result_and_the_logo(engine: Engine, client: TestC
         "state": "triaged",
         "score": 82,
         "rule": None,
+        "full_text_read": True,
         **CARD,
     }
 

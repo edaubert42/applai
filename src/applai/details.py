@@ -5,7 +5,8 @@ JSON-LD when it has one, else its main text. The description always comes from t
 rest only fills what the offer lacks, since screening judged the alert's location and
 contract. The offer then moves new → described. A page that fails records its error on the
 offer, which stays new and is read again on the next run. LinkedIn offers are left new: their
-reader is another one, through the candidate's LinkedIn MCP server.
+reader is another one, through the candidate's LinkedIn MCP server. So are those of
+EXTENSION_SITES, whose pages the ApplAI extension reads in the candidate's Chrome.
 
 The logo is the posting's, else the page's og:image, else the site's icon, downloaded once per
 company into logos/ in the data directory; none found, the UI shows initials. Every request
@@ -34,6 +35,8 @@ LOGOS_DIR = "logos"
 TIMEOUT = 20.0  # seconds
 USER_AGENT = f"ApplAI/{version('applai')}"
 MAX_LOGO_BYTES = 1_000_000
+EXTENSION_SITES = ("jobteaser.com",)  # they refuse ApplAI's requests: Chrome reads them
+MAX_PAGE_FAILURES = 2  # then the extension's offer is described from its alert (applai.browser)
 # Raster images only: an SVG can hold scripts.
 IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
                 "image/webp": ".webp", "image/x-icon": ".ico",
@@ -89,7 +92,7 @@ def describe_offers(
     ).all()
     with nullcontext(http) if http else watch_client() as client:
         for offer in offers:
-            if on_linkedin(offer.url):
+            if on_linkedin(offer.url) or read_by_extension(offer.url):
                 continue
             offer_id = offer.id
             try:
@@ -106,13 +109,22 @@ def on_linkedin(url: str) -> bool:
     return (urlsplit(url).hostname or "").endswith("linkedin.com")
 
 
-def describe_offer(session: Session, offer: Offer, data_dir: Path, http: httpx2.Client) -> None:
-    """Read the offer's page and move it to described, or record why not and raise PageError.
+def read_by_extension(url: str) -> bool:
+    """Whether an offer's page is read by the ApplAI extension, not over HTTP (applai.browser)."""
+    host = urlsplit(url).hostname or ""
+    return any(host == site or host.endswith(f".{site}") for site in EXTENSION_SITES)
 
+
+def describe_offer(
+    session: Session, offer: Offer, data_dir: Path, http: httpx2.Client, html: str | None = None
+) -> None:
+    """Read the offer's page, or its html when given, and move it to described.
+
+    Else record why not on the offer and raise PageError. Logos are downloaded with http.
     Writes in the caller's session and does not commit.
     """
     try:
-        base, details = _read(http, offer.url)
+        base, details = _read(http, offer.url) if html is None else _parse(offer.url, html)
     except PageError as error:
         offer.detail_error = str(error)
         raise
@@ -154,10 +166,14 @@ def _read(http: httpx2.Client, url: str) -> tuple[str, Details]:
         raise PageError("the page did not answer in time") from None
     except httpx2.HTTPError as error:  # a message may hold the URL, which may hold a token
         raise PageError(f"the page could not be read: {type(error).__name__}") from None
-    details = read_page(response.text)
+    return _parse(str(response.url), response.text)
+
+
+def _parse(url: str, html: str) -> tuple[str, Details]:
+    details = read_page(html)
     if not details.description:
         raise PageError("the page has no text")
-    return str(response.url), details
+    return url, details
 
 
 def _logo(http: httpx2.Client, company: str, candidates: list[str], logos: Path) -> str | None:
