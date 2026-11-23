@@ -220,3 +220,21 @@ def test_linkedin_offers_are_left_new_for_their_own_reader(engine: Engine, tmp_p
 
     offer = _get(engine, offer_id)
     assert (offer.state, offer.detail_error) == ("new", None)
+
+
+def test_a_page_with_googles_consent_text_is_not_the_offer_and_the_offer_stays_new(
+    engine: Engine, tmp_path: Path, site: Site
+):
+    consent = (
+        "<html><body><main><h1>Avant d'accéder à Google</h1>"
+        "<p>Nous utilisons des cookies pour fournir et gérer les services Google.</p>"
+        "<button>Tout accepter</button></main></body></html>"
+    )
+    offer_id = _offer(engine, site.page("/ml", consent))
+
+    errors = _describe(engine, tmp_path)
+
+    message = "Google's consent page, not the offer"
+    assert errors == [f"offer {offer_id}: {message}"]
+    offer = _get(engine, offer_id)
+    assert (offer.state, offer.description, offer.detail_error) == ("new", None, message)

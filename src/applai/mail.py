@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx2
 import msal  # pyright: ignore[reportMissingTypeStubs]
@@ -182,6 +182,7 @@ def read_alerts(engine: Engine, mailbox: Mailbox, user_id: int = LOCAL_USER_ID) 
             for offer in offers:
                 try:
                     link = mailbox.where_leads(offer.link) if source in REDIRECTED else offer.link
+                    link = _out_of_consent(link)
                 except httpx2.HTTPError as error:  # a redirect loop, a mailto:, a dead domain
                     problems.append(f"a link of {urlsplit(offer.link).netloc}: {_name(error)}")
                     continue
@@ -193,6 +194,7 @@ def read_alerts(engine: Engine, mailbox: Mailbox, user_id: int = LOCAL_USER_ID) 
                     session.add(Offer(
                         user_id=user_id, url=url, title=offer.title, company=offer.company,
                         location=offer.location, contract=offer.contract, source=source,
+                        board=offer.board,
                         received_at=alert.received_at,
                     ))  # fmt: skip
                     reading.offers += 1
@@ -211,6 +213,14 @@ def _sender(message: dict[str, Any]) -> str:
     sender: dict[str, Any] = message.get("from") or {}
     address: dict[str, Any] = sender.get("emailAddress") or {}
     return str(address.get("address") or "").lower()
+
+
+def _out_of_consent(link: str) -> str:
+    """Where Google's consent page (consent.google.*/ml) sends on, else the link itself."""
+    url = urlsplit(link)
+    if (url.hostname or "").startswith("consent.google.") and url.path == "/ml":
+        return parse_qs(url.query).get("continue", [link])[0]
+    return link
 
 
 def _without_tracking(link: str, whole_query: bool) -> str:
