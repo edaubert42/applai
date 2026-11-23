@@ -1,7 +1,9 @@
 """The scan, through the real app: a fake clock, a fake network, a fake agent backend."""
 
 import json
+import shlex
 import shutil
+import sys
 import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -19,7 +21,8 @@ from sqlalchemy.orm import Session
 from applai.agents import AgentResult, AgentRunner, FakeBackend, Usage
 from applai.app import create_app
 from applai.database import open_database
-from applai.models import Offer, Scan
+from applai.linkedin import COMMAND_VARIABLE, MAX_READS_PER_DAY
+from applai.models import LinkedInRead, Offer, Scan
 from applai.scan import Scanner, Watch
 from applai.triage import TRIAGE_MODEL
 
@@ -27,6 +30,7 @@ DEMO_DIR = Path(__file__).parents[1] / "demo" / "candidate"
 PARIS = ZoneInfo("Europe/Paris")
 NOON = datetime(2026, 11, 20, 12, 0, tzinfo=PARIS)
 SITE = "https://jobs.example.org/pivoine-analytics"
+LINKEDIN_SERVER = Path(__file__).parent / "fixtures" / "linkedin_mcp_server.py"
 POSTING = {
     "@context": "https://schema.org",
     "@type": "JobPosting",
@@ -76,7 +80,7 @@ def _utc(moment: datetime) -> datetime:
     return moment.astimezone(UTC).replace(tzinfo=None)
 
 
-def _seed(data_dir: Path, *rows: Scan | Offer) -> list[int]:
+def _seed(data_dir: Path, *rows: Scan | Offer | LinkedInRead) -> list[int]:
     engine = open_database(data_dir)
     with Session(engine) as session:
         session.add_all(rows)
@@ -95,6 +99,30 @@ def _scan(started: datetime, errors: list[str] | None = None) -> Scan:
 def _offer(slug: str) -> Offer:
     return Offer(user_id=1, url=f"{SITE}/{slug}", title="Data engineer",
                  company="Pivoine Analytics")  # fmt: skip
+
+
+def _linkedin_offer(job_id: str) -> Offer:
+    url = f"https://www.linkedin.com/comm/jobs/view/{job_id}/?trackingId=x"
+    return Offer(user_id=1, url=url, title="Data engineer", company="Pivoine Analytics")
+
+
+def _states(data_dir: Path) -> dict[int, str]:
+    engine = open_database(data_dir)
+    with Session(engine) as session:
+        states = {offer.id: offer.state for offer in session.scalars(select(Offer))}
+    engine.dispose()
+    return states
+
+
+def _serve_linkedin(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch, jobs: dict[str, object]
+) -> Path:
+    """Point APPLAI_LINKEDIN_MCP at the fictional server; return the file of its tool calls."""
+    jobs_file, calls_file = data_dir / "jobs.json", data_dir / "calls.jsonl"
+    jobs_file.write_text(json.dumps(jobs))
+    args = [sys.executable, str(LINKEDIN_SERVER), str(jobs_file), str(calls_file)]
+    monkeypatch.setenv(COMMAND_VARIABLE, shlex.join(args))
+    return calls_file
 
 
 def _scans(data_dir: Path) -> list[Scan]:
@@ -322,6 +350,80 @@ def test_the_status_gives_the_linkedin_reads_of_the_day_and_their_limit(app: Fas
         status = client.get("/api/scan").json()
 
     assert (status["linkedin_reads_today"], status["linkedin_reads_per_day"]) == (0, 30)
+
+
+def test_a_scan_reads_a_linkedin_offer_through_the_server_and_triage_takes_it(
+    data_dir: Path, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+):
+    posting = "Pivoine Analytics aide les bibliothèques. Python et SQL, à Paris."
+    calls = _serve_linkedin(
+        data_dir, monkeypatch, {"4000000001": {"sections": {"job_posting": posting}}}
+    )
+    (offer_id,) = _seed(data_dir, _linkedin_offer("4000000001"))
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _scanner(client).wait()
+        status = client.get("/api/scan").json()
+
+    assert _states(data_dir) == {offer_id: "triaged"}
+    assert [json.loads(line)["tool"] for line in calls.read_text().splitlines()] == [
+        "get_job_details"
+    ]
+    assert status["last_scan"]["errors"] == [
+        "Outlook is not set up: set APPLAI_MS_CLIENT_ID, then run applai mail login."
+    ]
+    assert status["linkedin_reads_today"] == 1
+
+
+def test_without_the_linkedin_variable_the_offers_stay_new_with_one_error_naming_it(
+    data_dir: Path, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv(COMMAND_VARIABLE, raising=False)
+    first, second = _seed(data_dir, _linkedin_offer("4000000001"), _linkedin_offer("4000000002"))
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _scanner(client).wait()
+        errors = client.get("/api/scan").json()["last_scan"]["errors"]
+
+    assert _states(data_dir) == {first: "new", second: "new"}
+    assert len(errors) == 2  # Outlook is not set up, and the variable
+    assert COMMAND_VARIABLE in errors[1]
+
+
+def test_a_failed_linkedin_read_is_an_error_of_the_scan_and_the_other_offers_go_on(
+    data_dir: Path, network: Network, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+):
+    page = f'<script type="application/ld+json">{json.dumps(POSTING)}</script>'
+    network.pages[f"{SITE}/data-engineer"] = (200, page)
+    _serve_linkedin(data_dir, monkeypatch, {})  # the server knows no job
+    linkedin, public = _seed(data_dir, _linkedin_offer("4000000001"), _offer("data-engineer"))
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _scanner(client).wait()
+        errors = client.get("/api/scan").json()["last_scan"]["errors"]
+
+    assert _states(data_dir) == {linkedin: "new", public: "triaged"}
+    assert len(errors) == 2
+    assert f"offer {linkedin}: the LinkedIn MCP server could not read the offer" in errors[1]
+
+
+def test_the_status_counts_the_linkedin_reads_of_the_day_by_the_modules_count(
+    data_dir: Path, app: FastAPI
+):
+    (offer_id,) = _seed(data_dir, _linkedin_offer("4000000001"))
+    reads = [LinkedInRead(user_id=1, offer_id=offer_id, read_at=_utc(at)) for at in (
+        NOON - timedelta(days=1), NOON - timedelta(hours=3), NOON - timedelta(hours=1),
+    )]  # fmt: skip
+    _seed(data_dir, *reads)
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _scanner(client).wait()
+        status = client.get("/api/scan").json()
+
+    assert (status["linkedin_reads_today"], status["linkedin_reads_per_day"]) == (
+        2,
+        MAX_READS_PER_DAY,
+    )
 
 
 def test_without_a_watch_the_app_does_not_scan(tmp_path: Path):

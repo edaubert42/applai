@@ -89,12 +89,10 @@ def describe_linkedin_offers(
     offers = [offer for offer in _new_offers(session, user_id) if _is_linkedin(offer.url)]
     command = os.environ.get(COMMAND_VARIABLE, "").strip()
     if offers and not command:
+        message = f"{COMMAND_VARIABLE} is not set: it starts the LinkedIn MCP server"
         for offer in offers:
-            _fail(
-                describing,
-                offer,
-                f"{COMMAND_VARIABLE} is not set: it starts the LinkedIn MCP server",
-            )
+            offer.detail_error = message
+        describing.errors.append(message)  # once, not once per offer
         session.commit()
         return describing
     for offer in offers:
@@ -138,15 +136,26 @@ def _new_offers(session: Session, user_id: int) -> Sequence[Offer]:
     ).all()
 
 
+def reads_today(session: Session, now: datetime, user_id: int = LOCAL_USER_ID) -> int:
+    """The reads made on now's UTC day, failed calls included; now has no time zone."""
+    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return (
+        session.scalar(
+            select(func.count())
+            .select_from(LinkedInRead)
+            .where(LinkedInRead.user_id == user_id, LinkedInRead.read_at >= day)
+        )
+        or 0
+    )
+
+
 def _may_read(session: Session, user_id: int, now: datetime) -> bool:
     """Whether a read now stays within the daily limit and the interval between reads."""
-    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    mine = LinkedInRead.user_id == user_id
-    last = session.scalar(select(func.max(LinkedInRead.read_at)).where(mine))
-    today = session.scalar(
-        select(func.count()).select_from(LinkedInRead).where(mine, LinkedInRead.read_at >= day)
+    last = session.scalar(
+        select(func.max(LinkedInRead.read_at)).where(LinkedInRead.user_id == user_id)
     )
-    return (today or 0) < MAX_READS_PER_DAY and (last is None or now - last >= MIN_INTERVAL)
+    within_interval = last is None or now - last >= MIN_INTERVAL
+    return reads_today(session, now, user_id) < MAX_READS_PER_DAY and within_interval
 
 
 def _posting(text: str) -> str:
