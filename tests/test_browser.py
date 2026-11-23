@@ -144,11 +144,25 @@ def test_a_page_sent_by_the_extension_describes_the_offer_then_triages_it(
     assert offer.state == "triaged"  # described, then triaged in the background
 
 
+def test_both_routes_accept_chrome_which_sends_no_origin_on_a_get(data_dir: Path, app: FastAPI):
+    (offer_id,) = _seed(data_dir, JOBTEASER)
+    chrome = {"Sec-Fetch-Site": "none"}  # what the extension's fetch really sends: no Origin
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        listed = client.get("/api/browser/pages", headers=chrome)
+        sent = client.post(f"/api/browser/pages/{offer_id}", json={"html": PAGE}, headers=chrome)
+
+    assert listed.status_code == 200
+    assert [page["offer_id"] for page in listed.json()] == [offer_id]
+    assert sent.status_code == 204
+    assert _offers(data_dir)[offer_id].state != "new"
+
+
 @pytest.mark.parametrize(
     "headers",
-    [{}, {"Origin": "https://evil.example"}, {"Origin": "chrome-extension://" + "a" * 32},
+    [{"Origin": "https://evil.example"}, {"Origin": "chrome-extension://" + "a" * 32},
      {"Origin": "http://127.0.0.1"}],
-    ids=["no-origin", "another-site", "another-extension", "the-app-itself"],
+    ids=["another-site", "another-extension", "the-app-itself"],
 )  # fmt: skip
 def test_both_routes_refuse_another_origin(data_dir: Path, app: FastAPI, headers: dict[str, str]):
     (offer_id,) = _seed(data_dir, JOBTEASER)
