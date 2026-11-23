@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VIEWS, api, type Card, type Decision, type View } from "./api";
 import DeclinePanel from "./DeclinePanel";
-import { Header, Logo, ReviewCard, useSourceName } from "./ReviewCard";
+import { Header, Logo, OfferRow, ReviewCard, useSourceName } from "./ReviewCard";
 import ScanBar from "./ScanBar";
 import { useSettings } from "./settings";
 
@@ -9,7 +9,10 @@ type Lists = Record<View, Card[]>;
 
 const focus = "focus-visible:outline-2 focus-visible:outline-link";
 
-/** The To review screen: the scan, the three views, and the cards with their decisions. */
+/**
+ * The To review screen: the scan, the three views, and the offers with their decisions.
+ * To review lists its offers as rows and opens one card at a time; Later shows its cards.
+ */
 export default function ReviewScreen() {
   const { t } = useSettings();
   const [view, setView] = useState<View>("to_review");
@@ -17,6 +20,8 @@ export default function ReviewScreen() {
   const [failed, setFailed] = useState(false);
   const [problem, setProblem] = useState(false); // a decision the API refused
   const [declining, setDeclining] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(null); // the card open among the rows of To review
+  const refocus = useRef<number | null>(null); // the row to give the focus back to once its card closed
   const deciding = useRef(false);
   const visible = useRef(new Map<number, number>()); // the share of each card on screen
 
@@ -40,6 +45,32 @@ export default function ReviewScreen() {
 
   const shown = useMemo(() => lists?.[view] ?? [], [lists, view]);
   const decliningCard = shown.find((card) => card.id === declining);
+  const asRows = view === "to_review";
+  const openCard = asRows ? shown.find((card) => card.id === open) : undefined;
+
+  function openOnly(id: number | null) {
+    setOpen(id);
+    setDeclining(null);
+  }
+
+  function closeCard(card: Card) {
+    refocus.current = card.id;
+    openOnly(null);
+  }
+
+  useEffect(() => {
+    if (open === null && refocus.current !== null) {
+      document.querySelector<HTMLElement>(`[data-row-id="${refocus.current}"]`)?.focus();
+      refocus.current = null;
+    }
+    if (open !== null) document.getElementById(`offer-${open}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [open]);
+
+  function moveBetweenRows(step: 1 | -1) {
+    const all = Array.from(document.querySelectorAll<HTMLElement>("[data-row-id]"));
+    const at = all.indexOf(document.activeElement as HTMLElement);
+    all[Math.min(Math.max(at + step, 0), all.length - 1)]?.focus();
+  }
 
   // The card in view: the one most on screen, the first when none is known.
   const inView = useCallback(() => {
@@ -69,6 +100,10 @@ export default function ReviewScreen() {
     setProblem(false);
     try {
       await api.decide(card.id, decision);
+      if (asRows && open === card.id) {
+        const at = shown.indexOf(card);
+        openOnly((shown[at + 1] ?? shown[at - 1])?.id ?? null); // the next offer, or the one above the last
+      }
       setLists((now) => {
         if (!now) return now;
         const without = (cards: Card[]) => cards.filter((other) => other.id !== card.id);
@@ -88,7 +123,19 @@ export default function ReviewScreen() {
       const target = event.target instanceof HTMLElement ? event.target : null;
       if (declining !== null || view === "screened_out" || event.ctrlKey || event.metaKey || event.altKey) return;
       if (target && ["TEXTAREA", "INPUT", "SELECT"].includes(target.tagName)) return;
-      const card = inView();
+      if (asRows && !openCard) {
+        if (event.key === "ArrowDown") moveBetweenRows(1);
+        else if (event.key === "ArrowUp") moveBetweenRows(-1);
+        else return;
+        event.preventDefault();
+        return;
+      }
+      if (openCard && event.key === "Escape") {
+        closeCard(openCard);
+        event.preventDefault();
+        return;
+      }
+      const card = openCard ?? inView();
       if (!card) return;
       if (event.key === "ArrowRight") void decide(card, { decision: "interested" });
       else if (event.key === "ArrowLeft") setDeclining(card.id);
@@ -99,6 +146,37 @@ export default function ReviewScreen() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   });
+
+  function fullCard(card: Card) {
+    return (
+      <article
+        key={card.id}
+        id={`offer-${card.id}`}
+        data-offer-id={card.id}
+        aria-labelledby={`offer-${card.id}-title`}
+        className="space-y-5.5 rounded-card border border-border bg-surface p-7"
+      >
+        {card.id === decliningCard?.id ? (
+          <>
+            <Header card={card} compact />
+            <DeclinePanel
+              onCancel={() => setDeclining(null)}
+              onSave={(reasons, note) =>
+                void decide(card, { decision: "not_interested", reasons, ...(note ? { note } : {}) })
+              }
+            />
+          </>
+        ) : (
+          <ReviewCard
+            card={card}
+            onInterested={() => void decide(card, { decision: "interested" })}
+            onNotInterested={() => setDeclining(card.id)}
+            onLater={() => void decide(card, { decision: "later" })}
+          />
+        )}
+      </article>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-215 space-y-7">
@@ -113,7 +191,7 @@ export default function ReviewScreen() {
               aria-selected={name === view}
               onClick={() => {
                 setView(name);
-                setDeclining(null);
+                openOnly(null);
               }}
               className={`min-h-11 rounded-pill px-5 font-medium ${focus} ${
                 name === view ? "bg-primary text-on-primary" : "text-muted hover:text-text"
@@ -136,35 +214,24 @@ export default function ReviewScreen() {
       ) : (
         <>
           {lists && shown.length === 0 && <p className="text-center text-muted">{t("review.empty")}</p>}
-          {shown.map((card) => (
-            <article
-              key={card.id}
-              id={`offer-${card.id}`}
-              data-offer-id={card.id}
-              aria-labelledby={`offer-${card.id}-title`}
-              className="space-y-5.5 rounded-card border border-border bg-surface p-7"
-            >
-              {card.id === decliningCard?.id ? (
-                <>
-                  <Header card={card} compact />
-                  <DeclinePanel
-                    onCancel={() => setDeclining(null)}
-                    onSave={(reasons, note) =>
-                      void decide(card, { decision: "not_interested", reasons, ...(note ? { note } : {}) })
-                    }
-                  />
-                </>
-              ) : (
-                <ReviewCard
-                  card={card}
-                  onInterested={() => void decide(card, { decision: "interested" })}
-                  onNotInterested={() => setDeclining(card.id)}
-                  onLater={() => void decide(card, { decision: "later" })}
-                />
-              )}
-            </article>
-          ))}
-          {shown.length > 0 && <p className="text-center text-sm text-muted">{t("review.keys")}</p>}
+          {asRows ? (
+            <ul className="space-y-3">
+              {shown.map((card) => (
+                <li key={card.id}>
+                  {card.id === openCard?.id ? (
+                    fullCard(card)
+                  ) : (
+                    <OfferRow card={card} onOpen={() => openOnly(card.id)} />
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            shown.map(fullCard)
+          )}
+          {shown.length > 0 && (
+            <p className="text-center text-sm text-muted">{t(asRows && !openCard ? "review.keys.rows" : "review.keys")}</p>
+          )}
         </>
       )}
     </div>
