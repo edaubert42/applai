@@ -109,6 +109,13 @@ def test_the_fictional_candidates_profile_is_read_as_a_typed_profile():
     assert {type(fact.diffusion) for fact in profile.facts} == {Diffusion}
 
 
+def test_a_profile_may_set_the_shortest_cdd_it_accepts(tmp_path: Path):
+    _write(tmp_path, _edited(("targets", "fixed_term_min_months"), 6))
+
+    assert load_profile(tmp_path).targets.fixed_term_min_months == 6
+    assert load_profile(DEMO_DIR).targets.fixed_term_min_months is None
+
+
 def test_the_profile_is_frozen_down_to_its_base_answers():
     profile = load_profile(DEMO_DIR)
     answers: Any = profile.base_answers
@@ -168,6 +175,12 @@ def test_without_APPLAI_DATA_DIR_the_error_names_it(
         pytest.param(("triage",), REMOVE, "triage", id="missing triage section"),
         pytest.param(
             ("triage", "max_years_required"), "three", "triage.max_years_required", id="years"
+        ),
+        pytest.param(
+            ("targets", "fixed_term_min_months"),
+            0,
+            "targets.fixed_term_min_months",
+            id="CDD of no month",
         ),
         pytest.param(("facts", 1, "text"), REMOVE, "facts[1].text", id="missing fact text"),
         pytest.param(("facts", 2, "status"), "approved", "facts[2].status", id="unknown status"),

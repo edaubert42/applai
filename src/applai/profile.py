@@ -105,6 +105,8 @@ class Targets(_Section):
     contracts: tuple[str, ...]  # in priority order
     locations: tuple[str, ...]
     salary: Salary
+    # With fixed_term in contracts: a shorter CDD is screened out after Triage.
+    fixed_term_min_months: Annotated[int, Field(ge=1)] | None = None
 
 
 class TriageRules(_Section):

@@ -19,6 +19,7 @@ OFFER_MOVES = {
     ("new", "screened_out"): "watch",
     ("new", "described"): "watch",
     ("described", "triaged"): "triage",
+    ("described", "screened_out"): "watch",  # a rule found after Triage (#107)
     ("triaged", "accepted"): "candidate",
     ("triaged", "declined"): "candidate",
     ("triaged", "later"): "candidate",

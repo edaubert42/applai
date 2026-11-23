@@ -43,7 +43,9 @@ CARD: dict[str, Any] = {
     "mission": ["Construire les pipelines de données", "Écrire du Python et du SQL"],
     "pros": ["Data engineering au cœur du poste", "CDI"],
     "cons": [{"text": "Salaire non précisé", "verdict": "?"}],
+    "fixed_term_months": None,
 }
+STORED = {name: value for name, value in CARD.items() if name != "fixed_term_months"}
 
 
 def _result(output: dict[str, Any]) -> AgentResult:
@@ -68,7 +70,7 @@ def profile() -> Profile:
     return load_profile(DEMO_DIR)
 
 
-def _offer(engine: Engine, description: str | None = DESCRIPTION) -> int:
+def _offer(engine: Engine, description: str | None = DESCRIPTION, **fields: object) -> int:
     with Session(engine) as session:
         offer = Offer(
             user_id=1,
@@ -77,6 +79,7 @@ def _offer(engine: Engine, description: str | None = DESCRIPTION) -> int:
             company=COMPANY,
             description=description,
             state="described",  # put there directly to set up the case
+            **fields,
         )
         session.add(offer)
         session.commit()
@@ -110,7 +113,7 @@ def test_a_described_offer_gets_its_stored_card_and_moves_to_triaged(
     [stored] = _triages(engine)
     assert (stored.offer_id, stored.user_id, stored.agent_run_id) == (offer_id, 1, run.id)
     assert (run.agent, run.outcome) == ("triage", "ok")
-    assert stored.card() == CARD
+    assert stored.card() == STORED
     assert _state(engine, offer_id) == "triaged"
     with Session(engine) as session:
         change = session.scalars(select(StateChange)).one()
@@ -123,7 +126,8 @@ def test_a_described_offer_gets_its_stored_card_and_moves_to_triaged(
     assert spec.model == TRIAGE_MODEL == "claude-haiku-5-5"
     sent = json.loads(spec.input)
     assert sent["offer"] == {"title": TITLE, "company": COMPANY, "description": DESCRIPTION}
-    assert sent["targets"] == profile.targets.model_dump(mode="json")
+    assert sent["targets"] == profile.targets.model_dump(mode="json", exclude_none=True)
+    assert "fixed_term_min_months" not in sent["targets"]  # unset in the demo profile
     assert [fact["id"] for fact in sent["facts"]] == ["F1", "F2", "F3"]
     forbidden = [fact.text for fact in profile.facts if fact.status == FactStatus.FORBIDDEN]
     assert forbidden
@@ -263,6 +267,128 @@ def test_a_profile_with_no_stretch_location_gives_no_minus_location_rule(profile
     no_stretch = _with_locations(profile, ("Lyon",), ())
 
     assert _location_rules(no_stretch) == ['Lyon: the location is "+".', OTHER_PLACES]
+
+
+PLACELESS = (
+    "Pivoine Analytics aide les réseaux de bibliothèques à suivre leurs prêts."
+    " Vous construirez nos pipelines de données en Python et SQL."
+)
+
+
+def _read(engine: Engine, offer_id: int) -> Offer:
+    with Session(engine, expire_on_commit=False) as session:
+        return session.get_one(Offer, offer_id)
+
+
+def _changes(engine: Engine, offer_id: int) -> list[tuple[str | None, str, str]]:
+    with Session(engine) as session:
+        changes = session.scalars(select(StateChange).where(StateChange.offer_id == offer_id))
+        return [(change.from_state, change.to_state, change.actor) for change in changes]
+
+
+def _triage(engine: Engine, profile: Profile, card: dict[str, Any], **fields: object) -> int:
+    """Store a described offer with fields and triage it with card as the agent's answer."""
+    offer_id = _offer(engine, DESCRIPTION, **fields)
+    triage_offer(AgentRunner(FakeBackend([_result(card)])), engine, offer_id, profile)
+    return offer_id
+
+
+def test_a_described_offer_is_sent_to_triage_with_the_place_its_page_gives(
+    engine: Engine, profile: Profile
+):
+    offer_id = _offer(engine, PLACELESS, location="Paris", contract="CDI", years_required=2)
+    backend = FakeBackend([_result(CARD)])
+
+    triage_offer(AgentRunner(backend), engine, offer_id, profile)
+
+    [spec] = backend.specs
+    assert json.loads(spec.input)["offer"] == {
+        "title": TITLE,
+        "company": COMPANY,
+        "description": PLACELESS,
+        "location": "Paris",
+        "contract": "CDI",
+        "years_required": 2,
+    }
+    prompt = " ".join(spec.system_prompt.split())
+    assert "come from the summary of the offer's page" in prompt
+    assert "win over what the description says" in prompt
+
+
+@pytest.mark.parametrize(
+    ("contract", "state", "rule"),
+    [
+        ("TEMPORARY", "screened_out", "contract"),
+        ("FULL_TIME, TEMPORARY", "screened_out", "contract"),
+        ("FULL_TIME", "triaged", None),
+    ],
+)
+def test_a_temporary_contract_is_screened_out_for_a_profile_without_fixed_term(
+    engine: Engine, profile: Profile, contract: str, state: str, rule: str | None
+):
+    offer_id = _triage(engine, profile, CARD, contract=contract)
+
+    offer = _read(engine, offer_id)
+    assert (offer.state, offer.screened_rule) == (state, rule)
+
+
+def _with_fixed_term(profile: Profile) -> Profile:
+    contracts = (*profile.targets.contracts, "fixed_term")
+    targets = profile.targets.model_copy(
+        update={"contracts": contracts, "fixed_term_min_months": 6}
+    )
+    return profile.model_copy(update={"targets": targets})
+
+
+def test_a_cdd_shorter_than_the_minimum_is_screened_out_by_watch_after_triage(
+    engine: Engine, profile: Profile
+):
+    card = CARD | {"fixed_term_months": 3}
+    offer_id = _triage(engine, _with_fixed_term(profile), card, contract="TEMPORARY")
+
+    offer = _read(engine, offer_id)
+    assert (offer.state, offer.screened_rule) == ("screened_out", "fixed_term")
+    assert _changes(engine, offer_id) == [("described", "screened_out", "watch")]
+    [stored] = _triages(engine)  # kept, so the candidate who rescues it reads its card
+    assert stored.cons == [
+        *CARD["cons"],
+        {"text": "CDD de moins de 6 mois", "verdict": "\N{MINUS SIGN}"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("months", "added"),
+    [
+        pytest.param(12, [], id="12 months"),
+        pytest.param(6, [], id="6 months"),
+        pytest.param(None, [{"text": "durée du CDD non précisée", "verdict": "?"}], id="unknown"),
+    ],
+)
+def test_a_cdd_of_the_minimum_or_more_or_of_unknown_length_passes(
+    engine: Engine, profile: Profile, months: int | None, added: list[dict[str, str]]
+):
+    card = CARD | {"fixed_term_months": months}
+    offer_id = _triage(engine, _with_fixed_term(profile), card, contract="TEMPORARY")
+
+    offer = _read(engine, offer_id)
+    assert (offer.state, offer.screened_rule) == ("triaged", None)
+    [stored] = _triages(engine)
+    assert stored.cons == [*CARD["cons"], *added]
+
+
+def test_an_offer_without_salary_is_not_screened_out_and_its_salary_tag_is_unknown(
+    engine: Engine, profile: Profile
+):
+    offer_id = _offer(engine, location="Lyon", contract="CDI", salary=None)
+    backend = FakeBackend([_result(CARD)])
+
+    triage_offer(AgentRunner(backend), engine, offer_id, profile)
+
+    [spec] = backend.specs
+    assert "salary" not in json.loads(spec.input)["offer"]
+    assert _read(engine, offer_id).state == "triaged"
+    [stored] = _triages(engine)
+    assert stored.tags["salary"]["verdict"] == "?"
 
 
 @pytest.mark.usefixtures("logged_in_claude")
