@@ -5,6 +5,7 @@ are read where they are used, so a change applies without restarting ApplAI.
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,6 +26,14 @@ def review_min_score(data_dir: Path | str | None = None) -> int:
     value = _read(data_dir).get("review_min_score", DEFAULT_REVIEW_MIN_SCORE)
     if type(value) is not int or not 0 <= value <= 100:
         raise SettingsError(f"{SETTINGS_FILE}: review_min_score must be a whole number, 0 to 100")
+    return value
+
+
+def extension_id(data_dir: Path | str | None = None) -> str | None:
+    """The id Chrome gave the ApplAI extension, whose origin alone may use /api/browser/pages."""
+    value = _read(data_dir).get("extension_id")
+    if value is not None and not (type(value) is str and re.fullmatch("[a-p]{32}", value)):
+        raise SettingsError(f"{SETTINGS_FILE}: extension_id must be the 32 letters Chrome shows")
     return value
 
 

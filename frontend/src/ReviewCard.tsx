@@ -119,6 +119,8 @@ export function Header({ card, compact = false }: { card: Card; compact?: boolea
           <a href={card.url} target="_blank" rel="noreferrer" className="text-link underline">
             {t("card.original")}
           </a>
+          {!card.full_text_read && " · "}
+          {!card.full_text_read && <span>{t("card.fullTextNotRead")}</span>}
         </p>
       )}
     </header>
