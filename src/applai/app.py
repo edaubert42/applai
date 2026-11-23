@@ -198,7 +198,8 @@ class SameOriginWrites:
     A browser sends Origin on a cross-site POST, even from a plain form with no script, so
     another site, or another local server on another port, cannot start a scan or decide on
     an offer. A write without Origin is not from a browser page (curl, tests) and goes through.
-    The extension's routes answer its origin only, chrome-extension:// + the id in settings.
+    The extension's routes refuse any other Origin than chrome-extension:// + the id in
+    settings, whatever the method; without Origin they go through like a write.
     """
 
     def __init__(self, app: ASGIApp, data_dir: Path) -> None:
@@ -226,7 +227,9 @@ class SameOriginWrites:
             return JSONResponse({"detail": str(error)}, 500)
         if extension is None:
             return JSONResponse({"detail": "Refused: set extension_id in settings.yaml."}, 403)
-        if origin != f"chrome-extension://{extension}":
+        # Chrome sends no Origin on the extension's GET; a web page always sends one on a
+        # POST and cannot read the answer to a cross-site GET.
+        if origin is not None and origin != f"chrome-extension://{extension}":
             return JSONResponse({"detail": "Refused: not sent by the ApplAI extension."}, 403)
         return None
 
