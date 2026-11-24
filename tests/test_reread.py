@@ -65,7 +65,8 @@ class Env:
     def run(self, spec: AgentSpec) -> AgentResult:  # the agents' backend: the model's call
         self.specs.append(spec)
         usage = Usage(model=TRIAGE_MODEL, input_tokens=900, output_tokens=300)
-        return AgentResult(output=_card(self.scores.pop(0)), usage=usage)  # none left: it fails
+        card = _card(self.scores.pop(0)) | {"fixed_term_months": None}  # none left: it fails
+        return AgentResult(output=card, usage=usage)
 
     def offer(self, score: int = 55, **fields: Any) -> int:
         """A triaged Google offer described from its alert only, its card scoring 55."""
