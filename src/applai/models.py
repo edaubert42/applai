@@ -166,8 +166,31 @@ class Application(Base):
     form_fields: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     form_failures: Mapped[int] = mapped_column(server_default="0")  # by the extension
     form_failed_at: Mapped[datetime | None]  # the last of them
+    draft_error: Mapped[str | None]  # why the last Drafting failed (applai.drafting)
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=_utc_now, onupdate=_utc_now)
+
+
+class DraftAnswer(Base):
+    """One answer, or the cover letter, the Drafting agent wrote for a field of a form.
+
+    sentences are the agent's, each {text, facts} citing validated facts (ADR 0008); text
+    is them joined without the facts' ids. status is pending until the candidate's label.
+    """
+
+    __tablename__ = "draft_answers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"), index=True)
+    agent_run_id: Mapped[int] = mapped_column(ForeignKey("agent_runs.id"))
+    kind: Mapped[str]  # question or cover_letter
+    field_index: Mapped[int]  # the field of applications.form_fields it fills
+    label: Mapped[str]  # the field's
+    sentences: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    text: Mapped[str]
+    status: Mapped[str] = mapped_column(server_default="pending")  # accepted, edited, rejected
+    created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
 class StateChange(Base):
