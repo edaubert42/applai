@@ -128,7 +128,7 @@ export interface FormReview {
   application_id: number; offer_id: number; title: string; company: string;
   url: string; form_url: string | null; state: string; fields: ReviewedField[];
   problems: ReviewProblem[] | null; review_error: string | null; has_screenshot: boolean;
-  send_authorized: boolean; send_error: string | null;
+  send_authorized: boolean; send_error: string | null; cv_warning: string | null;
 }
 
 export interface ScanStatus {
