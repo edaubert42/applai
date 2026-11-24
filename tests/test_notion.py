@@ -403,3 +403,32 @@ def test_write_sent_in_background_writes_to_notion_and_keeps_sent_on_error(
     write_sent_in_background(engine, data_dir, app_id, base_url=notion.url)
     status = last_write_status(data_dir)
     assert notion.requests[-1][0] == "/v1/pages" and status.last_error is None and status.last_ok_at
+
+
+def test_post_sent_writes_back_to_notion_and_stays_sent_on_notion_error(
+    data_dir: Path, engine: Engine, notion: FakeNotion, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("applai.notion.NOTION_API", notion.url)
+    other = "https://jobs.example.org/verger-numerique/analytics-engineer"
+    with Session(engine) as s:
+        o1 = Offer(user_id=1, url=ML_ENGINEER, title="ML engineer", company="Verger Numérique")
+        o2 = Offer(user_id=1, url=other, title="Analytics engineer", company="Verger Numérique")
+        s.add_all([o1, o2])
+        s.flush()
+        a1 = Application(user_id=1, offer_id=o1.id, state=ApplicationState.VALIDATED)
+        a2 = Application(user_id=1, offer_id=o2.id, state=ApplicationState.VALIDATED)
+        s.add_all([a1, a2])
+        s.commit()
+        id1, id2 = a1.id, a2.id
+
+    app = create_app(data_dir, frontend_dir=data_dir / "no-frontend")
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        assert client.post(f"/api/applications/{id1}/sent").status_code == 204
+        assert notion.requests[-1][0] == "/v1/pages"
+        assert notion.requests[-1][2]["properties"]["Lien"] == {"url": ML_ENGINEER}
+
+        notion.write_answer = (503, {"object": "error", "message": "upstream-secret"})
+        assert client.post(f"/api/applications/{id2}/sent").status_code == 204
+    with Session(engine) as s:
+        assert s.get_one(Application, id1).state == ApplicationState.SENT
+        assert s.get_one(Application, id2).state == ApplicationState.SENT

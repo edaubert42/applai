@@ -27,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from applai import browser, correct, reread, review_form, validation
+from applai import browser, correct, notion, reread, review_form, validation
 from applai.agents import AgentError
 from applai.applications import Board, board
 from applai.capture import find_form
@@ -423,9 +423,13 @@ def validate_application(application_id: int, session: _Session) -> None:
 
 
 @api.post("/applications/{application_id}/sent", status_code=204)
-def mark_sent(application_id: int, session: _Session) -> None:
-    """Record manual send as a label and move validated -> sent."""
+def mark_sent(
+    application_id: int, session: _Session, request: Request, later: BackgroundTasks
+) -> None:
+    """Record manual send as a label, move validated -> sent, and write back to Notion."""
     _run_gate(session, lambda: validation.mark_sent(session, LOCAL_USER_ID, application_id))
+    s = request.app.state
+    later.add_task(notion.write_sent_in_background, s.engine, s.data_dir, application_id)
 
 
 @api.post("/applications/{application_id}/drop", status_code=204)

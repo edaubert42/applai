@@ -199,14 +199,14 @@ def _set_write_status(data_dir: Path, *, ok: bool, error: str | None = None) -> 
 
 
 def record_sent(
-    data_dir: Path, title: str, company: str, url: str, *, base_url: str = NOTION_API
+    data_dir: Path, title: str, company: str, url: str, *, base_url: str | None = None
 ) -> None:
     """Record a sent application in Notion by URL; quiet no-op when unconfigured."""
     _write_sent(data_dir, title, company, url, base_url=base_url)
 
 
 def write_sent_in_background(
-    database: Engine, data_dir: Path, application_id: int, *, base_url: str = NOTION_API
+    database: Engine, data_dir: Path, application_id: int, *, base_url: str | None = None
 ) -> None:
     """Write a sent application to Notion in the background; never raises or rolls back."""
     try:
@@ -227,13 +227,13 @@ def write_sent_in_background(
 
 
 def _write_sent(
-    data_dir: Path, title: str, company: str, url: str, *, base_url: str = NOTION_API
+    data_dir: Path, title: str, company: str, url: str, *, base_url: str | None = None
 ) -> bool:
     token = os.environ.get(TOKEN_VARIABLE, "").strip()
     if not token or not (Path(data_dir) / CONFIG_FILE).is_file():
         return False
     cfg = load_config(data_dir)
-    root, n = base_url.rstrip("/"), cfg.properties
+    root, n = (base_url or NOTION_API).rstrip("/"), cfg.properties
     q = {"filter": {"property": n.url, "url": {"equals": url}}, "page_size": 1}
     raw = _request("POST", f"{root}/v1/databases/{cfg.database_id}/query", token, q, "query")
     results = raw.get("results")
