@@ -6,12 +6,22 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
+from applai.app import create_app
 from applai.database import open_database
 from applai.models import Application, Offer, StateChange
-from applai.notion import NotionError, SyncReport, sync_notion
+from applai.notion import (
+    NotionError,
+    SyncReport,
+    last_write_status,
+    record_sent,
+    sync_notion,
+    write_sent_in_background,
+)
+from applai.orchestrator import ApplicationState
 
 TOKEN = "fictional-token"
 DATABASE_ID = "0f1e2d3c-4b5a-4968-8776-655443322110"
@@ -25,17 +35,22 @@ properties:
 """
 DATA_ENGINEER = "https://jobs.example.org/brindille-logistique/data-engineer"
 ANALYST = "https://jobs.example.org/atelier-casoar/analyste-donnees"
+ML_ENGINEER = "https://jobs.example.org/verger-numerique/ml-engineer"
+PAGE_ID = "11111111-1111-4111-8111-111111111111"
 
 
-def _row(url: str, title: str, company: str, status: str | None) -> dict[str, Any]:
+def _row(
+    url: str, title: str, company: str, status: str | None, kind: str = "status"
+) -> dict[str, Any]:
     """A page of the Notion database, as the API returns it."""
     return {
         "object": "page",
+        "id": PAGE_ID,
         "properties": {
             "Lien": {"type": "url", "url": url},
             "Poste": {"type": "title", "title": [{"plain_text": title}]},
             "Entreprise": {"type": "select", "select": {"name": company}},
-            "Statut": {"type": "status", "status": status and {"name": status}},
+            "Statut": {"type": kind, kind: status and {"name": status}},
         },
     }
 
@@ -53,6 +68,8 @@ class FakeNotion(ThreadingHTTPServer):
         super().__init__(("127.0.0.1", 0), _Handler)
         self.rows = list(ROWS)
         self.answer: tuple[int, dict[str, Any]] | None = None  # replaces the rows if set
+        self.write_answer: tuple[int, dict[str, Any]] | None = None
+        self.methods: list[str] = []
         self.requests: list[tuple[str, dict[str, str], dict[str, Any]]] = []
 
     @property
@@ -62,11 +79,17 @@ class FakeNotion(ThreadingHTTPServer):
 
 class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
+        self._handle("POST")
+
+    def do_PATCH(self) -> None:
+        self._handle("PATCH")
+
+    def _handle(self, method: str) -> None:
         notion = cast(FakeNotion, self.server)
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])) or b"{}")
+        notion.methods.append(method)
         notion.requests.append((self.path, dict(self.headers), body))
-        start = int(body.get("start_cursor", 0))
-        status, answer = notion.answer or (200, _page(notion.rows, start))
+        status, answer = _reply(notion, method, self.path, body)
         content = json.dumps(answer).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -76,6 +99,30 @@ class _Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         pass
+
+
+def _reply(notion: FakeNotion, method: str, path: str, body: dict[str, Any]) -> tuple[int, Any]:
+    if path.endswith("/query"):
+        flt = body.get("filter")
+        rows = notion.rows
+        if flt:
+            p, u = flt["property"], flt["url"]["equals"]
+            rows = [r for r in rows if r["properties"].get(p, {}).get("url") == u]
+        return notion.answer or (200, _page(rows, int(body.get("start_cursor", 0))))
+    if forced := notion.write_answer or notion.answer:
+        return forced
+    if method == "POST" and path == "/v1/pages":
+        page = {
+            "object": "page",
+            "id": f"p-{len(notion.rows) + 1}",
+            "properties": body["properties"],
+        }
+        notion.rows.append(page)
+        return 200, page
+    if method == "PATCH" and path == f"/v1/pages/{PAGE_ID}":
+        notion.rows[0]["properties"].update(body["properties"])
+        return 200, notion.rows[0]
+    return 404, {"object": "error", "code": "object_not_found"}
 
 
 def _page(rows: list[dict[str, Any]], start: int) -> dict[str, Any]:
@@ -249,3 +296,110 @@ def test_a_refused_request_names_notion_s_status_never_the_token_and_writes_noth
 
     assert TOKEN not in str(error.value)
     assert _offers(engine) == {}
+
+
+def _assert_private(message: str, secret: str) -> None:
+    for leaked in (TOKEN, ML_ENGINEER, "ML engineer", "Verger Numérique", secret):
+        assert leaked not in message
+
+
+def test_record_sent_creates_a_page_when_the_offer_url_is_absent_from_notion(
+    data_dir: Path, notion: FakeNotion
+):
+    record_sent(data_dir, "ML engineer", "Verger Numérique", ML_ENGINEER, base_url=notion.url)
+    assert notion.methods == ["POST", "POST"]
+    assert [p for p, _, _ in notion.requests] == [f"/v1/databases/{DATABASE_ID}/query", "/v1/pages"]
+    _, hdrs, qbody = notion.requests[0]
+    assert hdrs["Authorization"] == f"Bearer {TOKEN}" and hdrs["Notion-Version"] == "2022-06-28"
+    assert qbody["filter"] == {"property": "Lien", "url": {"equals": ML_ENGINEER}}
+    assert notion.requests[1][2] == {
+        "parent": {"database_id": DATABASE_ID},
+        "properties": {
+            "Poste": {"title": [{"text": {"content": "ML engineer"}}]},
+            "Entreprise": {"rich_text": [{"text": {"content": "Verger Numérique"}}]},
+            "Lien": {"url": ML_ENGINEER},
+            "Statut": {"status": {"name": "Candidature envoyée"}},
+        },
+    }
+    (data_dir / "notion.yaml").write_text(f"{NOTION_YAML}sent_status: Envoyée\n")
+    other = "https://jobs.example.org/verger-numerique/data-scientist"
+    record_sent(data_dir, "Data scientist", "Verger Numérique", other, base_url=notion.url)
+    assert notion.requests[-1][2]["properties"]["Statut"] == {"status": {"name": "Envoyée"}}
+
+
+@pytest.mark.parametrize("kind", ["status", "select"])
+def test_record_sent_updates_existing_page_by_url_without_creating_a_duplicate(
+    data_dir: Path, notion: FakeNotion, kind: str
+):
+    notion.rows = [_row(DATA_ENGINEER, "Data engineer", "Brindille Logistique", "À préparer", kind)]
+    record_sent(
+        data_dir, "Data engineer", "Brindille Logistique", DATA_ENGINEER, base_url=notion.url
+    )
+    assert notion.methods == ["POST", "PATCH"]
+    assert [p for p, _, _ in notion.requests] == [
+        f"/v1/databases/{DATABASE_ID}/query",
+        f"/v1/pages/{PAGE_ID}",
+    ]
+    assert notion.requests[1][2] == {
+        "properties": {"Statut": {kind: {"name": "Candidature envoyée"}}}
+    }
+    assert len(notion.rows) == 1
+
+
+@pytest.mark.parametrize(("token", "has_yaml"), [(None, True), ("", True), (TOKEN, False)])
+def test_record_sent_is_a_quiet_no_op_when_notion_is_not_configured(
+    data_dir: Path,
+    notion: FakeNotion,
+    monkeypatch: pytest.MonkeyPatch,
+    token: str | None,
+    has_yaml: bool,
+):
+    if token is None:
+        monkeypatch.delenv("APPLAI_NOTION_TOKEN")
+    else:
+        monkeypatch.setenv("APPLAI_NOTION_TOKEN", token)
+    if not has_yaml:
+        (data_dir / "notion.yaml").unlink()
+    record_sent(data_dir, "ML engineer", "Verger Numérique", ML_ENGINEER, base_url=notion.url)
+    assert notion.requests == []
+
+
+@pytest.mark.parametrize(("where", "code"), [("query", 500), ("write", 401)])
+def test_record_sent_error_names_http_status_without_leaking_secrets_or_candidate_values(
+    data_dir: Path, notion: FakeNotion, where: str, code: int
+):
+    secret = "notion-internal-payload-do-not-leak"
+    setattr(notion, "answer" if where == "query" else "write_answer", (code, {"message": secret}))
+    with pytest.raises(NotionError, match=str(code)) as error:
+        record_sent(data_dir, "ML engineer", "Verger Numérique", ML_ENGINEER, base_url=notion.url)
+    _assert_private(str(error.value), secret)
+
+
+def test_write_sent_in_background_writes_to_notion_and_keeps_sent_on_error(
+    data_dir: Path, engine: Engine, notion: FakeNotion
+):
+    with Session(engine) as session:
+        offer = Offer(user_id=1, url=ML_ENGINEER, title="ML engineer", company="Verger Numérique")
+        session.add(offer)
+        session.flush()
+        application = Application(user_id=1, offer_id=offer.id, state=ApplicationState.SENT)
+        session.add(application)
+        session.commit()
+        app_id = application.id
+
+    secret = "secret-response-body"
+    notion.write_answer = (502, {"object": "error", "message": secret})
+    write_sent_in_background(engine, data_dir, app_id, base_url=notion.url)
+    with Session(engine) as session:
+        assert session.get_one(Application, app_id).state == ApplicationState.SENT
+
+    app = create_app(data_dir, frontend_dir=data_dir / "no-frontend")
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        row = next(r for r in client.get("/api/services").json()["applai"] if r["id"] == "notion")
+    assert row["state"] == "red" and "502" in (row["last_error"] or "") and row["last_error_at"]
+    _assert_private(row["last_error"] or "", secret)
+
+    notion.write_answer = None
+    write_sent_in_background(engine, data_dir, app_id, base_url=notion.url)
+    status = last_write_status(data_dir)
+    assert notion.requests[-1][0] == "/v1/pages" and status.last_error is None and status.last_ok_at
