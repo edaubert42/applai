@@ -150,12 +150,11 @@ def _citation_problem(cited: list[str], facts: dict[str, Fact]) -> str | None:
 
 
 def _invented(text: str, known: set[str]) -> bool:
-    """A capitalized word or a number of text that known lacks; a sentence may start capitalized."""
-    for sentence in re.split(r"(?<=[.!?:;])\s+", text):
-        for index, token in enumerate(_TOKEN.findall(sentence)):
-            number = any(char.isdigit() for char in token)
-            if (number or (index and token[0].isupper())) and token not in known:
-                return True
+    """A capitalized word or a number of text that known lacks; the first word may be."""
+    for index, token in enumerate(_TOKEN.findall(text)):
+        number = any(char.isdigit() for char in token)
+        if (number or (index and token[0].isupper())) and token not in known:
+            return True
     return False
 
 

@@ -164,6 +164,23 @@ def test_a_reword_citing_a_fact_it_may_not_use_or_adding_a_capitalized_word_is_r
     assert "change 4" not in outcome
 
 
+@pytest.mark.parametrize("text", [
+    "Prévision pour le client : Ortie.",
+    "Prévision pour le client ; Ortie.",
+    "Prévision livrée. Ortie conseillée.",
+])  # fmt: skip
+def test_an_invented_name_after_sentence_punctuation_is_refused(
+    engine: Engine, data_dir: Path, text: str
+):
+    tailored = _tailored(_change("reword", f"{BULLETS}[2]", text=text, facts=("F3",)))
+
+    _drafted(engine, data_dir, tailored)
+
+    assert _changes(engine) == []
+    outcome = _run(engine).outcome
+    assert "capitalized" in outcome and "Ortie" not in outcome
+
+
 @pytest.mark.parametrize(
     "headline", ["Analytics engineer of pipelines", "Analytics engineer H/F", "Ingénieur(e) data"]
 )
