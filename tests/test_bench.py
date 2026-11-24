@@ -30,6 +30,8 @@ CARD: dict[str, Any] = {
     "pros": ["Data engineering"],
     "cons": [],
     "fixed_term_months": None,
+    "work_mode": None,
+    "years_required": None,
 }
 
 type Run = int | str  # a score, or FAILED
