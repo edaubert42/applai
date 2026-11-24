@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type ScanStatus } from "./api";
+import { api, type ScanStatus, type Services } from "./api";
+import { STATE_DOT, serviceName, worstState } from "./service-state";
 import { useSettings } from "./settings";
 
 const POLL_MS = 3000;
 
-/** Where the last scan stands, and the button that starts one by hand. */
-export default function ScanBar({ onScanned }: { onScanned: () => void }) {
+/** Where the last scan stands, the worst state of the services, and the button that starts a scan by hand. */
+export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () => void; onOpenSettings: () => void }) {
   const { t, formatTime } = useSettings();
   const [status, setStatus] = useState<ScanStatus | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [services, setServices] = useState<Services | null>(null);
   const wasRunning = useRef(false);
   const [asked, setAsked] = useState(0); // each change asks the API for the status again
   const refresh = useCallback(() => setAsked((count) => count + 1), []);
+  const [scans, setScans] = useState(0); // each scan that ends asks for the services' state again
 
   useEffect(() => {
     let current = true;
@@ -20,7 +23,10 @@ export default function ScanBar({ onScanned }: { onScanned: () => void }) {
         if (!current) return;
         setStatus(next);
         setUnavailable(false);
-        if (wasRunning.current && !next.running) onScanned();
+        if (wasRunning.current && !next.running) {
+          onScanned();
+          setScans((count) => count + 1);
+        }
         wasRunning.current = next.running;
       },
       () => current && setUnavailable(true),
@@ -29,6 +35,16 @@ export default function ScanBar({ onScanned }: { onScanned: () => void }) {
       current = false;
     };
   }, [asked, onScanned]);
+  useEffect(() => {
+    let current = true;
+    api.services().then(
+      (next) => current && setServices(next),
+      () => current && setServices(null), // no state known: no dot
+    );
+    return () => {
+      current = false;
+    };
+  }, [scans]);
   // A scan in progress is asked about again, until it ends.
   useEffect(() => {
     if (!status?.running) return;
@@ -59,6 +75,7 @@ export default function ScanBar({ onScanned }: { onScanned: () => void }) {
       aria-label={t("scan.label")}
       className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-block bg-surface p-5"
     >
+      {services && <ServicesDot services={services} onOpenSettings={onOpenSettings} />}
       <div className="min-w-0 flex-1 basis-80 text-sm">
         {unavailable ? (
           <p className="text-muted">{t("scan.unavailable")}</p>
@@ -67,11 +84,6 @@ export default function ScanBar({ onScanned }: { onScanned: () => void }) {
         ) : (
           <>
             <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span
-                role="img"
-                aria-label={t(last.errors.length ? "scan.failed" : "scan.ok")}
-                className={`size-3 rounded-pill ${last.errors.length ? "bg-minus" : "bg-plus"}`}
-              />
               <span>{t("scan.last", { time: formatTime(last.finished_at ?? last.started_at) })}</span>
               <span>{t("scan.new", { n: last.new_offers })}</span>
               {status.next_slot && (
@@ -109,5 +121,28 @@ export default function ScanBar({ onScanned }: { onScanned: () => void }) {
         {label}
       </button>
     </section>
+  );
+}
+
+/** The worst state of /api/services; when not green, a link to Réglages that names the services at fault. */
+function ServicesDot({ services, onOpenSettings }: { services: Services; onOpenSettings: () => void }) {
+  const { t, lookup } = useSettings();
+  const { state, at_fault } = worstState(services);
+  const dot = `size-3 shrink-0 rounded-pill ${STATE_DOT[state]}`;
+
+  if (state === "green") return <span role="img" aria-label={t("scan.services.green")} className={dot} />;
+  const names = at_fault.map((service) => serviceName(service.id, lookup)).join(", ");
+  return (
+    <a
+      href="#settings"
+      onClick={(event) => {
+        event.preventDefault();
+        onOpenSettings();
+      }}
+      className="inline-flex min-h-11 items-center gap-2 text-sm font-medium underline focus-visible:outline-2 focus-visible:outline-link [overflow-wrap:anywhere]"
+    >
+      <span aria-hidden="true" className={dot} />
+      {t(`scan.services.${state}`, { names })}
+    </a>
   );
 }

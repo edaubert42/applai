@@ -13,8 +13,9 @@ const REREAD_POLL_MS = 5000;
 /**
  * The To review screen: the scan, the three views, and the offers with their decisions.
  * To review lists its offers as rows and opens one card at a time; Later shows its cards.
+ * onOpenSettings opens Réglages, where a failing service is explained.
  */
-export default function ReviewScreen() {
+export default function ReviewScreen({ onOpenSettings }: { onOpenSettings: () => void }) {
   const { t } = useSettings();
   const [view, setView] = useState<View>("to_review");
   const [lists, setLists] = useState<Lists | null>(null);
@@ -201,7 +202,7 @@ export default function ReviewScreen() {
 
   return (
     <div className="mx-auto max-w-215 space-y-7">
-      <ScanBar onScanned={reload} />
+      <ScanBar onScanned={reload} onOpenSettings={onOpenSettings} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="tablist" aria-label={t("review.tabs")} className="flex flex-wrap gap-1 rounded-pill bg-surface p-1">
           {VIEWS.map((name) => (

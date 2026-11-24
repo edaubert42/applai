@@ -45,8 +45,8 @@ describe("a card", () => {
     ["fr", fr, "une alerte WTTJ"],
     ["en", en, "a WTTJ alert"],
   ] as const)("shows every field of the result, in %s", async (language, words, source) => {
+    if (language === "en") localStorage.setItem("applai.language", "en"); // as chosen on Réglages
     await openScreen();
-    if (language === "en") fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
     const card = within(screen.getByRole("article", { name: /Ingénieur logiciel/ }));
     const lineOf = (text: string) => card.getByText(text).closest("li")?.textContent;
 
@@ -442,7 +442,6 @@ describe("the scan bar", () => {
     await openScreen();
     expect(await screen.findByText(fill(fr["scan.new"], { n: 4 }))).toBeTruthy();
     expect(screen.getByText(fill(fr["scan.linkedin"], { n: 3, max: 20 }))).toBeTruthy();
-    expect(screen.getByRole("img", { name: fr["scan.ok"] })).toBeTruthy();
   });
 });
 

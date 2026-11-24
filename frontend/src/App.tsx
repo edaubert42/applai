@@ -41,12 +41,11 @@ function Shell() {
             </button>
           ))}
         </nav>
-        <Switches />
       </header>
       <main className="mx-auto min-w-0 max-w-5xl overflow-x-clip p-6">
         <h1 className="mb-4 text-2xl font-semibold">{t(`nav.${page}`)}</h1>
         {page === "review" ? (
-          <ReviewScreen />
+          <ReviewScreen onOpenSettings={() => setPage("settings")} />
         ) : page === "applications" ? (
           <ApplicationsScreen />
         ) : page === "settings" ? (
@@ -57,34 +56,6 @@ function Shell() {
           </section>
         )}
       </main>
-    </div>
-  );
-}
-
-function Switches() {
-  const { t, language, setLanguage, theme, setTheme } = useSettings();
-  const other = language === "fr" ? "en" : "fr";
-  const button = `${pill} min-w-11 border border-outline hover:bg-raised`;
-
-  return (
-    <div className="flex gap-2">
-      <button
-        type="button"
-        aria-label={t(theme === "dark" ? "theme.toLight" : "theme.toDark")}
-        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        className={button}
-      >
-        {t(theme === "dark" ? "theme.light" : "theme.dark")}
-      </button>
-      <button
-        type="button"
-        lang={other}
-        aria-label={t("language.switch")}
-        onClick={() => setLanguage(other)}
-        className={button}
-      >
-        {t("language.other")}
-      </button>
     </div>
   );
 }

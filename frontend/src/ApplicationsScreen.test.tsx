@@ -22,8 +22,8 @@ const groups = {
 
 async function openScreen(routes = applicationsRoutes(groups), language: "fr" | "en" = "fr") {
   fakeApi({ ...reviewRoutes(), ...routes });
+  if (language === "en") localStorage.setItem("applai.language", "en"); // as chosen on Réglages
   render(<App />);
-  if (language === "en") fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
   const nav = language === "en" ? en["nav.applications"] : fr["nav.applications"];
   fireEvent.click(screen.getByRole("button", { name: nav }));
   await screen.findAllByRole("region");
@@ -95,8 +95,8 @@ describe("the Applications dashboard", () => {
       ...applicationsRoutes({ in_progress: [created] }),
       "PUT /api/applications/7/form-url": { form_url: lever, form_url_error: null },
     });
+    if (language === "en") localStorage.setItem("applai.language", "en"); // as chosen on Réglages
     render(<App />);
-    if (language === "en") fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
     fireEvent.click(screen.getByRole("button", { name: words["nav.applications"] }));
     const row = within(await screen.findByRole("listitem"));
 
