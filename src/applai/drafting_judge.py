@@ -74,9 +74,11 @@ def judge_answers(
     sentences = [sentence for answer in answers for sentence in answer.sentences]
     if not sentences:
         return
+    spec = judge_spec(sentences, profile)  # a bug here is raised, not taken for a failed run
     try:
-        result = runner.run_agent(judge_spec(sentences, profile), database=database,
-                                  offer_id=offer_id, application_id=application_id)  # fmt: skip
+        result = runner.run_agent(
+            spec, database=database, offer_id=offer_id, application_id=application_id
+        )
     except Exception:  # recorded in the trace by run_agent; the answers stay unjudged
         return
     verdicts = iter(result.output["verdicts"])
