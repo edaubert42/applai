@@ -69,6 +69,7 @@ class FakeNotion(ThreadingHTTPServer):
         self.rows = list(ROWS)
         self.answer: tuple[int, dict[str, Any]] | None = None  # replaces the rows if set
         self.write_answer: tuple[int, dict[str, Any]] | None = None
+        self.status_type: str = "status"
         self.methods: list[str] = []
         self.requests: list[tuple[str, dict[str, str], dict[str, Any]]] = []
 
@@ -78,6 +79,9 @@ class FakeNotion(ThreadingHTTPServer):
 
 
 class _Handler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        self._handle("GET")
+
     def do_POST(self) -> None:
         self._handle("POST")
 
@@ -86,7 +90,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str) -> None:
         notion = cast(FakeNotion, self.server)
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])) or b"{}")
+        length = int(self.headers.get("Content-Length", 0))
+        body: dict[str, Any] = json.loads(self.rfile.read(length)) if length else {}
         notion.methods.append(method)
         notion.requests.append((self.path, dict(self.headers), body))
         status, answer = _reply(notion, method, self.path, body)
@@ -109,6 +114,11 @@ def _reply(notion: FakeNotion, method: str, path: str, body: dict[str, Any]) -> 
             p, u = flt["property"], flt["url"]["equals"]
             rows = [r for r in rows if r["properties"].get(p, {}).get("url") == u]
         return notion.answer or (200, _page(rows, int(body.get("start_cursor", 0))))
+    if method == "GET" and path.startswith("/v1/databases/"):
+        return notion.answer or (
+            200,
+            {"object": "database", "properties": {"Statut": {"type": notion.status_type}}},
+        )
     if forced := notion.write_answer or notion.answer:
         return forced
     if method == "POST" and path == "/v1/pages":
@@ -303,28 +313,34 @@ def _assert_private(message: str, secret: str) -> None:
         assert leaked not in message
 
 
+@pytest.mark.parametrize("kind", ["status", "select"])
 def test_record_sent_creates_a_page_when_the_offer_url_is_absent_from_notion(
-    data_dir: Path, notion: FakeNotion
+    data_dir: Path, notion: FakeNotion, kind: str
 ):
+    notion.status_type = kind
     record_sent(data_dir, "ML engineer", "Verger Numérique", ML_ENGINEER, base_url=notion.url)
-    assert notion.methods == ["POST", "POST"]
-    assert [p for p, _, _ in notion.requests] == [f"/v1/databases/{DATABASE_ID}/query", "/v1/pages"]
+    assert notion.methods == ["POST", "GET", "POST"]
+    assert [p for p, _, _ in notion.requests] == [
+        f"/v1/databases/{DATABASE_ID}/query",
+        f"/v1/databases/{DATABASE_ID}",
+        "/v1/pages",
+    ]
     _, hdrs, qbody = notion.requests[0]
     assert hdrs["Authorization"] == f"Bearer {TOKEN}" and hdrs["Notion-Version"] == "2022-06-28"
     assert qbody["filter"] == {"property": "Lien", "url": {"equals": ML_ENGINEER}}
-    assert notion.requests[1][2] == {
+    assert notion.requests[2][2] == {
         "parent": {"database_id": DATABASE_ID},
         "properties": {
             "Poste": {"title": [{"text": {"content": "ML engineer"}}]},
             "Entreprise": {"rich_text": [{"text": {"content": "Verger Numérique"}}]},
             "Lien": {"url": ML_ENGINEER},
-            "Statut": {"status": {"name": "Candidature envoyée"}},
+            "Statut": {kind: {"name": "Candidature envoyée"}},
         },
     }
     (data_dir / "notion.yaml").write_text(f"{NOTION_YAML}sent_status: Envoyée\n")
     other = "https://jobs.example.org/verger-numerique/data-scientist"
     record_sent(data_dir, "Data scientist", "Verger Numérique", other, base_url=notion.url)
-    assert notion.requests[-1][2]["properties"]["Statut"] == {"status": {"name": "Envoyée"}}
+    assert notion.requests[-1][2]["properties"]["Statut"] == {kind: {"name": "Envoyée"}}
 
 
 @pytest.mark.parametrize("kind", ["status", "select"])
@@ -409,26 +425,36 @@ def test_post_sent_writes_back_to_notion_and_stays_sent_on_notion_error(
     data_dir: Path, engine: Engine, notion: FakeNotion, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr("applai.notion.NOTION_API", notion.url)
-    other = "https://jobs.example.org/verger-numerique/analytics-engineer"
+    urls = (
+        ML_ENGINEER,
+        "https://jobs.example.org/verger-numerique/analytics-engineer",
+        "https://jobs.example.org/verger-numerique/data-architect",
+    )
     with Session(engine) as s:
-        o1 = Offer(user_id=1, url=ML_ENGINEER, title="ML engineer", company="Verger Numérique")
-        o2 = Offer(user_id=1, url=other, title="Analytics engineer", company="Verger Numérique")
-        s.add_all([o1, o2])
+        offers = [
+            Offer(user_id=1, url=u, title="ML engineer", company="Verger Numérique") for u in urls
+        ]
+        s.add_all(offers)
         s.flush()
-        a1 = Application(user_id=1, offer_id=o1.id, state=ApplicationState.VALIDATED)
-        a2 = Application(user_id=1, offer_id=o2.id, state=ApplicationState.VALIDATED)
-        s.add_all([a1, a2])
+        apps = [
+            Application(user_id=1, offer_id=o.id, state=ApplicationState.VALIDATED) for o in offers
+        ]
+        s.add_all(apps)
         s.commit()
-        id1, id2 = a1.id, a2.id
+        ids = [a.id for a in apps]
 
     app = create_app(data_dir, frontend_dir=data_dir / "no-frontend")
     with TestClient(app, base_url="http://127.0.0.1") as client:
-        assert client.post(f"/api/applications/{id1}/sent").status_code == 204
+        assert client.post(f"/api/applications/{ids[0]}/sent").status_code == 204
         assert notion.requests[-1][0] == "/v1/pages"
         assert notion.requests[-1][2]["properties"]["Lien"] == {"url": ML_ENGINEER}
 
         notion.write_answer = (503, {"object": "error", "message": "upstream-secret"})
-        assert client.post(f"/api/applications/{id2}/sent").status_code == 204
+        assert client.post(f"/api/applications/{ids[1]}/sent").status_code == 204
+
+        before = len(notion.requests)
+        monkeypatch.delenv("APPLAI_NOTION_TOKEN")
+        assert client.post(f"/api/applications/{ids[2]}/sent").status_code == 204
+        assert len(notion.requests) == before
     with Session(engine) as s:
-        assert s.get_one(Application, id1).state == ApplicationState.SENT
-        assert s.get_one(Application, id2).state == ApplicationState.SENT
+        assert [s.get_one(Application, i).state for i in ids] == [ApplicationState.SENT] * 3

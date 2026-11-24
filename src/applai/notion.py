@@ -226,6 +226,12 @@ def write_sent_in_background(
         _set_write_status(data_dir, ok=True)
 
 
+def _status_kind(container: dict[str, Any], name: str) -> str:
+    prop = cast(dict[str, Any], container.get("properties") or {}).get(name)
+    ptype = cast(dict[str, Any], prop).get("type") if isinstance(prop, dict) else None
+    return "select" if ptype == "select" else "status"
+
+
 def _write_sent(
     data_dir: Path, title: str, company: str, url: str, *, base_url: str | None = None
 ) -> bool:
@@ -242,19 +248,17 @@ def _write_sent(
         pid = page.get("id")
         if not isinstance(pid, str) or not _PAGE_ID.fullmatch(pid):
             raise NotionError("Notion answered with a page without a valid id.")
-        prop = cast(dict[str, Any], page.get("properties") or {}).get(n.status)
-        ptype = cast(dict[str, Any], prop).get("type") if isinstance(prop, dict) else None
-        kind = "select" if ptype == "select" else "status"
-        body = {"properties": {n.status: {kind: {"name": cfg.sent_status}}}}
+        body = {"properties": {n.status: {_status_kind(page, n.status): {"name": cfg.sent_status}}}}
         _request("PATCH", f"{root}/v1/pages/{pid}", token, body, "write")
         return True
+    db = _request("GET", f"{root}/v1/databases/{cfg.database_id}", token, None, "query")
     body = {
         "parent": {"database_id": cfg.database_id},
         "properties": {
             n.title: {"title": [{"text": {"content": title}}]},
             n.company: {"rich_text": [{"text": {"content": company}}]},
             n.url: {"url": url},
-            n.status: {"status": {"name": cfg.sent_status}},
+            n.status: {_status_kind(db, n.status): {"name": cfg.sent_status}},
         },
     }
     _request("POST", f"{root}/v1/pages", token, body, "write")
@@ -262,16 +266,14 @@ def _write_sent(
 
 
 def _request(
-    method: str, url: str, token: str, body: dict[str, Any], action: str = "request"
+    method: str, url: str, token: str, body: dict[str, Any] | None, action: str = "request"
 ) -> dict[str, Any]:
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
-    req = urllib.request.Request(
-        url, data=json.dumps(body).encode(), method=method, headers=headers
-    )
+    headers = {"Authorization": f"Bearer {token}", "Notion-Version": NOTION_VERSION}
+    data = None
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as response:
             answer = json.load(response)
