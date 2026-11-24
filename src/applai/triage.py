@@ -4,8 +4,10 @@ triage_spec() builds what the agent is sent from the offer's text, the summary i
 (SUMMARY_FIELDS) and the profile, with no database, so the bench runs the same agent. Its
 location rules come from the profile: the targets' locations fit, the stretch locations are
 marked down. triage_offer() runs it on a stored offer, keeps the card in triages with the agent
-run that wrote it, then screens the offer again on its final fields and the CDD length the card
-gives (applai.screening): it moves to screened_out when a rule sets it aside, else to triaged.
+run that wrote it, fills the offer's work mode and years required from the card where its page
+gave none (READ_FIELDS), then screens the offer again on these final fields and the CDD length
+the card gives (applai.screening): it moves to screened_out when a rule sets it aside, else to
+triaged. An unknown value never sets an offer aside.
 
 Only validated facts whose diffusion is not never reach the agent (ADR 0008). The card is
 checked against CARD_SCHEMA by run_agent; a card outside it is never stored.
@@ -38,6 +40,9 @@ MAX_CONS = 5  # in the card the agent writes and in the stored card, with what c
 # What the offer's page says in its summary (applai.details), sent when known.
 SUMMARY_FIELDS = ("location", "contract", "salary", "work_mode", "years_required")
 type Summary = Mapping[str, str | int | None]
+WORK_MODES = ("remote", "hybrid", "onsite")  # offers.work_mode's values
+# What the card reads from the text, stored on the offer only when its page gave nothing.
+READ_FIELDS = ("work_mode", "years_required")
 
 _TEXT: dict[str, Any] = {"type": "string", "minLength": 1}
 
@@ -66,8 +71,13 @@ CARD_SCHEMA: dict[str, Any] = {
         "pros": {"type": "array", "items": _TEXT, "maxItems": 5},
         "cons": {"type": "array", "items": _with_verdict(MINUS, UNKNOWN), "maxItems": MAX_CONS},
         "fixed_term_months": {"type": ["integer", "null"], "minimum": 1},
+        "work_mode": {"enum": [*WORK_MODES, None]},
+        "years_required": {"type": ["integer", "null"], "minimum": 0},
     },
-    "required": ["score", "tags", "about", "mission", "pros", "cons", "fixed_term_months"],
+    "required": [
+        *("score", "tags", "about", "mission", "pros", "cons", "fixed_term_months"),
+        *READ_FIELDS,
+    ],
     "additionalProperties": False,
 }
 
@@ -140,6 +150,11 @@ the offer's page: they win over what the description says.
   "{UNKNOWN}" for something the offer leaves unknown.
 - fixed_term_months: for a fixed-term contract (CDD), its length in months ("1 an" is 12);
   null when the offer is not a fixed-term contract or does not say how long it lasts.
+- work_mode: "remote", "hybrid" or "onsite", how the offer says the job is done; null when
+  it does not say.
+- years_required: the years of experience the offer requires, a whole number: "3 à 5 ans" is
+  3, the lowest number written; "5 ans et plus" is 5. null when no number is written, as with
+  "junior", "senior" or "confirmé".
 
 Location:
 {{location_rules}}
@@ -237,6 +252,9 @@ def triage_offer(runner: AgentRunner, database: Engine, offer_id: int, profile: 
             cons=_with_code_cons(card["cons"], _fixed_term_cons(profile, offer.contract, months)),
         )
         session.add(triage)
+        for name in READ_FIELDS:  # the page wins: Triage fills only what it left empty
+            if getattr(offer, name) is None:
+                setattr(offer, name, card[name])
         if screen_triaged(session, offer, profile, months) is None:
             move(session, offer, OfferState.TRIAGED, Actor.TRIAGE)
     return triage

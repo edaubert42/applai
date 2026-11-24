@@ -3,8 +3,10 @@
 describe_offers() reads the page of each offer ApplAI found that is still new: its JobPosting
 JSON-LD when it has one, else its main text. The description always comes from the page; the
 rest only fills what the offer lacks, since screening judged the alert's location and
-contract. The offer then moves new → described. A page that fails records its error on the
-offer, which stays new and is read again on the next run. LinkedIn offers are left new: their
+contract: from the JSON-LD, the work mode (remote only: schema.org has no hybrid), the years
+required (monthsOfExperience ÷ 12, rounded down) and the salary (baseSalary, else
+estimatedSalary). The offer then moves new → described. A page that fails records its error
+on the offer, which stays new and is read again on the next run. LinkedIn offers are left new: their
 reader is another one, through the candidate's LinkedIn MCP server. So are those of
 EXTENSION_SITES, whose pages the ApplAI extension reads in the candidate's Chrome.
 
@@ -14,6 +16,7 @@ carries a generic User-Agent, never anything about the candidate.
 """
 
 import json
+import math
 from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -30,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from applai.models import LOCAL_USER_ID, Offer, OfferOrigin, OfferState
 from applai.orchestrator import Actor, move
+from applai.screening import REMOTE
 from applai.text import slugify
 
 LOGOS_DIR = "logos"
@@ -60,6 +64,8 @@ class Details:
     location: str | None = None
     contract: str | None = None
     salary: str | None = None
+    work_mode: str | None = None  # only remote: schema.org has no hybrid
+    years_required: int | None = None
     logos: tuple[str, ...] = ()
 
 
@@ -145,8 +151,9 @@ def describe_offer(
         offer.detail_failed_at = datetime.now(UTC).replace(tzinfo=None)
         raise
     offer.description = details.description
-    for name in ("company", "location", "contract", "salary"):
-        if getattr(details, name) and not getattr(offer, name):
+    for name in ("company", "location", "contract", "salary", "work_mode", "years_required"):
+        # is not None: 0 years is a value; in (None, ""): an alert may give an empty company.
+        if getattr(details, name) is not None and getattr(offer, name) in (None, ""):
             setattr(offer, name, getattr(details, name))
     candidates = [urljoin(base, url) for url in (*details.logos, "/favicon.ico")]
     offer.logo = _logo(http, offer.company, candidates, data_dir / LOGOS_DIR)
@@ -167,12 +174,15 @@ def read_page(html: str) -> Details:
         return Details(page.text(), logos=(*page.og_images, *page.icons))
     organization = posting.get("hiringOrganization")
     logo = _at(organization, "logo")
+    location_type = posting.get("jobLocationType")
     return Details(
         _Page.of(str(posting.get("description") or "")).text(),
         company=_string(_at(organization, "name")) or _string(organization),
         location="; ".join(filter(None, map(_place, _list(posting.get("jobLocation"))))) or None,
         contract=", ".join(_strings(posting.get("employmentType"))) or None,
-        salary=_salary(posting.get("baseSalary")),
+        salary=_salary(posting.get("baseSalary")) or _salary(posting.get("estimatedSalary")),
+        work_mode=REMOTE if "TELECOMMUTE" in map(str.upper, _strings(location_type)) else None,
+        years_required=_years(posting.get("experienceRequirements")),
         logos=(*_strings(_at(logo, "url") or logo), *page.og_images, *page.icons),
     )
 
@@ -321,6 +331,18 @@ def _salary(salary: Any) -> str | None:
     text = " ".join(_strings([amount, _at(salary, "currency")]))
     unit = _string(_at(value, "unitText"))
     return f"{text} per {unit.lower()}" if unit else text
+
+
+def _years(requirements: Any) -> int | None:
+    """The years an experienceRequirements asks: its monthsOfExperience ÷ 12, rounded down."""
+    for requirement in _list(requirements):
+        try:
+            months = float(_string(_at(requirement, "monthsOfExperience")) or "nan")
+        except ValueError:
+            continue
+        if math.isfinite(months) and months >= 0:
+            return int(months // 12)
+    return None
 
 
 def _at(value: Any, *keys: str) -> Any:

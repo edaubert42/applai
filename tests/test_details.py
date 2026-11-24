@@ -238,3 +238,42 @@ def test_a_page_with_googles_consent_text_is_not_the_offer_and_the_offer_stays_n
     assert errors == [f"offer {offer_id}: {message}"]
     offer = _get(engine, offer_id)
     assert (offer.state, offer.description, offer.detail_error) == ("new", None, message)
+
+
+def _posting_page(**fields: Any) -> str:
+    """A HelloWork-like page: POSTING without its baseSalary's amount, with fields added."""
+    posting = POSTING | {"baseSalary": {"@type": "MonetaryAmount", "currency": "EUR"}} | fields
+    return f'<script type="application/ld+json">{json.dumps(posting)}</script>'
+
+
+@pytest.mark.parametrize(("months", "years"), [(36, 3), (18, 1)])
+def test_a_posting_gives_the_years_required_and_its_estimated_salary(
+    engine: Engine, tmp_path: Path, site: Site, months: int, years: int
+):
+    html = _posting_page(
+        experienceRequirements={
+            "@type": "OccupationalExperienceRequirements",
+            "monthsOfExperience": months,
+        },
+        estimatedSalary={
+            "@type": "MonetaryAmount",
+            "currency": "EUR",
+            "value": {"minValue": 42000, "maxValue": 46000, "unitText": "YEAR"},
+        },
+    )
+    offer_id = _offer(engine, site.page("/jobs/7", html))
+
+    assert _describe(engine, tmp_path) == []
+
+    offer = _get(engine, offer_id)
+    assert (offer.years_required, offer.salary) == (years, "42000-46000 EUR per year")
+    assert offer.work_mode is None  # schema.org says only whether it is remote
+
+
+def test_a_telecommute_posting_gives_remote(engine: Engine, tmp_path: Path, site: Site):
+    offer_id = _offer(engine, site.page("/jobs/8", _posting_page(jobLocationType="TELECOMMUTE")))
+
+    _describe(engine, tmp_path)
+
+    offer = _get(engine, offer_id)
+    assert (offer.work_mode, offer.years_required, offer.salary) == ("remote", None, None)
