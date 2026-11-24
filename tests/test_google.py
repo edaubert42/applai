@@ -30,6 +30,7 @@ EXT = {"Origin": f"chrome-extension://{(EXT_ID := 'kfbcmpgnoaljdhiekfbcmpgnoaljd
 GOOGLE_URL = "https://www.google.com/search?q=Data+engineer&udm=8&htidocid=abc123"
 CARD = {
     "score": 80, "about": "Givre.", "pros": ["Data"], "cons": [], "mission": ["SQL", "Python"],
+    "fixed_term_months": None,
     "tags": {k: {"text": "?", "verdict": "?"}
              for k in ("location", "work_mode", "contract", "experience", "salary")},
 }  # fmt: skip
