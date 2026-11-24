@@ -7,9 +7,9 @@ cover letter to file fields; a letter asked as a file is rendered as a PDF (appl
 Only choice fields with options (select, radio, checkbox) go to the filling agent: Sonnet,
 no tool, picking among each field's own options or none (ADR 0008); its output schema lists
 them, so a value that is not an option fails the run. Every text field that is not identity
-was drafted as a question (applai.drafting.drafted_fields): none is left to it. A failure is
-kept as the
-application's fill_error, for a retry by hand. No action sends anything (ADR 0003): the
+was drafted as a question (applai.drafting.drafted_fields): none is left to it. A link field
+(LinkedIn, website) Drafting leaves to identity has no value in the profile: it stays empty,
+for the candidate. A failure is kept as the application's fill_error, for a retry by hand. No action sends anything (ADR 0003): the
 extension fills, attaches, and reports (applai.browser).
 """
 
@@ -41,16 +41,17 @@ LETTER_PDF = "cover_letter.pdf"  # in the application's directory
 _CHOICES = ("select", "radio", "checkbox")
 
 # Matched on folded labels, in this order; email and phone fields also by their type.
+_FIRST_NAME = re.compile(r"\b(prenom|first name|given name)\b")
 _IDENTITY: list[tuple[re.Pattern[str], Callable[[Identity], str]]] = [
-    (re.compile(r"^(name|full name|your name|nom complet|nom et prenom|prenom et nom)$"),
-     lambda i: f"{i.first_name} {i.last_name}"),
-    (re.compile(r"\b(prenom|first name|given name)\b"), lambda i: i.first_name),
-    (re.compile(r"^nom$|\b(nom de famille|last name|family name|surname)\b"),
-     lambda i: i.last_name),
+    (_FIRST_NAME, lambda i: i.first_name),
+    (re.compile(r"\b(nom de famille|last name|family name|surname)\b"), lambda i: i.last_name),
     (re.compile(r"\b(e ?mail|courriel)\b"), lambda i: i.email),
     (re.compile(r"\b(telephone|phone|tel|mobile|portable)\b"), lambda i: i.phone),
     (re.compile(r"\b(ville|city)\b"), lambda i: i.city),
 ]  # fmt: skip
+# Any other name, as Drafting leaves it to identity: the last name when the form also asks
+# for the first one, else the full name.
+_NAME = re.compile(r"\b(nom|name)\b")
 _CV = re.compile(r"\b(cv|resume|curriculum)\b")
 
 SYSTEM_PROMPT = """\
@@ -80,11 +81,15 @@ class FillingError(Exception):
     """An application not planned. The message holds no candidate data."""
 
 
-def _identity(field: dict[str, Any], identity: Identity) -> str | None:
+def _identity(field: dict[str, Any], identity: Identity, asks_first: bool) -> str | None:
     label = fold(field["label"])
     if field["type"] in ("email", "phone"):
         return identity.email if field["type"] == "email" else identity.phone
-    return next((value(identity) for pattern, value in _IDENTITY if pattern.search(label)), None)
+    if value := next((get(identity) for pattern, get in _IDENTITY if pattern.search(label)), None):
+        return value
+    if _NAME.search(label):
+        return identity.last_name if asks_first else f"{identity.first_name} {identity.last_name}"
+    return None
 
 
 def by_code(
@@ -93,6 +98,7 @@ def by_code(
     """The actions code plans, and the choice fields left to the agent."""
     files = [i for i, field in enumerate(fields) if field["type"] == "file" and i not in answers]
     cvs = [i for i in files if _CV.search(fold(fields[i]["label"]))] or files[:1]
+    asks_first = any(_FIRST_NAME.search(fold(field["label"])) for field in fields)
     actions: list[FillAction] = []
     left: list[int] = []
 
@@ -110,7 +116,9 @@ def by_code(
                 plan(index, "fill", text)
         elif kind == "file" and cv and cvs and index == cvs[0]:
             plan(index, "attach", CV)
-        elif kind in ("text", "email", "phone") and (value := _identity(field, profile.identity)):
+        elif kind in ("text", "email", "phone") and (
+            value := _identity(field, profile.identity, asks_first)
+        ):
             plan(index, "fill", value)
         elif kind in _CHOICES and field["options"]:
             left.append(index)

@@ -154,6 +154,21 @@ def test_identity_and_checked_answers_are_planned_by_code_and_only_choices_ask_s
     assert (run.model, run.offer_id, run.application_id) == (FILLING_MODEL, offer_id, ambiguous)
 
 
+def test_a_name_field_drafting_leaves_to_identity_is_filled_with_the_name(
+    data_dir: Path, engine: Engine
+):
+    # Drafting skips any text field naming a name; Filling fills it, never leaves it blank.
+    profile = load_profile(data_dir)
+    alone = _application(engine, [_field("Votre nom", "text")])
+    with_first = _application(engine, [_field("Prénom", "text"), _field("Votre nom", "text")])
+
+    for application_id in (alone, with_first):
+        plan_fill(AgentRunner(FakeBackend([])), engine, data_dir, application_id, profile)
+
+    assert _planned(engine, alone) == {0: ("fill", "Jeanne Dupont")}
+    assert _planned(engine, with_first) == {0: ("fill", "Jeanne"), 1: ("fill", "Dupont")}
+
+
 def _pdf_text(pdf: bytes) -> str:
     """The text a PDF shows, from its uncompressed text operators."""
     lines = re.findall(rb"\(((?:[^()\\]|\\.)*)\) Tj", pdf)
