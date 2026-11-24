@@ -70,6 +70,42 @@ export interface FormUrl {
 
 export type Applications = Record<Group, Row[]>;
 
+export type AnswerStatus = "pending" | "accepted" | "edited" | "rejected";
+
+export interface CitedFact {
+  id: string;
+  text: string | null; // null: no longer in the profile
+}
+
+export interface Answer {
+  id: number;
+  kind: "question" | "cover_letter";
+  field_index: number;
+  label: string;
+  sentences: { text: string; facts: CitedFact[] }[];
+  text: string; // as drafted
+  edited_text: string | null;
+  status: AnswerStatus;
+  warnings: string[]; // the judge's, shown without blocking
+}
+
+/** GET /api/applications/{id}/draft, as src/applai/correct.py serves it. */
+export interface Draft {
+  application_id: number;
+  offer_id: number;
+  title: string;
+  company: string;
+  state: string;
+  draft_error: string | null;
+  answers: Answer[];
+  resolved: boolean;
+}
+
+export type AnswerDecision =
+  | { decision: "accept" }
+  | { decision: "edit"; text: string; reason?: string }
+  | { decision: "reject"; reason: string };
+
 export interface ScanStatus {
   running: boolean;
   last_scan: {
@@ -112,6 +148,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return (await response.json()) as T;
 }
 
+/** A request whose answer has no body (204). */
+async function requestEmpty(method: string, path: string): Promise<void> {
+  const response = await fetch(path, { method });
+  if (!response.ok) throw new Error(`${method} ${path}: ${response.status}`);
+}
+
 export const api = {
   cards: (view: View) => request<Card[]>("GET", `/api/review?view=${view}`),
   decide: (id: number, decision: Decision) =>
@@ -120,6 +162,10 @@ export const api = {
   applications: () => request<Applications>("GET", "/api/applications"),
   pasteFormUrl: (id: number, url: string) =>
     request<FormUrl>("PUT", `/api/applications/${id}/form-url`, { url }),
+  draft: (id: number) => request<Draft>("GET", `/api/applications/${id}/draft`),
+  decideAnswer: (id: number, answer: number, decision: AnswerDecision) =>
+    request<Answer>("POST", `/api/applications/${id}/draft/${answer}`, decision),
+  answersChecked: (id: number) => requestEmpty("POST", `/api/applications/${id}/answers-checked`),
   scanStatus: () => request<ScanStatus>("GET", "/api/scan"),
   services: () => request<Services>("GET", "/api/services"),
   startScan: () => request<unknown>("POST", "/api/scan"),
