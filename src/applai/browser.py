@@ -14,8 +14,8 @@ Form capture: an application created with its form's URL (applai.capture) and no
 listed for the extension, which opens the form in a tab, lists its controls without filling
 anything and sends them back; the application moves to form_captured. With no control, it sends
 the page's text, and the form_capture agent reads the fields in it (applai.capture.read_fields).
-A form that fails, or shows no field, is asked for again only after the next scan; after MAX_FORM_FAILURES its URL
-is dropped and the candidate pastes one, which counts from zero again.
+A form that fails, or shows no field, is asked for again only after the next scan; after
+MAX_FORM_FAILURES its URL is dropped and the candidate pastes one, which counts from zero again.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
 page received for one is read for its text, and the offer is triaged again in the background.
 """

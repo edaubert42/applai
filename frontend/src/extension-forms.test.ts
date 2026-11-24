@@ -2,7 +2,7 @@
 // no DOM library, so the frontend's jsdom runs this test.
 import { afterEach, expect, test, vi } from "vitest";
 
-import { readForm } from "../../extension/forms.js";
+import { readForm, readText } from "../../extension/forms.js";
 
 const FORM = `
   <form action="/apply" method="post">
@@ -67,4 +67,44 @@ test("it never dispatches an input, click or submit event, and runs alone as Chr
   expect(events).toEqual([]);
   for (const act of acts) expect(act).not.toHaveBeenCalled();
   expect((document.querySelector("#name") as HTMLInputElement).value).toBe("");
+});
+
+// A form drawn by a custom widget: no standard control, part of it in a shadow DOM.
+const WIDGET = `
+  <h1>Data engineer chez Pivoine Analytics</h1>
+  <script>window.tracking = "x";</script>
+  <div role="form">
+    <div class="question">Nom complet *</div><div role="textbox" contenteditable aria-label="Votre nom"></div>
+    <div hidden>Texte masqué</div><div aria-hidden="true">Décor</div>
+    <pivoine-upload></pivoine-upload>
+    <div role="button">Envoyer</div>
+  </div>`;
+
+test("with no control, it reads the page's visible text, its shadow DOM's too, and nothing else", () => {
+  document.body.innerHTML = WIDGET;
+  const host = document.querySelector("pivoine-upload") as HTMLElement;
+  host.attachShadow({ mode: "open" }).innerHTML = "<label>CV *</label><span>PDF, 2 Mo maximum</span>";
+  const events: string[] = [];
+  for (const type of ["input", "change", "click", "submit", "keydown", "focus", "focusin"]) {
+    document.addEventListener(type, () => events.push(type), true);
+  }
+  const acts = [
+    vi.spyOn(HTMLElement.prototype, "click"),
+    vi.spyOn(HTMLElement.prototype, "focus"),
+    vi.spyOn(EventTarget.prototype, "dispatchEvent"),
+  ];
+  const injected = new Function(`return (${readText.toString()})`)() as typeof readText;
+
+  expect(readForm(document)).toEqual([]);
+  expect(injected()).toBe(
+    "Data engineer chez Pivoine Analytics Nom complet * Votre nom CV * PDF, 2 Mo maximum Envoyer",
+  );
+  expect(events).toEqual([]);
+  for (const act of acts) expect(act).not.toHaveBeenCalled();
+});
+
+test("it sends at most what ApplAI accepts: 20000 characters", () => {
+  document.body.innerHTML = `<p>${"Pivoine ".repeat(4000)}</p>`;
+
+  expect(readText(document)).toHaveLength(20000);
 });

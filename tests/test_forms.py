@@ -1,7 +1,7 @@
 """Form capture: the ApplAI extension reads a form, the real app stores its fields."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -168,8 +168,8 @@ def test_a_failed_form_waits_for_the_next_scan_and_a_second_failure_keeps_an_err
 
 
 # The fallback: no standard control on the page, so Sonnet reads the fields from its text.
-PAGE_TEXT = ("Pivoine Analytics recrute un data engineer. Nom complet * E-mail * Téléphone CV * "
-             "Disponibilité Immédiate Sous 3 mois Pourquoi Pivoine Analytics ? * Envoyer")  # fmt: skip
+PAGE_TEXT = ("Pivoine Analytics recrute un data engineer. Nom complet * E-mail * Téléphone "
+             "CV * Disponibilité Immédiate Sous 3 mois Pourquoi Pivoine Analytics ? *")  # fmt: skip
 READ = AgentResult(output={"fields": FIELDS},
                    usage=Usage(model=FORM_MODEL, input_tokens=1200, output_tokens=400))  # fmt: skip
 
@@ -189,7 +189,7 @@ class Scripted:
 
 
 @contextmanager
-def _with_agent(tmp_path: Path, engine: Engine, model: Scripted) -> Iterator[TestClient]:
+def _with_agent(tmp_path: Path, engine: Engine, model: Scripted) -> Generator[TestClient]:
     """The real app with the watch on and the model mocked; today's scan is done."""
     with Session(engine) as session, session.begin():
         done = datetime(2026, 11, 20, 7, 31)  # 08:31 in Paris, as UTC: no scan at startup
@@ -237,7 +237,7 @@ def test_a_fallback_that_fails_or_finds_nothing_is_a_failure_and_the_second_drop
     nothing = AgentResult(output={"fields": []}, usage=Usage(model=FORM_MODEL))
     model = Scripted(AgentError("form_capture", FailureKind.EXIT, "code 1"), nothing)
     path = f"/api/browser/forms/{application_id}"
-    body = {"fields": [], "text": PAGE_TEXT}
+    body: dict[str, Any] = {"fields": [], "text": PAGE_TEXT}
 
     with _with_agent(tmp_path, engine, model) as client:
         failed = client.post(path, json=body, headers=EXTENSION)
@@ -255,7 +255,9 @@ def test_a_fallback_that_fails_or_finds_nothing_is_a_failure_and_the_second_drop
     assert (agent["state"], agent["last_error"]) == ("red", "exit")
     second = _get(engine, application_id)
     assert (second.state, second.form_fields, second.form_url) == ("created", None, None)
-    assert second.form_url_error == "The form shows no field ApplAI recognizes: paste the form's URL."
+    assert second.form_url_error == (
+        "The form shows no field ApplAI recognizes: paste the form's URL."
+    )
     runs = trace(engine, second.offer_id).runs
     assert [(run.agent, run.outcome) for run in runs] == [
         ("form_capture", "exit"), ("form_capture", "ok"),
@@ -267,8 +269,8 @@ def test_fields_posted_never_call_the_model(tmp_path: Path, engine: Engine):
     model = Scripted()
 
     with _with_agent(tmp_path, engine, model) as client:
-        sent = client.post(f"/api/browser/forms/{application_id}",
-                           json={"fields": FIELDS, "text": PAGE_TEXT}, headers=EXTENSION)  # fmt: skip
+        body = {"fields": FIELDS, "text": PAGE_TEXT}
+        sent = client.post(f"/api/browser/forms/{application_id}", json=body, headers=EXTENSION)
 
     assert sent.status_code == 204
     assert model.specs == []
@@ -284,7 +286,7 @@ def test_the_fallback_is_refused_for_another_origin_or_an_application_not_waitin
     captured = _application(engine, state="form_captured", fields=FIELDS)
     without_url = _application(engine, form_url=None)
     model = Scripted()
-    body = {"fields": [], "text": PAGE_TEXT}
+    body: dict[str, Any] = {"fields": [], "text": PAGE_TEXT}
 
     with _with_agent(tmp_path, engine, model) as client:
         foreign = client.post(f"/api/browser/forms/{waiting}", json=body,

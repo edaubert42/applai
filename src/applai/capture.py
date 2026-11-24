@@ -42,7 +42,9 @@ _APPLY = re.compile(r"\b(postuler|candidater|apply)\b", re.IGNORECASE)
 FORM_AGENT = "form_capture"
 FORM_MODEL = "claude-sonnet-5-5"  # pinned, as the bench measures one fixed version
 MAX_LABEL, MAX_OPTIONS, MAX_FIELDS = 1000, 500, 500  # as extension/forms.js keeps them
-type FieldType = Literal["text", "email", "phone", "file", "select", "radio", "checkbox", "textarea"]
+type FieldType = Literal[
+    "text", "email", "phone", "file", "select", "radio", "checkbox", "textarea"
+]
 
 
 class FormField(BaseModel):
@@ -68,8 +70,11 @@ FIELDS_SCHEMA: dict[str, Any] = {
                     "label": {"type": "string", "minLength": 1, "maxLength": MAX_LABEL},
                     "type": {"enum": list(get_args(FieldType.__value__))},
                     "required": {"type": "boolean"},
-                    "options": {"type": "array", "items": {"type": "string"},
-                                "maxItems": MAX_OPTIONS},  # fmt: skip
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": MAX_OPTIONS,
+                    },
                 },
                 "required": ["label", "type", "required", "options"],
                 "additionalProperties": False,

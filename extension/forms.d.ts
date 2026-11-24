@@ -6,3 +6,4 @@ export type Field = {
   options: string[];
 };
 export function readForm(root?: Document): Field[];
+export function readText(root?: Document): string;
