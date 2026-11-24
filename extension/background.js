@@ -54,7 +54,11 @@ export async function readForms(fetch = globalThis.fetch, browser = globalThis.c
       const reason = ["not_allowed", "not_loaded"].includes(error?.message) ? error.message : "not_read";
       [path, body] = ["/failure", { reason }];
     }
-    await send(fetch, `/api/browser/forms/${application_id}${path}`, body);
+    const sent = await send(fetch, `/api/browser/forms/${application_id}${path}`, body);
+    if (sent?.status === 422) {
+      // ApplAI refused the fields: a failure, not a form to open again every minute
+      await send(fetch, `/api/browser/forms/${application_id}/failure`, { reason: "not_read" });
+    }
   }
 }
 
@@ -80,13 +84,13 @@ async function readIn(url, browser, wait) {
 
 async function send(fetch, path, body) {
   try {
-    await fetch(`${APPLAI}${path}`, {
+    return await fetch(`${APPLAI}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
   } catch {
-    // ApplAI stopped meanwhile: it asks for it again
+    return null; // ApplAI stopped meanwhile: it asks for it again
   }
 }
 

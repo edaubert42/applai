@@ -74,12 +74,13 @@ function chromeWith(calls, { status = "complete", fields = FIELDS } = {}) {
   };
 }
 
-async function readFormsWith(forms, options) {
+async function readFormsWith(forms, options, answer = 204) {
   const calls = [];
   await readForms(
     async (url, init) => {
       calls.push([url, init]);
-      return url === `${APPLAI}/api/browser/forms` ? Response.json(forms) : new Response(null, { status: 204 });
+      if (url === `${APPLAI}/api/browser/forms`) return Response.json(forms);
+      return new Response(null, { status: url.endsWith("/failure") ? 204 : answer });
     },
     chromeWith(calls, options),
     async () => {}, // no real wait
@@ -94,6 +95,15 @@ test("it opens each form in an inactive tab, reads it there, closes the tab and 
     ["run", { tabId: 3 }, readForm],
     ["close", 3],
     [`${APPLAI}/api/browser/forms/5`, { ...SENT, body: JSON.stringify({ fields: FIELDS }) }],
+  ]);
+});
+
+test("it reports a failure when ApplAI refuses the fields, so the form is not opened every minute", async () => {
+  const calls = await readFormsWith([{ application_id: 5, url: LEVER }], {}, 422);
+
+  assert.deepEqual(calls.slice(-2), [
+    [`${APPLAI}/api/browser/forms/5`, { ...SENT, body: JSON.stringify({ fields: FIELDS }) }],
+    [`${APPLAI}/api/browser/forms/5/failure`, { ...SENT, body: JSON.stringify({ reason: "not_read" }) }],
   ]);
 });
 

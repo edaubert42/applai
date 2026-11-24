@@ -6,6 +6,7 @@ export function readForm(root = document) {
   const TYPES = { email: "email", tel: "phone", file: "file", radio: "radio", checkbox: "checkbox" };
   const SKIPPED = ["hidden", "submit", "button", "reset", "image"];
   const MARK = /\s*[*✱]\s*$/; // a required field's mark at the end of its label
+  const MAX_LABEL = 1000, MAX_OPTIONS = 500; // what ApplAI accepts (applai.browser.FormField)
   const words = (node) => (node?.textContent ?? "").replace(/\s+/g, " ").trim();
   const ownWords = (label) => {
     const copy = label.cloneNode(true); // detached: the page sees nothing
@@ -33,6 +34,8 @@ export function readForm(root = document) {
   const sharing = new Map(); // how many radios or checkboxes share each name
   for (const control of controls) sharing.set(keyOf(control), (sharing.get(keyOf(control)) ?? 0) + 1);
 
+  const clean = (label, control) =>
+    (label.replace(MARK, "").trim() || control.name || control.type).slice(0, MAX_LABEL);
   const fields = [];
   const groups = new Map();
   for (const control of controls) {
@@ -43,15 +46,15 @@ export function readForm(root = document) {
       control.required || control.getAttribute("aria-required") === "true" || MARK.test(label);
     if (!grouped) {
       const options = type === "select" ? [...control.options].filter((o) => o.value).map(words) : [];
-      fields.push({ label: label.replace(MARK, ""), type, required, options });
+      fields.push({ label: clean(label, control), type, required, options: options.slice(0, MAX_OPTIONS) });
       continue;
     }
     if (!groups.has(keyOf(control))) {
-      groups.set(keyOf(control), { label: label.replace(MARK, ""), type, required: false, options: [] });
+      groups.set(keyOf(control), { label: clean(label, control), type, required: false, options: [] });
       fields.push(groups.get(keyOf(control)));
     }
     const group = groups.get(keyOf(control));
-    group.options.push(labelOf(control).replace(MARK, ""));
+    if (group.options.length < MAX_OPTIONS) group.options.push(clean(labelOf(control), control));
     group.required ||= required;
   }
   return fields;

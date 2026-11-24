@@ -40,6 +40,13 @@ test("it reads each control's label, type, whether it is required, and its optio
   ]);
 });
 
+test("it lists only what ApplAI accepts: a label of 1000 characters at most, never empty", () => {
+  document.body.innerHTML = `<label for="a">*</label><input id="a" name="code">
+    <label for="b">${"x".repeat(1200)}</label><input id="b" name="long">`;
+
+  expect(readForm(document).map((field) => field.label.length)).toEqual(["code".length, 1000]);
+});
+
 test("it never dispatches an input, click or submit event, and runs alone as Chrome sends it", () => {
   document.body.innerHTML = FORM;
   const events: string[] = [];
