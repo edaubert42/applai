@@ -33,14 +33,21 @@ class FormNotFound(Exception):
 
 
 def find_form(engine: Engine, application_id: int, http: httpx2.Client) -> None:
-    """Record on the application its form's URL, or why it was not found; commits."""
-    with Session(engine) as session:
+    """Record on the application its form's URL, or why it was not found; commits.
+
+    A URL the candidate pasted while the page was read is kept.
+    """
+    with Session(engine, expire_on_commit=False) as session:
         application = session.get_one(Application, application_id)
         offer = session.get_one(Offer, application.offer_id)
+        session.commit()  # no transaction is held while the page is read
         try:
-            application.form_url, application.form_url_error = form_url(offer, http), None
-        except FormNotFound as error:
-            application.form_url, application.form_url_error = None, str(error)
+            found, error = form_url(offer, http), None
+        except FormNotFound as not_found:
+            found, error = None, str(not_found)
+        session.refresh(application)
+        if application.form_url is None:
+            application.form_url, application.form_url_error = found, error
         session.commit()
 
 
