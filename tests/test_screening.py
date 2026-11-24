@@ -60,6 +60,8 @@ def _screen(engine: Engine, profile: Profile, **fields: object) -> Offer:
         ({"contract": "Stage"}, "contract"),
         ({"contract": "cdd"}, "contract"),
         ({"contract": "Alternance"}, "contract"),
+        ({"contract": "TEMPORARY"}, "contract"),  # schema.org's employmentType
+        ({"contract": "INTERN"}, "contract"),
         ({"years_required": 4}, "years"),
         ({"work_mode": "onsite", "location": "Lille 59000"}, "location"),
         ({"work_mode": "hybrid", "location": "69003 Lyon"}, "location"),
@@ -128,6 +130,8 @@ def test_a_fully_remote_offer_passes_wherever_it_is_and_is_noted(engine: Engine,
         {"location": "Somewhere in France"},
         {"contract": None},
         {"contract": "Portage salarial"},
+        {"contract": "FULL_TIME"},  # says nothing about the contract
+        {"contract": "PART_TIME"},
         {"years_required": None},
         {"work_mode": None, "location": "Lille 59000"},
     ],
@@ -145,7 +149,7 @@ def test_a_contract_is_known_by_the_wording_of_the_source_case_and_accent_insens
 ):
     kept = [
         _screen(engine, profile, contract=wording)
-        for wording in ("CDI", "cdi", "Freelance", "Indépendant", "INDEPENDANT")
+        for wording in ("CDI", "cdi", "Freelance", "Indépendant", "INDEPENDANT", "CONTRACTOR")
     ]
 
     assert {o.state for o in kept} == {"new"}

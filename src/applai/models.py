@@ -203,7 +203,8 @@ class AgentRun(Base):
 class Triage(Base):
     """The card the Triage agent wrote for one offer, and the agent run that wrote it.
 
-    Its fields are those of applai.triage.CARD_SCHEMA, which the card was checked against.
+    Its fields are those of applai.triage.CARD_SCHEMA, which the card was checked against, but
+    fixed_term_months; cons may end with what code adds about a CDD's length.
     """
 
     __tablename__ = "triages"
@@ -221,7 +222,7 @@ class Triage(Base):
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
     def card(self) -> dict[str, Any]:
-        """The card as the agent wrote it."""
+        """The card as stored: the agent's, with what code added to its cons."""
         return {
             "score": self.score,
             "tags": self.tags,

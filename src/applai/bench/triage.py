@@ -1,9 +1,11 @@
 """The Triage bench: recall on the offers the candidate wanted, precision and cost.
 
 A bench case is one offer, as a YAML file, with the candidate's expected decision (accept or
-decline) and, optionally, the trap it covers. The Triage agent runs RUNS times on each case;
-a run that fails counts as score 0 and the bench goes on. The offer is proposed when its
-median score is at least the threshold, review_min_score unless --min-score overrides it.
+decline) and, optionally, the trap it covers and the summary of the offer's page (location,
+contract, salary, work_mode, years_required), sent to Triage as for a real offer. The Triage
+agent runs RUNS times on each case; a run that fails counts as score 0 and the bench goes on.
+The offer is proposed when its median score is at least the threshold, review_min_score
+unless --min-score overrides it.
 
 Recall is the share of wanted offers that are proposed, and the bench fails under
 RECALL_THRESHOLD, or when no case is wanted, as it then measures nothing; precision is the
@@ -20,7 +22,7 @@ import statistics
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -28,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from applai.agents import AgentError, AgentRunner, Backend
 from applai.profile import DATA_DIR_VARIABLE, Profile, load_profile
 from applai.settings import review_min_score
-from applai.triage import TRIAGE_MODEL, triage_spec
+from applai.triage import SUMMARY_FIELDS, TRIAGE_MODEL, triage_spec
 
 RUNS = 3
 RECALL_THRESHOLD = 0.9
@@ -58,6 +60,12 @@ class BenchCase(BaseModel):
     description: _Text
     expected: Expected
     trap: _Text | None = None
+    # The summary of the offer's page, sent to Triage as for a real offer (SUMMARY_FIELDS).
+    location: _Text | None = None
+    contract: _Text | None = None
+    salary: _Text | None = None
+    work_mode: Literal["remote", "hybrid", "onsite"] | None = None
+    years_required: Annotated[int, Field(ge=0)] | None = None
 
 
 @dataclass(frozen=True)
@@ -130,7 +138,8 @@ def _load_case(path: Path, name: str) -> BenchCase:
 
 
 def _run_case(runner: AgentRunner, case: BenchCase, profile: Profile) -> CaseResult:
-    spec = triage_spec(case.title, case.company, case.description, profile)
+    summary = case.model_dump(include=set(SUMMARY_FIELDS))
+    spec = triage_spec(case.title, case.company, case.description, profile, summary)
     scores: list[int | None] = []
     cost = 0.0
     for _ in range(RUNS):

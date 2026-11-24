@@ -29,6 +29,7 @@ CARD: dict[str, Any] = {
     "mission": ["Construire les pipelines", "Écrire du SQL"],
     "pros": ["Data engineering"],
     "cons": [],
+    "fixed_term_months": None,
 }
 
 type Run = int | str  # a score, or FAILED
@@ -56,7 +57,7 @@ def _case(data_dir: Path, name: str, expected: str, **fields: str) -> None:
         "company": fields.get("company", f"Entreprise {name}"),
         "description": fields.get("description", f"Offre {name}, à Lyon, en CDI."),
         "expected": expected,
-    }
+    } | fields
     path = data_dir / "bench" / "triage" / f"{name}.yaml"
     path.write_text(yaml.safe_dump(case, allow_unicode=True), encoding="utf-8")
 
@@ -120,6 +121,20 @@ def test_each_case_runs_3_times_and_is_proposed_on_its_median_score(
     assert code == 1
 
 
+def test_a_case_sends_its_page_fields_to_triage_as_a_real_offer_does(
+    data_dir: Path, capsys: pytest.CaptureFixture[str]
+):
+    _case(data_dir, "a", "accept", location="Lyon", salary="40000 EUR per year")
+    _case(data_dir, "b", "accept")
+    backend = FakeBackend([_result(80)] * 6)
+
+    _bench(capsys, backend, "--private")
+
+    offers = [json.loads(spec.input)["offer"] for spec in backend.specs]
+    assert (offers[0]["location"], offers[0]["salary"]) == ("Lyon", "40000 EUR per year")
+    assert set(offers[3]) == {"title", "company", "description"}
+
+
 def test_the_threshold_comes_from_the_settings_and_min_score_overrides_it(
     data_dir: Path, capsys: pytest.CaptureFixture[str]
 ):
@@ -171,6 +186,16 @@ def test_the_public_bench_reports_each_case_of_the_demo_candidate(
     assert len(cases) >= 25
     assert {"senior in the text", "stretch location", "fully remote"} <= traps
     assert {"staff augmentation", "pre-sales", "missing salary"} <= traps
+    # #107: the place or the salary only in the page's summary, never in the description.
+    summary_only = [case for case in cases if {"location", "salary"} & set(case)]
+    assert [(case.get("location"), case["expected"]) for case in summary_only] == [
+        ("Lyon", "accept"),
+        ("Bordeaux", "decline"),
+        (None, "decline"),
+    ]
+    for case in summary_only:
+        place_or_salary = case.get("location") or case["salary"]
+        assert place_or_salary.split()[0] not in case["description"]
     wanted = sum(case["expected"] == "accept" for case in cases)
     assert 0 < wanted < len(cases)
     backend = FakeBackend([_result(80)] * (3 * len(cases)))
