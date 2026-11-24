@@ -87,6 +87,17 @@ def test_one_sentence_citing_a_fact_to_confirm_fails_the_bench(capsys: pytest.Ca
     assert code == 1
 
 
+def test_a_drafting_run_with_an_uncited_sentence_fails_the_bench(
+    capsys: pytest.CaptureFixture[str],
+):
+    # The first run of the first offer cites no fact: its schema refuses it, and the run fails.
+    code, out = _bench(capsys, Scripted(cite=lambda run: [] if run == 0 else ["F1"]))
+
+    assert "1 failed" in out
+    assert "1 Drafting runs failed" in out
+    assert code == 1
+
+
 def test_a_judge_that_finds_everything_supported_fails_the_bench(
     capsys: pytest.CaptureFixture[str],
 ):

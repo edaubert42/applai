@@ -6,8 +6,8 @@ refuses its citation (applai.drafting.citation_problem), and the bench fails whe
 judge case lists sentences citing facts, each labeled supported or unsupported by a human;
 the judge reads each case RUNS times, as it reads one application, and the bench fails when
 Cohen's kappa between its verdicts and the labels is under KAPPA_THRESHOLD. A failed
-Drafting run is counted and drafts nothing; a failed judge run counts as verdicts against
-every label of its case.
+Drafting run (its schema refuses an uncited sentence) fails the bench; a failed judge run
+counts as verdicts against every label of its case.
 """
 
 from dataclasses import dataclass, field
@@ -103,6 +103,7 @@ class _Totals:
     drafting_runs: int = 0
     judge_runs: int = 0
     failed: int = 0
+    drafting_failed: int = 0
     drafting_cost: float = 0.0
     judge_cost: float = 0.0
 
@@ -153,6 +154,7 @@ def _draft(runner: AgentRunner, case: OfferCase, profile: Profile, totals: _Tota
         result = runner.run_agent(drafting_spec(offer, fields, questions, letter, profile))
     except AgentError:
         totals.failed += 1
+        totals.drafting_failed += 1
         return
     totals.drafting_cost += result.usage.cost_usd
     answers: list[list[dict[str, Any]]] = list(result.output["answers"].values())
@@ -179,6 +181,8 @@ def _failures(totals: _Totals) -> list[str]:
     failures: list[str] = []
     if totals.invalid_rate is None or totals.invalid_rate > 0:
         failures.append("a sentence cites a fact it may not, or none was drafted")
+    if totals.drafting_failed:
+        failures.append(f"{totals.drafting_failed} Drafting runs failed (uncited sentence, say)")
     if totals.kappa is None or totals.kappa < KAPPA_THRESHOLD:
         failures.append(f"the judge's kappa is under {KAPPA_THRESHOLD}")
     return failures
