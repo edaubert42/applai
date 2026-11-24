@@ -172,13 +172,15 @@ class FormUrlRecorded(BaseModel):
 
 @api.put("/applications/{application_id}/form-url")
 def paste_form_url(application_id: int, body: FormUrl, session: _Session) -> FormUrlRecorded:
-    """Record the form's URL the candidate pasted on an application still created."""
+    """Record the form's URL the candidate pasted on an application still created; the
+    extension reads it at once, the failures of the form before forgotten (applai.browser)."""
     application = session.get(Application, application_id)
     if application is None or application.user_id != LOCAL_USER_ID:
         raise HTTPException(404, "no such application")
     if application.state != ApplicationState.CREATED:
         raise HTTPException(409, f"Application {application_id} is past form capture.")
     application.form_url, application.form_url_error = body.url, None
+    application.form_failures, application.form_failed_at = 0, None
     session.commit()
     return FormUrlRecorded(form_url=body.url)
 
@@ -251,7 +253,7 @@ _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 # The ApplAI extension's routes (applai.browser), whatever the method.
-_EXTENSION_PATHS = re.compile(r"/api/browser/pages(/[0-9]+(/failure)?)?")
+_EXTENSION_PATHS = re.compile(r"/api/browser/(pages|forms)(/[0-9]+(/failure)?)?")
 
 
 class SameOriginWrites:

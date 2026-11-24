@@ -1,4 +1,5 @@
-"""JobTeaser's and Google's pages, read by the ApplAI extension in Chrome (ADR 0005).
+"""JobTeaser's and Google's pages and the applications' forms, read by the ApplAI extension in
+the candidate's own Chrome (ADR 0005).
 
 Those sites refuse ApplAI's requests, so the scan leaves their offers new (EXTENSION_SITES in
 applai.details). Every minute the extension (extension/) asks for them, fetches each page with
@@ -8,30 +9,46 @@ without the profile none is listed. A page received describes its offer as a pag
 HTTP would, then the offer is triaged in the background, not at the next scan. A page that
 fails, reported by the extension or with no text, is asked for again only after the next scan;
 after MAX_PAGE_FAILURES the offer is described from its alert's fields, then triaged.
+
+Form capture: an application created with its form's URL (applai.capture) and no fields is
+listed for the extension, which opens the form in a tab, lists its controls without filling
+anything and sends them back; the application moves to form_captured. A form that fails, or
+shows no field, is asked for again only after the next scan; after MAX_FORM_FAILURES its URL
+is dropped and the candidate pastes one, which counts from zero again.
 """
 
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from applai import details
 from applai.agents import AgentRunner
+from applai.capture import PASTE
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
 from applai.google import describe_google_offer, on_google
-from applai.models import LOCAL_USER_ID, Offer, OfferOrigin, OfferState, Scan
-from applai.orchestrator import TransitionError
+from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Scan
+from applai.orchestrator import Actor, ApplicationState, TransitionError, move
 from applai.profile import Profile, ProfileError, load_profile
 from applai.scan import Watch
 from applai.screening import screen_offer
 from applai.triage import triage_offer
 
 CONNECTED_FOR = timedelta(minutes=5)  # after the extension's last ask
+MAX_FORM_FAILURES = 2
+# Why a form was not read, as the extension reports it, in the error the dashboard shows.
+_FORM_FAILURES = {
+    "not_allowed": "is on a site the ApplAI extension does not read",
+    "not_loaded": "did not load",
+    "not_read": "could not be read",
+    "no_field": "shows no field ApplAI recognizes",
+}
 
 router = APIRouter(prefix="/api/browser")
 
@@ -47,6 +64,30 @@ class PageSent(BaseModel):
 
 class PageFailed(BaseModel):
     status: int | None = Field(None, ge=100, le=599)  # the page's; none: it was not fetched
+
+
+class FormField(BaseModel):
+    """One control of a form, as the extension's reader lists it (extension/forms.js)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=1000)
+    type: Literal["text", "email", "phone", "file", "select", "radio", "checkbox", "textarea"]
+    required: bool
+    options: list[str] = Field(max_length=500)
+
+
+class FormToRead(BaseModel):
+    application_id: int
+    url: str
+
+
+class FormSent(BaseModel):
+    fields: list[FormField] = Field(max_length=500)  # none: a failure
+
+
+class FormFailed(BaseModel):
+    reason: Literal["not_allowed", "not_loaded", "not_read"]
 
 
 class BrowserStatus(BaseModel):
@@ -166,6 +207,78 @@ def _triage(engine: Engine, data_dir: Path, runner: AgentRunner, offer_id: int) 
     """Triage the offer; a failure, recorded in its trace, leaves it described for the scan."""
     with suppress(Exception):
         triage_offer(runner, engine, offer_id, load_profile(data_dir))
+
+
+def _form_waiting(application: Application, last_scan: datetime | None) -> bool:
+    """Created, with a form's URL and no fields, and not failed since the last scan finished."""
+    failed = application.form_failed_at
+    return (
+        application.user_id == LOCAL_USER_ID
+        and application.state == ApplicationState.CREATED
+        and application.form_url is not None
+        and application.form_fields is None
+        and (failed is None or (last_scan is not None and last_scan > failed))
+    )
+
+
+@router.get("/forms")
+def forms(request: Request) -> list[FormToRead]:
+    """The forms waiting for the extension."""
+    with Session(request.app.state.engine) as session:
+        last_scan = _last_scan(session)
+        created = session.scalars(
+            select(Application)
+            .where(Application.state == ApplicationState.CREATED)
+            .order_by(Application.id)
+        )
+        return [
+            FormToRead(application_id=a.id, url=a.form_url)
+            for a in created
+            if a.form_url is not None and _form_waiting(a, last_scan)
+        ]
+
+
+@router.post("/forms/{application_id}", status_code=204)
+def form_sent(application_id: int, body: FormSent, request: Request) -> None:
+    """Store a waiting application's fields and move it to form_captured; none is a failure."""
+    with Session(request.app.state.engine) as session:
+        application = _waiting_form(session, application_id)
+        if not body.fields:
+            _form_failed(application, "no_field", request.app.state.clock())
+        else:
+            application.form_fields = [field.model_dump() for field in body.fields]
+            try:
+                move(session, application, ApplicationState.FORM_CAPTURED, Actor.FORM_CAPTURE)
+            except TransitionError as error:  # another post moved it meanwhile
+                raise HTTPException(409, str(error)) from None
+        session.commit()
+
+
+@router.post("/forms/{application_id}/failure", status_code=204)
+def form_failed(application_id: int, body: FormFailed, request: Request) -> None:
+    """Record a form the extension could not read."""
+    with Session(request.app.state.engine) as session:
+        _form_failed(_waiting_form(session, application_id), body.reason, request.app.state.clock())
+        session.commit()
+
+
+def _waiting_form(session: Session, application_id: int) -> Application:
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    if not _form_waiting(application, _last_scan(session)):
+        raise HTTPException(409, f"Application {application_id} is not waiting for its form.")
+    return application
+
+
+def _form_failed(application: Application, reason: str, now: datetime) -> None:
+    """Record a form not read, asked for again after the next scan; after the last failure
+    allowed, drop its URL so the candidate pastes one."""
+    application.form_failures += 1
+    application.form_failed_at = now.astimezone(UTC).replace(tzinfo=None)  # as the scans' times
+    if application.form_failures >= MAX_FORM_FAILURES:
+        application.form_url = None
+        application.form_url_error = f"The form {_FORM_FAILURES[reason]}: {PASTE}."
 
 
 @router.get("/status")
