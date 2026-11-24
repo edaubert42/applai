@@ -44,8 +44,11 @@ CARD: dict[str, Any] = {
     "pros": ["Data engineering au cœur du poste", "CDI"],
     "cons": [{"text": "Salaire non précisé", "verdict": "?"}],
     "fixed_term_months": None,
+    "work_mode": None,
+    "years_required": None,
 }
-STORED = {name: value for name, value in CARD.items() if name != "fixed_term_months"}
+NOT_STORED = ("fixed_term_months", "work_mode", "years_required")  # not in the card's table
+STORED = {name: value for name, value in CARD.items() if name not in NOT_STORED}
 
 
 def _result(output: dict[str, Any]) -> AgentResult:
@@ -142,6 +145,8 @@ def test_a_described_offer_gets_its_stored_card_and_moves_to_triaged(
         pytest.param(_without(CARD, "salary"), id="missing tag"),
         pytest.param(CARD | {"pros": [f"Atout {n}" for n in range(6)]}, id="6 pros"),
         pytest.param(CARD | {"score": 120}, id="score 120"),
+        pytest.param(CARD | {"work_mode": "partiel"}, id="unknown work mode"),
+        pytest.param(CARD | {"years_required": -1}, id="negative years"),
     ],
 )
 def test_a_card_outside_the_schema_is_refused_and_the_offer_stays_described(
@@ -402,6 +407,50 @@ def test_an_offer_without_salary_is_not_screened_out_and_its_salary_tag_is_unkno
     # The salary tag is the agent's answer, which a fake cannot prove; what code owes it is
     # the instruction, and the bench measures the answer.
     assert '"?" when the offer does not say' in re.sub(r"\s+", " ", spec.system_prompt)
+
+
+def _lenient(profile: Profile) -> Profile:
+    """The demo profile, setting aside no offer for its years."""
+    triage = profile.triage.model_copy(update={"max_years_required": 99})
+    return profile.model_copy(update={"triage": triage})
+
+
+def test_the_work_mode_and_years_triage_reads_fill_only_what_the_page_left_empty(
+    engine: Engine, profile: Profile
+):
+    card = CARD | {"work_mode": "hybrid", "years_required": 5}
+    from_text = _read(engine, _triage(engine, _lenient(profile), card))
+    from_page = _read(engine, _triage(engine, _lenient(profile), card, years_required=2))
+
+    assert (from_text.work_mode, from_text.years_required) == ("hybrid", 5)
+    assert (from_page.work_mode, from_page.years_required) == ("hybrid", 2)
+
+
+@pytest.mark.parametrize(
+    ("years", "state", "rule", "actor"),
+    [
+        pytest.param(5, "screened_out", "years", "watch", id="5 years"),
+        pytest.param(None, "triaged", None, "triage", id="unknown"),
+    ],
+)
+def test_an_offer_triage_reads_above_the_maximum_years_is_screened_out_by_watch(
+    engine: Engine, profile: Profile, years: int | None, state: str, rule: str | None, actor: str
+):
+    assert profile.triage.max_years_required == 3
+    offer_id = _triage(engine, profile, CARD | {"years_required": years})
+
+    offer = _read(engine, offer_id)
+    assert (offer.state, offer.screened_rule) == (state, rule)
+    assert _changes(engine, offer_id) == [("described", state, actor)]
+    assert len(_triages(engine)) == 1  # kept, so the candidate who rescues it reads its card
+
+
+def test_the_prompt_says_how_to_read_the_years_from_the_text(profile: Profile):
+    prompt = " ".join(triage_spec(TITLE, COMPANY, DESCRIPTION, profile).system_prompt.split())
+
+    assert '"3 à 5 ans" is 3' in prompt
+    assert '"5 ans et plus" is 5' in prompt
+    assert '"junior", "senior" or "confirmé"' in prompt
 
 
 @pytest.mark.usefixtures("logged_in_claude")
