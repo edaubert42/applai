@@ -17,9 +17,9 @@ const services = {
 async function openPage(language: "fr" | "en" = "fr", routes = servicesRoutes(services)) {
   const calls = fakeApi({ ...reviewRoutes(), ...routes });
   render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: fr["nav.settings"] }));
   if (language === "en") fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
   const words = language === "en" ? en : fr;
-  fireEvent.click(screen.getByRole("button", { name: words["nav.settings"] }));
   await screen.findAllByRole("region");
   return { calls, words };
 }
@@ -83,14 +83,15 @@ describe("the Settings page", () => {
     expect(await screen.findAllByRole("region")).toHaveLength(4);
   });
 
-  it("has no button that signs in or sends anything", async () => {
+  it("has no button that signs in or sends anything, only the theme and the language", async () => {
     const hint = "Set APPLAI_LINKEDIN_CMD to connect LinkedIn.";
     const sites = [aService({ id: "alert_linkedin", state: "red", hint })];
     const { calls } = await openPage("fr", servicesRoutes({ ...services, sites }));
     const main = within(screen.getByRole("main"));
 
     expect(main.getByText(hint)).toBeTruthy();
-    expect(main.queryAllByRole("button")).toEqual([]);
+    const buttons = main.queryAllByRole("button").map((button) => button.getAttribute("aria-label"));
+    expect(buttons).toEqual([fr["theme.toLight"], fr["language.switch"]]);
     expect(main.queryAllByRole("link")).toEqual([]);
     expect(calls.filter((call) => call.method !== "GET")).toEqual([]);
   });

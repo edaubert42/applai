@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { fakeApi, reviewRoutes } from "./fake-api";
@@ -38,6 +38,8 @@ function rootToken(name: string): string {
   return document.documentElement.style.getPropertyValue(`--ui-${name}`);
 }
 
+const openSettings = () => fireEvent.click(screen.getByRole("button", { name: fr["nav.settings"] }));
+
 describe("the shell", () => {
   it("renders in French, then in English, only from the translation files", async () => {
     render(<App />);
@@ -49,6 +51,7 @@ describe("the shell", () => {
     const french = Object.values(fr);
     expect(shownStrings().filter((s) => !isMessage(french, s))).toEqual([]);
 
+    openSettings();
     fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
 
     expect(document.documentElement.lang).toBe("en");
@@ -63,11 +66,25 @@ describe("the shell", () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(fr).sort());
   });
 
+  it("sets the theme and the language on Réglages, not in the header", () => {
+    render(<App />);
+    const header = within(screen.getByRole("banner"));
+
+    for (const name of [fr["theme.toLight"], fr["language.switch"]]) {
+      expect(header.queryByRole("button", { name })).toBeNull();
+    }
+    openSettings();
+    const main = within(screen.getByRole("main"));
+    expect(main.getByRole("button", { name: fr["theme.toLight"] })).toBeTruthy();
+    expect(main.getByRole("button", { name: fr["language.switch"] })).toBeTruthy();
+  });
+
   it("switches from the dark tokens to the light ones", () => {
     render(<App />);
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(rootToken("background")).toBe(themes.dark.background);
 
+    openSettings();
     fireEvent.click(screen.getByRole("button", { name: fr["theme.toLight"] }));
 
     expect(document.documentElement.dataset.theme).toBe("light");
@@ -79,6 +96,7 @@ describe("the shell", () => {
 
   it("keeps the chosen theme and language after a reload", () => {
     const { unmount } = render(<App />);
+    openSettings();
     fireEvent.click(screen.getByRole("button", { name: fr["theme.toLight"] }));
     fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
     unmount();
