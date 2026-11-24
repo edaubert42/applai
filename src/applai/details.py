@@ -35,8 +35,9 @@ LOGOS_DIR = "logos"
 TIMEOUT = 20.0  # seconds
 USER_AGENT = f"ApplAI/{version('applai')}"
 MAX_LOGO_BYTES = 1_000_000
-EXTENSION_SITES = ("jobteaser.com",)  # they refuse ApplAI's requests: Chrome reads them
+EXTENSION_SITES = ("jobteaser.com", "google.com", "google.fr")  # Chrome reads them with its session
 MAX_PAGE_FAILURES = 2  # then the extension's offer is described from its alert (applai.browser)
+ALERT_ONLY = "Full text not read; the job alert gives only: "  # then the alert's fields
 # Raster images only: an SVG can hold scripts.
 IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
                 "image/webp": ".webp", "image/x-icon": ".ico",
@@ -109,25 +110,35 @@ def describe_offers(
 
 def on_linkedin(url: str) -> bool:
     """Whether an offer is LinkedIn's, which this module leaves to its own reader."""
-    return (urlsplit(url).hostname or "").endswith("linkedin.com")
+    host = (urlsplit(url).hostname or "").rstrip(".").lower()
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
 
 
 def read_by_extension(url: str) -> bool:
     """Whether an offer's page is read by the ApplAI extension, not over HTTP (applai.browser)."""
-    host = urlsplit(url).hostname or ""
+    host = (urlsplit(url).hostname or "").rstrip(".").lower()
     return any(host == site or host.endswith(f".{site}") for site in EXTENSION_SITES)
 
 
+def describe_from_alert(session: Session, offer: Offer) -> None:
+    """Describe an offer from its alert fields and move it to described, without committing."""
+    fields = (offer.title, offer.company, offer.location, offer.contract)
+    offer.description = ALERT_ONLY + "; ".join(filter(None, fields)) + "."
+    move(session, offer, OfferState.DESCRIBED, Actor.WATCH)
+
+
 def describe_offer(
-    session: Session, offer: Offer, data_dir: Path, http: httpx2.Client, html: str | None = None
-) -> None:
-    """Read the offer's page, or its html when given, and move it to described.
+    session: Session, offer: Offer, data_dir: Path, http: httpx2.Client,
+    html: str | None = None, url: str | None = None,
+) -> None:  # fmt: skip
+    """Read the offer's page (or url, or html when given) and move it to described.
 
     Else record why not on the offer and raise PageError. Logos are downloaded with http.
     Writes in the caller's session and does not commit.
     """
+    target = url or offer.url
     try:
-        base, details = _read(http, offer.url) if html is None else _parse(offer.url, html)
+        base, details = _read(http, target) if html is None else _parse(target, html)
     except PageError as error:
         offer.detail_error = str(error)
         raise
@@ -176,12 +187,12 @@ def _parse(url: str, html: str) -> tuple[str, Details]:
     details = read_page(html)
     if not details.description:
         raise PageError("the page has no text")
-    if _is_consent_wall(details.description):
+    if is_consent_wall(details.description):
         raise PageError("Google's consent page, not the offer")
     return url, details
 
 
-def _is_consent_wall(text: str) -> bool:
+def is_consent_wall(text: str) -> bool:
     """Whether text is Google's consent page, which a request without cookies gets."""
     text = text.replace("\N{RIGHT SINGLE QUOTATION MARK}", "'").lower()
     return any(opening in text for opening in _CONSENT_WALLS)

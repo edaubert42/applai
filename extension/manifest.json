@@ -2,8 +2,10 @@
   "manifest_version": 3,
   "name": "ApplAI",
   "version": "0.1.0",
-  "description": "Reads the JobTeaser offer pages ApplAI asks for, with this Chrome's session.",
+  "description": "Reads the JobTeaser and Google offer pages ApplAI asks for, with this Chrome's session.",
   "permissions": ["alarms"],
-  "host_permissions": ["https://*.jobteaser.com/*", "http://127.0.0.1/*"],
+  "host_permissions": [
+    "https://*.jobteaser.com/*", "https://*.google.com/*", "https://*.google.fr/*", "http://127.0.0.1/*"
+  ],
   "background": { "service_worker": "background.js", "type": "module" }
 }

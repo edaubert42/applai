@@ -107,6 +107,21 @@ def describe_linkedin_offers(
     return describing
 
 
+def read_linkedin_offer(session: Session, offer: Offer, url: str, now: datetime) -> str:
+    """Read one LinkedIn offer URL through the MCP server within pacing; return its text."""
+    command = os.environ.get(COMMAND_VARIABLE, "").strip()
+    if not command:
+        raise LinkedInError(f"{COMMAND_VARIABLE} is not set: it starts the LinkedIn MCP server")
+    match = _JOB_ID.search(urlsplit(url).path)
+    if match is None:
+        raise LinkedInError("the LinkedIn URL has no job id")
+    if not _may_read(session, offer.user_id, now):
+        raise LinkedInError("LinkedIn's daily limit or read interval is reached")
+    session.add(LinkedInRead(user_id=offer.user_id, offer_id=offer.id, read_at=now))
+    session.commit()
+    return _posting(call_tool(command, TOOL, {"job_id": match.group(1)}))
+
+
 def _describe(
     session: Session, offer: Offer, command: str, job_id: str, now: datetime, into: Describing
 ) -> None:

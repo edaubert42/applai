@@ -1,4 +1,4 @@
-"""JobTeaser's pages, read by the ApplAI extension in the candidate's own Chrome (ADR 0005).
+"""JobTeaser's and Google's pages, read by the ApplAI extension in Chrome (ADR 0005).
 
 Those sites refuse ApplAI's requests, so the scan leaves their offers new (EXTENSION_SITES in
 applai.details). Every minute the extension (extension/) asks for them, fetches each page with
@@ -20,17 +20,18 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
+from applai import details
 from applai.agents import AgentRunner
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
+from applai.google import describe_google_offer, on_google
 from applai.models import LOCAL_USER_ID, Offer, OfferOrigin, OfferState, Scan
-from applai.orchestrator import Actor, TransitionError, move
-from applai.profile import ProfileError, load_profile
+from applai.orchestrator import TransitionError
+from applai.profile import Profile, ProfileError, load_profile
 from applai.scan import Watch
 from applai.screening import screen_offer
 from applai.triage import triage_offer
 
 CONNECTED_FOR = timedelta(minutes=5)  # after the extension's last ask
-ALERT_ONLY = "Full text not read; the job alert gives only: "  # then the alert's fields
 
 router = APIRouter(prefix="/api/browser")
 
@@ -92,8 +93,13 @@ def page_sent(offer_id: int, body: PageSent, request: Request, later: Background
     """Describe a waiting offer from its page's HTML; a page with no text is a failure."""
     clock, data_dir = request.app.state.clock, request.app.state.data_dir
 
-    def read(session: Session, offer: Offer, watch: Watch) -> bool:
+    def read(session: Session, offer: Offer, watch: Watch, profile: Profile) -> bool:
         try:
+            if on_google(offer.url):
+                now = clock().astimezone(UTC).replace(tzinfo=None)
+                return describe_google_offer(
+                    session, offer, body.html, profile, data_dir, watch.http, now
+                )
             describe_offer(session, offer, data_dir, watch.http, body.html)
         except PageError as error:
             return _failed(session, offer, str(error), clock())
@@ -107,16 +113,14 @@ def page_failed(offer_id: int, body: PageFailed, request: Request, later: Backgr
     """Record a page the extension could not read."""
     error = f"the page answered HTTP {body.status}" if body.status else "the page was not fetched"
     clock = request.app.state.clock
-    _receive(
-        request, offer_id, later, lambda session, offer, _: _failed(session, offer, error, clock())
-    )
+    _receive(request, offer_id, later, lambda s, o, _w, _p: _failed(s, o, error, clock()))
 
 
 def _receive(
     request: Request,
     offer_id: int,
     later: BackgroundTasks,
-    read: Callable[[Session, Offer, Watch], bool],
+    read: Callable[[Session, Offer, Watch, Profile], bool],
 ) -> None:
     """Run read on a waiting offer and commit; once it is described, triage it in the background."""
     watch: Watch | None = request.app.state.watch
@@ -130,14 +134,14 @@ def _receive(
         if not _waiting(offer, _last_scan(session)):
             raise HTTPException(409, f"Offer {offer_id} is not waiting for its page.")
         try:
-            set_aside = screen_offer(session, offer, load_profile(data_dir))
+            profile = load_profile(data_dir)
         except ProfileError as error:
             raise HTTPException(409, f"Offer {offer_id} was not screened: {error}") from None
-        if set_aside:
+        if screen_offer(session, offer, profile):
             session.commit()
             raise HTTPException(409, f"Offer {offer_id} was set aside by screening.")
         try:
-            described = read(session, offer, watch)
+            described = read(session, offer, watch, profile)
         except TransitionError as error:  # a scan set it aside meanwhile
             raise HTTPException(409, str(error)) from None
         session.commit()
@@ -153,9 +157,7 @@ def _failed(session: Session, offer: Offer, error: str, now: datetime) -> bool:
     offer.page_failed_at = now.astimezone(UTC).replace(tzinfo=None)  # as the scans' times
     if offer.page_failures < MAX_PAGE_FAILURES:
         return False
-    fields = (offer.title, offer.company, offer.location, offer.contract)
-    offer.description = ALERT_ONLY + "; ".join(filter(None, fields)) + "."
-    move(session, offer, OfferState.DESCRIBED, Actor.WATCH)
+    details.describe_from_alert(session, offer)
     return True
 
 

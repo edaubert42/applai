@@ -90,7 +90,11 @@ def test_the_fictional_candidates_profile_is_read_as_a_typed_profile():
         exclude_title_words=("Senior", "Lead", "Staff", "Data Scientist", "MLOps", "Research"),
         max_years_required=3,
         stretch_locations=("Saint-Étienne",),  # near Lyon (#75)
-    )
+        trusted_boards=(
+            "LinkedIn", "Welcome to the Jungle", "HelloWork", "Indeed", "APEC",
+            "France Travail", "JobTeaser", "LesJeudis", "WeLoveDevs", "Cadremploi",
+        ),
+    )  # fmt: skip
     assert [(fact.id, fact.status, fact.diffusion) for fact in profile.facts] == [
         ("F1", FactStatus.VALIDATED, Diffusion.ANYWHERE),
         ("F2", FactStatus.VALIDATED, Diffusion.APPLICATIONS_ONLY),

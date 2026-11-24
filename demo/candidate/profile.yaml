@@ -33,6 +33,7 @@ triage:
   exclude_title_words: [Senior, Lead, Staff, Data Scientist, MLOps, Research]
   max_years_required: 3
   stretch_locations: [Saint-Étienne]  # passes; Triage marks it down
+  trusted_boards: [LinkedIn, Welcome to the Jungle, HelloWork, Indeed, APEC, France Travail, JobTeaser, LesJeudis, WeLoveDevs, Cadremploi]
 
 # status: validated, to_confirm or forbidden.
 # diffusion: anywhere, applications_only or never.

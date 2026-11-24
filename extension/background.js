@@ -6,7 +6,7 @@ export const APPLAI = "http://127.0.0.1:8000"; // applai serve's address
 const READ = "read-pages";
 
 // Ask ApplAI for the pages to read, fetch each with the browser's cookies, send back its HTML.
-// Only JobTeaser's, as the manifest's host permissions. A page that fails is reported: ApplAI
+// Only JobTeaser's and Google's, as the manifest's host permissions. A page that fails is reported: ApplAI
 // asks for it again only after its next scan, never every minute.
 export async function readPages(fetch = globalThis.fetch) {
   let pages;
@@ -18,7 +18,7 @@ export async function readPages(fetch = globalThis.fetch) {
     return; // ApplAI is not running
   }
   for (const { offer_id, url } of pages) {
-    if (!onJobTeaser(url)) continue;
+    if (!onAllowedHost(url)) continue;
     let path = "", body;
     try {
       const page = await fetch(url, { credentials: "include" });
@@ -39,10 +39,12 @@ export async function readPages(fetch = globalThis.fetch) {
   }
 }
 
-function onJobTeaser(url) {
+const HOSTS = [".jobteaser.com", ".google.com", ".google.fr"];
+
+function onAllowedHost(url) {
   try {
     const { protocol, hostname } = new URL(url);
-    return protocol === "https:" && `.${hostname}`.endsWith(".jobteaser.com");
+    return protocol === "https:" && HOSTS.some((host) => `.${hostname}`.endsWith(host));
   } catch {
     return false; // not a URL
   }
