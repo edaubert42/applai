@@ -6,12 +6,14 @@ form with no open question, a slot for other documents. A form with neither move
 with no agent run. Each answer is a list of sentences, each citing the facts it states; code
 checks every cited fact is in the profile, validated, and not of diffusion never (ADR 0008),
 else nothing is stored, the run's outcome says why, and the application stays form_captured
-with its draft_error. Only those facts reach the agent.
+with its draft_error. Only those facts reach the agent. An answer the candidate rejects
+is drafted again alone, with their reason (redraft_answer).
 """
 
 import json
 import re
 from contextlib import suppress
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +31,16 @@ AGENT = "drafting"
 DRAFTING_MODEL = "claude-opus-5-5"  # pinned, as the bench measures one version
 QUESTION, COVER_LETTER = "question", "cover_letter"  # draft_answers.kind
 INVALID_CITATION = "invalid_citation"  # the outcome of a run whose citations code refused
+
+
+class AnswerStatus(StrEnum):
+    """draft_answers.status: pending until the candidate's label (applai.correct)."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    EDITED = "edited"
+    REJECTED = "rejected"
+
 
 # Matched on folded labels (applai.text.fold): what Filling enters from the profile.
 _IDENTITY = re.compile(
@@ -59,6 +71,8 @@ the candidate's targets, base answers, and the facts about the candidate you may
 - answers: for each question, under its field number, the answer as a list of sentences.
 - cover_letter, when asked: the letter's body as a list of sentences, with no address, no
   greeting and no sign-off: the candidate adds them.
+- rejected, when given: the candidate rejected your earlier text for that field, for the
+  reason they give. Write it again, following their reason.
 
 Each sentence is {"text": ..., "facts": [...]}: facts lists the ids ("F3") of the facts the
 sentence relies on, at least one. A sentence no fact backs is not written. Never write a
@@ -100,8 +114,10 @@ def drafting_spec(
     questions: list[int],
     letter: int | None,
     profile: Profile,
+    rejected: dict[str, Any] | None = None,
 ) -> AgentSpec:
-    """What the Drafting agent is sent: the offer, the fields to draft, the profile's parts."""
+    """What the Drafting agent is sent: the offer, the fields to draft, the profile's parts,
+    and the text the candidate rejected, with their reason, when one field is drafted again."""
     sent: dict[str, Any] = {
         "offer": {name: value for name, value in offer.items() if value},
         "questions": [{"field": i, "label": fields[i]["label"]} for i in questions],
@@ -113,6 +129,8 @@ def drafting_spec(
     if letter is not None:
         sent["cover_letter"] = {"field": letter, "label": fields[letter]["label"]}
         output["cover_letter"] = _SENTENCES
+    if rejected is not None:
+        sent["rejected"] = rejected
     return AgentSpec(name=AGENT, model=DRAFTING_MODEL, system_prompt=SYSTEM_PROMPT,
                      json_schema=_object(output),
                      input=json.dumps(sent, ensure_ascii=False, indent=2))  # fmt: skip
@@ -184,22 +202,80 @@ def _run(
     result = runner.run_agent(
         spec, database=database, offer_id=offer_id, application_id=application_id
     )
-    if result.run_id is None:  # run_agent records it, given the database
-        raise DraftingError("Drafting: the agent run was not recorded.")
+    run_id = _run_id(result.run_id)
     drafted = [(i, QUESTION, result.output["answers"][str(i)]) for i in questions]
     if letter is not None:
         drafted.append((letter, COVER_LETTER, result.output["cover_letter"]))
-    for _, _, sentences in drafted:
-        if problem := citation_problem(sentences, profile):
-            with Session(database) as session, session.begin():
-                session.get_one(AgentRun, result.run_id).outcome = INVALID_CITATION
-            raise DraftingError(f"Drafting refused: {problem}.")
+    _check_citations(database, run_id, [sentences for _, _, sentences in drafted], profile)
     return [
-        DraftAnswer(application_id=application_id, agent_run_id=result.run_id, kind=kind,
+        DraftAnswer(application_id=application_id, agent_run_id=run_id, kind=kind,
                     field_index=i, label=fields[i]["label"], sentences=sentences,
-                    text=" ".join(_CITED_IDS.sub("", s["text"]) for s in sentences))
+                    text=rendered(sentences))
         for i, kind, sentences in drafted
     ]  # fmt: skip
+
+
+def _run_id(run_id: int | None) -> int:
+    if run_id is None:  # run_agent records it, given the database
+        raise DraftingError("Drafting: the agent run was not recorded.")
+    return run_id
+
+
+def _check_citations(
+    database: Engine, run_id: int, answers: list[list[dict[str, Any]]], profile: Profile
+) -> None:
+    """Refuse the run if a sentence of its answers cites a fact it may not use (ADR 0008)."""
+    for sentences in answers:
+        if problem := citation_problem(sentences, profile):
+            with Session(database) as session, session.begin():
+                session.get_one(AgentRun, run_id).outcome = INVALID_CITATION
+            raise DraftingError(f"Drafting refused: {problem}.")
+
+
+def sentence_text(text: str) -> str:
+    """A drafted sentence without the facts' ids the agent may have written in it."""
+    return _CITED_IDS.sub("", text)
+
+
+def rendered(sentences: list[dict[str, Any]]) -> str:
+    """An answer's text: its sentences, joined, without the facts' ids."""
+    return " ".join(sentence_text(sentence["text"]) for sentence in sentences)
+
+
+def redraft_answer(
+    runner: AgentRunner, database: Engine, answer_id: int, reason: str, profile: Profile
+) -> DraftAnswer:
+    """Draft one rejected answer again with the candidate's reason, and replace it, pending.
+
+    The application's other answers are not sent nor touched. The citations are checked as
+    a whole Drafting's; on any failure the answer stays rejected. No session is held open
+    while the agent runs: the answer is replaced only if it is still rejected meanwhile.
+    """
+    with Session(database) as session:
+        answer = session.get_one(DraftAnswer, answer_id)
+        application = session.get_one(Application, answer.application_id)
+        offer = session.get_one(Offer, application.offer_id)
+        sent = {"title": offer.title, "company": offer.company, "description": offer.description}
+        fields, index = application.form_fields or [], answer.field_index
+        rejected = {"field": index, "text": answer.text, "reason": reason}
+        is_letter, offer_id, application_id = answer.kind == COVER_LETTER, offer.id, application.id
+    questions, letter = ([], index) if is_letter else ([index], None)
+    spec = drafting_spec(sent, fields, questions, letter, profile, rejected)
+    result = runner.run_agent(
+        spec, database=database, offer_id=offer_id, application_id=application_id
+    )
+    run_id = _run_id(result.run_id)
+    output = result.output
+    sentences = output["cover_letter"] if is_letter else output["answers"][str(index)]
+    _check_citations(database, run_id, [sentences], profile)
+    with Session(database, expire_on_commit=False) as session, session.begin():
+        answer = session.get_one(DraftAnswer, answer_id)
+        application = session.get_one(Application, answer.application_id)
+        if answer.status != AnswerStatus.REJECTED or application.state != ApplicationState.DRAFTED:
+            raise DraftingError(f"Answer {answer_id} was changed while it was drafted again.")
+        answer.agent_run_id, answer.sentences, answer.text = run_id, sentences, rendered(sentences)
+        answer.status, answer.edited_text = AnswerStatus.PENDING, None
+    return answer
 
 
 def record_failure(database: Engine, application_id: int, error: str) -> None:
