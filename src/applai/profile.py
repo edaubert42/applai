@@ -137,6 +137,7 @@ class Profile(_Section):
     targets: Targets
     triage: TriageRules
     facts: tuple[Fact, ...]
+    cv: str | None = None  # the CV Filling attaches: a file's path inside the data directory
 
     @model_validator(mode="after")
     def _fact_ids_are_unique(self) -> Self:
@@ -159,12 +160,31 @@ def load_profile(data_dir: Path | str | None = None) -> Profile:
     path = Path(data_dir) / PROFILE_FILE
     content = _read_yaml(path)
     try:
-        return Profile.model_validate(content)
+        profile = Profile.model_validate(content)
     except ValidationError as error:
         problems = [_describe(detail, content) for detail in error.errors()]
+    else:
+        if profile.cv is None or cv_file(data_dir, profile) is not None:
+            return profile
+        problems = ["cv: not a file inside the data directory"]
     # Raised outside the except clause, so the ValidationError, whose text holds the
     # refused values, is not even chained to the ProfileError.
     raise _refused(path, problems)
+
+
+def cv_file(data_dir: Path | str, profile: Profile) -> Path | None:
+    """The profile's CV, or None when it has none or it is not a file inside data_dir.
+
+    Resolved first: neither "..", an absolute path nor a link leads out of data_dir.
+    """
+    if profile.cv is None:
+        return None
+    root = Path(data_dir).resolve()
+    try:
+        path = (root / profile.cv).resolve()
+        return path if path.is_relative_to(root) and path.is_file() else None
+    except (OSError, ValueError):
+        return None
 
 
 def _no_data_dir() -> str:
