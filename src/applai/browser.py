@@ -12,10 +12,11 @@ after MAX_PAGE_FAILURES the offer is described from its alert's fields, then tri
 
 Form capture: an application created with its form's URL (applai.capture) and no fields is
 listed for the extension, which opens the form in a tab, lists its controls without filling
-anything and sends them back; the application moves to form_captured. With no control, it sends
-the page's text, and the form_capture agent reads the fields in it (applai.capture.read_fields).
-A form that fails, or shows no field, is asked for again only after the next scan; after
-MAX_FORM_FAILURES its URL is dropped and the candidate pastes one, which counts from zero again.
+anything and sends them back; the application moves to form_captured, and is drafted in the
+background (applai.drafting). With no control, it sends the page's text, and the form_capture
+agent reads the fields in it (applai.capture.read_fields). A form that fails, or shows no field,
+is asked for again only after the next scan; after MAX_FORM_FAILURES its URL is dropped and the
+candidate pastes one, which counts from zero again.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
 page received for one is read for its text, and the offer is triaged again in the background.
 """
@@ -35,6 +36,7 @@ from applai import details, reread
 from applai.agents import AgentRunner
 from applai.capture import MAX_FIELDS, PASTE, FormField, read_fields
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
+from applai.drafting import draft_in_background
 from applai.google import describe_google_offer, on_google
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Scan
 from applai.orchestrator import Actor, ApplicationState, TransitionError, move
@@ -282,10 +284,14 @@ def forms(request: Request) -> list[FormToRead]:
 
 
 @router.post("/forms/{application_id}", status_code=204)
-def form_sent(application_id: int, body: FormSent, request: Request) -> None:
-    """Store a waiting application's fields and move it to form_captured. With none and the
-    page's text, the form_capture agent reads them in the text; none found is a failure."""
-    engine, watch = request.app.state.engine, request.app.state.watch
+def form_sent(
+    application_id: int, body: FormSent, request: Request, later: BackgroundTasks
+) -> None:
+    """Store a waiting application's fields and move it to form_captured, then draft it in
+    the background with the watch's runner (applai.drafting). With no fields and the page's
+    text, the form_capture agent reads them in the text; none found is a failure."""
+    state = request.app.state
+    engine, watch = state.engine, state.watch
     fields, reason = body.fields, "no_field"
     if not fields and body.text and watch is not None:
         with Session(engine) as session:  # refused before the model is called
@@ -305,6 +311,9 @@ def form_sent(application_id: int, body: FormSent, request: Request) -> None:
             except TransitionError as error:  # another post moved it meanwhile
                 raise HTTPException(409, str(error)) from None
         session.commit()
+    if fields and watch is not None:
+        later.add_task(draft_in_background, state.engine, state.data_dir, watch.runner,
+                       application_id)  # fmt: skip
 
 
 @router.post("/forms/{application_id}/failure", status_code=204)
