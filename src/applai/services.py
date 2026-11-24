@@ -21,6 +21,7 @@ from applai.mail import CLIENT_ID_VARIABLE as MAIL_VAR
 from applai.mail import TOKEN_FILE
 from applai.models import AgentRun, MailRead, Offer, OfferOrigin, OfferState, Scan, StateChange
 from applai.notion import TOKEN_VARIABLE as NOTION_VAR
+from applai.notion import last_write_status
 from applai.profile import ProfileError, load_profile
 from applai.scan import Clock, Scanner, Watch
 from applai.settings import SettingsError, extension_id
@@ -241,15 +242,24 @@ def _applai(
     q_n = select(func.max(Offer.updated_at)).where(
         Offer.user_id == uid, Offer.origin == OfferOrigin.OLD_WORKFLOW
     )
+    ws = last_write_status(data_dir)
+    n_ok = max((t for t in (s.scalar(q_n), ws.last_ok_at) if t is not None), default=None)
+    n_st = _state(now, n_ok, ws.last_error_at, conn=tok)
     s_hint = "Review scan errors." if scan_st != "green" else None
     p_hint = "Fix profile.yaml." if prof_err else None
     b_hint = "Check APPLAI_BACKUP_DIR." if bak_msg else None
-    n_hint = None if tok else f"Set {NOTION_VAR}."
+    n_hint = (
+        f"Set {NOTION_VAR}."
+        if not tok
+        else "Check Notion token and database access."
+        if n_st != "green"
+        else None
+    )
     return [
         _row("scan", scan_st, scan_at, scan_err, fail_at, s_hint, next_at=_iso(next_at)),
         _row("profile", "red" if prof_err else "green", None, prof_err, None, p_hint),
         _row("backup", "green" if not bak_msg else "red", bak_at, bak_msg, None, b_hint),
-        _row("notion", "green" if tok else "red", s.scalar(q_n), None, None, n_hint, connected=tok),
+        _row("notion", n_st, n_ok, ws.last_error, ws.last_error_at, n_hint, connected=tok),
     ]
 
 
