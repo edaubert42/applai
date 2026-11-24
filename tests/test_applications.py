@@ -151,6 +151,8 @@ def test_a_row_has_the_offers_company_title_link_and_the_last_change(
         "state": "drafted",
         "origin": "applai",
         "changed_at": "2026-11-04T09:30:00Z",
+        "form_url": None,
+        "form_url_error": None,
     }
 
 
@@ -208,6 +210,8 @@ def test_an_old_workflow_offer_is_a_row_in_progress_with_its_origin_and_notion_s
         "state": "Envoyée",
         "origin": "old_workflow",
         "changed_at": "2026-11-09T08:00:00Z",
+        "form_url": None,
+        "form_url_error": None,
     }
     assert board["in_progress"][1]["origin"] == "applai"
     assert board["sent"] == []
