@@ -92,13 +92,14 @@ def describe_linkedin_offers(
         message = f"{COMMAND_VARIABLE} is not set: it starts the LinkedIn MCP server"
         for offer in offers:
             offer.detail_error = message
+            offer.detail_failed_at = now
         describing.errors.append(message)  # once, not once per offer
         session.commit()
         return describing
     for offer in offers:
         match = _JOB_ID.search(urlsplit(offer.url).path)
         if match is None:
-            _fail(describing, offer, "the LinkedIn URL has no job id")
+            _fail(describing, offer, "the LinkedIn URL has no job id", now)
             continue
         if _may_read(session, user_id, now):
             _describe(session, offer, command, match.group(1), now, describing)
@@ -131,7 +132,7 @@ def _describe(
     try:
         offer.description = _posting(call_tool(command, TOOL, {"job_id": job_id}))
     except LinkedInError as error:
-        _fail(into, offer, str(error))
+        _fail(into, offer, str(error), now)
         return
     offer.detail_error = None
     move(session, offer, OfferState.DESCRIBED, Actor.WATCH)
@@ -198,9 +199,10 @@ async def _call(argv: list[str], tool: str, arguments: dict[str, Any], timeout: 
     return "".join(block.text for block in result.content if isinstance(block, TextContent))
 
 
-def _fail(describing: Describing, offer: Offer, error: str) -> None:
+def _fail(describing: Describing, offer: Offer, error: str, failed_at: datetime) -> None:
     """Record on the offer why it could not be read; it stays new."""
     offer.detail_error = error
+    offer.detail_failed_at = failed_at
     describing.errors.append(f"offer {offer.id}: {error}")
 
 
