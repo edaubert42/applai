@@ -1,6 +1,6 @@
 # The ApplAI extension
 
-JobTeaser refuses ApplAI's requests, but serves its offer pages to the candidate's own Chrome. The ApplAI extension (`extension/`) reads them there, with the session Chrome already has: the candidate never signs in anywhere for ApplAI. It also reads the form of each accepted offer: it opens the form in an inactive tab, lists its fields (`extension/forms.js`) and closes the tab. It only reads: no click, no typing, no submit. Its permissions are `*.jobteaser.com` and the ATS hosts of `applai.capture.ATS_HOSTS`, the boards that host their own form (`BOARD_HOSTS`), ApplAI's address `http://127.0.0.1`, `scripting` to read a form in its tab, and an alarm to ask ApplAI every minute.
+JobTeaser refuses ApplAI's requests, but serves its offer pages to the candidate's own Chrome. The ApplAI extension (`extension/`) reads them there, with the session Chrome already has: the candidate never signs in anywhere for ApplAI. It also reads the form of each accepted offer (`extension/forms.js`) and fills waiting forms (`extension/fill.js`), blocking every submission in code (ADR 0003) and leaving the filled tab open for the candidate. Opening, reading and filling stay limited in code to the manifest's explicit ATS and board hosts; `<all_urls>` is added only for Chrome's `captureVisibleTab` screenshot after filling. Its permissions are `alarms` and `scripting`.
 
 ## Set it up in Chrome on Windows, with ApplAI in WSL
 

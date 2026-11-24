@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "ApplAI",
-  "version": "0.2.0",
-  "description": "Reads the JobTeaser and Google offer pages and the application forms ApplAI asks for, with this Chrome's session. Never fills nor sends.",
+  "version": "0.3.0",
+  "description": "Reads offer pages and forms, and fills waiting forms with this Chrome's session. Never sends.",
   "permissions": ["alarms", "scripting"],
   "host_permissions": [
+    "<all_urls>",
     "https://*.jobteaser.com/*",
     "https://*.google.com/*",
     "https://*.google.fr/*",

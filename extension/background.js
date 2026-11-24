@@ -1,6 +1,6 @@
-// The ApplAI extension's service worker: it reads the offer pages and the forms ApplAI asks for,
-// with this Chrome's session, so the candidate never signs in anywhere for ApplAI. It reads
-// only: no click, no typing, no submit. Setup: docs/extension.md.
+// The ApplAI extension's service worker: it reads offer pages and forms, and fills waiting forms
+// with this Chrome's session, blocking every submission in code (ADR 0003). Setup: docs/extension.md.
+import { fillForm } from "./fill.js";
 import { readForm, readText } from "./forms.js";
 
 export const APPLAI = "http://127.0.0.1:8000"; // applai serve's address
@@ -86,6 +86,74 @@ async function readIn(url, browser, wait) {
   }
 }
 
+// Ask ApplAI for forms to fill; fetch attachments, fill in an inactive tab (fill.js), capture a
+// screenshot, leave the tab open for the candidate, and post the filled state.
+export async function fillForms(fetch = globalThis.fetch, browser = globalThis.chrome, wait = sleep) {
+  let fills;
+  try {
+    const asked = await fetch(`${APPLAI}/api/browser/fills`, {});
+    if (!asked.ok) return;
+    fills = await asked.json();
+  } catch { return; }
+  for (const { application_id, url, actions } of fills) {
+    let path = "", body;
+    try {
+      body = await fillIn(application_id, url, actions, fetch, browser, wait);
+    } catch (error) {
+      const reason = ["not_allowed", "not_loaded"].includes(error?.message) ? error.message : "not_filled";
+      [path, body] = ["/failure", { reason }];
+    }
+    const sent = await send(fetch, `/api/browser/fills/${application_id}${path}`, body);
+    if (sent?.status === 422) {
+      await send(fetch, `/api/browser/fills/${application_id}/failure`, { reason: "not_filled" });
+    }
+  }
+}
+
+async function fillIn(applicationId, url, actions, fetch, browser, wait) {
+  if (!onHosts(url, browser.runtime.getManifest().host_permissions)) throw new Error("not_allowed");
+  const files = await fetchFiles(applicationId, actions, fetch);
+  const tab = await browser.tabs.create({ url, active: false });
+  for (let waited = 0; (await browser.tabs.get(tab.id)).status !== "complete"; waited += 500) {
+    if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
+    await wait(500);
+  }
+  let fields = [];
+  for (let tries = 0; tries < TRIES && !fields.length; tries++) {
+    if (tries) await wait(2000);
+    const [done] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: fillForm, args: [actions, files] });
+    fields = done?.result ?? [];
+  }
+  const screenshot = await captureTab(tab, browser);
+  return screenshot ? { fields, screenshot } : { fields };
+}
+
+async function fetchFiles(applicationId, actions, fetch) {
+  const slots = [...new Set(actions.filter((a) => a.kind === "attach").map((a) => String(a.value)))];
+  const files = {};
+  for (const slot of slots) {
+    const res = await fetch(`${APPLAI}/api/browser/fills/${applicationId}/files/${slot}`, {});
+    if (!res.ok) throw new Error("not_filled");
+    const match = (res.headers?.get("Content-Disposition") ?? "").match(/filename="?([^";]+)"?/i);
+    let bin = "";
+    for (const byte of new Uint8Array(await res.arrayBuffer())) bin += String.fromCharCode(byte);
+    files[slot] = { name: match?.[1] ?? `${slot}.pdf`, type: res.headers?.get("Content-Type") ?? "application/pdf", base64: btoa(bin) };
+  }
+  return files;
+}
+
+async function captureTab(tab, browser) {
+  let previous = null;
+  try {
+    previous = (await browser.tabs.query?.({ active: true, windowId: tab.windowId }))?.[0]?.id ?? null;
+    await browser.tabs.update(tab.id, { active: true });
+    const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    return dataUrl?.replace(/^data:image\/png;base64,/, "") || null;
+  } catch { return null; } finally {
+    if (previous !== null && previous !== tab.id) await browser.tabs.update(previous, { active: true }).catch(() => {});
+  }
+}
+
 async function send(fetch, path, body) {
   try {
     return await fetch(`${APPLAI}${path}`, {
@@ -134,6 +202,7 @@ if (globalThis.chrome?.alarms) {
     try {
       await readPages();
       await readForms();
+      await fillForms();
     } finally {
       reading = false;
     }
