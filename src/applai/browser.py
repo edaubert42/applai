@@ -13,9 +13,9 @@ after MAX_PAGE_FAILURES the offer is described from its alert's fields, then tri
 Form capture: an application created with its form's URL (applai.capture) and no fields is
 listed for the extension, which opens the form in a tab, lists its controls without filling
 anything and sends them back; the application moves to form_captured, and is drafted in the
-background (applai.drafting). A form that fails, or
-shows no field, is asked for again only after the next scan; after MAX_FORM_FAILURES its URL
-is dropped and the candidate pastes one, which counts from zero again.
+background (applai.drafting). A form that fails, or shows no field, is asked for again only
+after the next scan; after MAX_FORM_FAILURES its URL is dropped and the candidate pastes one,
+which counts from zero again.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
 page received for one is read for its text, and the offer is triaged again in the background.
 """
