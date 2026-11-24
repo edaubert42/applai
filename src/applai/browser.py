@@ -12,8 +12,9 @@ after MAX_PAGE_FAILURES the offer is described from its alert's fields, then tri
 
 Form capture: an application created with its form's URL (applai.capture) and no fields is
 listed for the extension, which opens the form in a tab, lists its controls without filling
-anything and sends them back; the application moves to form_captured. A form that fails, or
-shows no field, is asked for again only after the next scan; after MAX_FORM_FAILURES its URL
+anything and sends them back; the application moves to form_captured. With no control, it sends
+the page's text, and the form_capture agent reads the fields in it (applai.capture.read_fields).
+A form that fails, or shows no field, is asked for again only after the next scan; after MAX_FORM_FAILURES its URL
 is dropped and the candidate pastes one, which counts from zero again.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
 page received for one is read for its text, and the offer is triaged again in the background.
@@ -26,13 +27,13 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from applai import details, reread
 from applai.agents import AgentRunner
-from applai.capture import PASTE
+from applai.capture import MAX_FIELDS, PASTE, FormField, read_fields
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
 from applai.google import describe_google_offer, on_google
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Scan
@@ -44,6 +45,7 @@ from applai.triage import retriage_offer, triage_offer
 
 CONNECTED_FOR = timedelta(minutes=5)  # after the extension's last ask
 MAX_FORM_FAILURES = 2
+MAX_TEXT = 20_000  # characters of a form page's text, as extension/forms.js keeps them
 # Why a form was not read, as the extension reports it, in the error the dashboard shows.
 _FORM_FAILURES = {
     "not_allowed": "is on a site the ApplAI extension does not read",
@@ -68,24 +70,14 @@ class PageFailed(BaseModel):
     status: int | None = Field(None, ge=100, le=599)  # the page's; none: it was not fetched
 
 
-class FormField(BaseModel):
-    """One control of a form, as the extension's reader lists it (extension/forms.js)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    label: str = Field(min_length=1, max_length=1000)
-    type: Literal["text", "email", "phone", "file", "select", "radio", "checkbox", "textarea"]
-    required: bool
-    options: list[str] = Field(max_length=500)
-
-
 class FormToRead(BaseModel):
     application_id: int
     url: str
 
 
 class FormSent(BaseModel):
-    fields: list[FormField] = Field(max_length=500)  # none: a failure
+    fields: list[FormField] = Field(max_length=MAX_FIELDS)  # none: read from text, if sent
+    text: str | None = Field(None, max_length=MAX_TEXT)  # the page's visible text
 
 
 class FormFailed(BaseModel):
@@ -291,13 +283,23 @@ def forms(request: Request) -> list[FormToRead]:
 
 @router.post("/forms/{application_id}", status_code=204)
 def form_sent(application_id: int, body: FormSent, request: Request) -> None:
-    """Store a waiting application's fields and move it to form_captured; none is a failure."""
-    with Session(request.app.state.engine) as session:
+    """Store a waiting application's fields and move it to form_captured. With none and the
+    page's text, the form_capture agent reads them in the text; none found is a failure."""
+    engine, watch = request.app.state.engine, request.app.state.watch
+    fields, reason = body.fields, "no_field"
+    if not fields and body.text and watch is not None:
+        with Session(engine) as session:  # refused before the model is called
+            _waiting_form(session, application_id)
+        try:  # no session is held while the agent runs
+            fields = read_fields(watch.runner, engine, application_id, body.text)
+        except Exception:  # in the trace; a 500 would open the form again every minute
+            reason = "not_read"
+    with Session(engine) as session:
         application = _waiting_form(session, application_id)
-        if not body.fields:
-            _form_failed(application, "no_field", request.app.state.clock())
+        if not fields:
+            _form_failed(application, reason, request.app.state.clock())
         else:
-            application.form_fields = [field.model_dump() for field in body.fields]
+            application.form_fields = [field.model_dump() for field in fields]
             try:
                 move(session, application, ApplicationState.FORM_CAPTURED, Actor.FORM_CAPTURE)
             except TransitionError as error:  # another post moved it meanwhile
