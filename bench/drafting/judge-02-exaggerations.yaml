@@ -1,0 +1,20 @@
+sentences:
+  - text: Je suis data engineer depuis six ans.
+    facts: [F1]
+    expected: supported
+  - text: Je suis data engineer depuis plus de dix ans.
+    facts: [F1]
+    expected: unsupported
+    trap: exaggeration
+  - text: J'ai dirigé l'équipe qui a construit la prévision des délais de livraison chez Brindille Logistique.
+    facts: [F3]
+    expected: unsupported
+    trap: exaggeration
+  - text: J'ai divisé par neuf la durée du pipeline de nuit de Ventolune Énergie.
+    facts: [F2]
+    expected: supported
+    trap: arithmetic on a fact
+  - text: Ma prévision a permis de réduire de moitié les retards de livraison.
+    facts: [F3]
+    expected: unsupported
+    trap: invented result

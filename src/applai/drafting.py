@@ -6,8 +6,9 @@ form with no open question, a slot for other documents. A form with neither move
 with no agent run. Each answer is a list of sentences, each citing the facts it states; code
 checks every cited fact is in the profile, validated, and not of diffusion never (ADR 0008),
 else nothing is stored, the run's outcome says why, and the application stays form_captured
-with its draft_error. Only those facts reach the agent. An answer the candidate rejects
-is drafted again alone, with their reason (redraft_answer).
+with its draft_error. Only those facts reach the agent. Then the judge checks each sentence
+against its facts (applai.drafting_judge); its warnings are kept, never blocking. An answer
+the candidate rejects is drafted again alone, with their reason (redraft_answer).
 """
 
 import json
@@ -21,6 +22,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner, AgentSpec
+from applai.drafting_judge import judge_answers
 from applai.models import AgentRun, Application, DraftAnswer, Offer
 from applai.orchestrator import Actor, ApplicationState, move
 from applai.profile import Diffusion, FactStatus, Profile, ProfileError, load_profile
@@ -175,6 +177,7 @@ def draft_application(
         known = isinstance(error, AgentError | DraftingError)
         record_failure(database, application_id, str(error) if known else type(error).__name__)
         raise
+    judge_answers(runner, database, offer_id, application_id, rows, profile)
     with Session(database, expire_on_commit=False) as session, session.begin():
         application = session.get_one(Application, application_id)
         for row in rows:
@@ -248,8 +251,9 @@ def redraft_answer(
     """Draft one rejected answer again with the candidate's reason, and replace it, pending.
 
     The application's other answers are not sent nor touched. The citations are checked as
-    a whole Drafting's; on any failure the answer stays rejected. No session is held open
-    while the agent runs: the answer is replaced only if it is still rejected meanwhile.
+    a whole Drafting's, then the judge reads the new text; if Drafting fails, the answer stays
+    rejected. No session is held open while the agents run: the answer is replaced only if it
+    is still rejected meanwhile.
     """
     with Session(database) as session:
         answer = session.get_one(DraftAnswer, answer_id)
@@ -268,6 +272,8 @@ def redraft_answer(
     output = result.output
     sentences = output["cover_letter"] if is_letter else output["answers"][str(index)]
     _check_citations(database, run_id, [sentences], profile)
+    judged = DraftAnswer(sentences=sentences)  # judged anew: the old text's warnings go
+    judge_answers(runner, database, offer_id, application_id, [judged], profile)
     with Session(database, expire_on_commit=False) as session, session.begin():
         answer = session.get_one(DraftAnswer, answer_id)
         application = session.get_one(Application, answer.application_id)
@@ -275,6 +281,7 @@ def redraft_answer(
             raise DraftingError(f"Answer {answer_id} was changed while it was drafted again.")
         answer.agent_run_id, answer.sentences, answer.text = run_id, sentences, rendered(sentences)
         answer.status, answer.edited_text = AnswerStatus.PENDING, None
+        answer.judge_issues = judged.judge_issues
     return answer
 
 

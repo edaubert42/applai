@@ -1,0 +1,20 @@
+sentences:
+  - text: I have worked as a data engineer for six years, first at Brindille Logistique, then at Ventolune Énergie.
+    facts: [F1]
+    expected: supported
+    trap: translated fact
+  - text: I cut Ventolune Énergie's nightly pipeline from 6 hours to 40 minutes with incremental loads.
+    facts: [F2]
+    expected: supported
+    trap: translated fact
+  - text: I single-handedly rebuilt Ventolune Énergie's entire data platform.
+    facts: [F2]
+    expected: unsupported
+    trap: exaggeration
+  - text: I built a real-time delivery-time forecast in Spark, used by 120 warehouses.
+    facts: [F3]
+    expected: unsupported
+    trap: invented detail
+  - text: My delivery-time forecast is used by 120 warehouses at Brindille Logistique.
+    facts: [F3]
+    expected: supported

@@ -16,6 +16,7 @@ from applai.agents import AgentResult, AgentRunner, FakeBackend, Usage
 from applai.app import create_app
 from applai.database import open_database
 from applai.drafting import DRAFTING_MODEL, draft_application
+from applai.drafting_judge import JUDGE_MODEL
 from applai.models import Application, DraftAnswer, Label, Offer, StateChange
 from applai.profile import load_profile
 from applai.scan import Watch
@@ -163,7 +164,7 @@ def test_rejecting_an_answer_drafts_only_it_again_with_the_reason(
     assert (label.level, label.decision, label.correction, label.note) == (
         "answers", "rejected", True, REASON,
     )  # fmt: skip
-    [spec] = backend.specs
+    spec = backend.specs[0]  # then the judge's
     assert REASON in spec.input and PROJECT in spec.input and WHY not in spec.input
     answer = _answer(engine, project)
     assert (answer.status, answer.text, answer.sentences) == (
@@ -172,6 +173,30 @@ def test_rejecting_an_answer_drafts_only_it_again_with_the_reason(
     assert rejected.json()["sentences"][0]["facts"] == [{"id": "F3", "text": F3}]
     sibling = _answer(engine, why)
     assert (sibling.status, sibling.text) == ("accepted", SIX_YEARS)
+
+
+def test_a_redrafted_answer_is_judged_again_and_loses_the_old_texts_warnings(
+    data_dir: Path, engine: Engine
+):
+    supported = AgentResult(output={"verdicts": [{"supported": True, "reason": None}]},
+                            usage=Usage(model=JUDGE_MODEL, duration_ms=2000, input_tokens=900,
+                                        output_tokens=80))  # fmt: skip
+    backend = FakeBackend([REDRAFT, supported])
+    watch = Watch(http=httpx2.Client(), runner=AgentRunner(backend), ms_client_id=None)
+    app = create_app(data_dir, frontend_dir=data_dir / "none", watch=watch)
+    application_id, [_, project] = _drafted(engine)
+    with Session(engine) as session, session.begin():  # the judge flagged the first text
+        session.get_one(DraftAnswer, project).judge_issues = [{"sentence": 0, "reason": "Vague."}]
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        rejected = client.post(f"/api/applications/{application_id}/draft/{project}",
+                               json={"decision": "reject", "reason": REASON})  # fmt: skip
+
+    assert rejected.status_code == 200
+    assert [spec.name for spec in backend.specs] == ["drafting", "drafting_judge"]
+    assert REDRAFTED in backend.specs[1].input
+    answer = _answer(engine, project)
+    assert (answer.text, answer.judge_issues) == (REDRAFTED, [])
 
 
 def test_a_rejected_answer_whose_redraft_fails_cannot_be_accepted(data_dir: Path, engine: Engine):
