@@ -76,6 +76,8 @@ export function aRow(overrides: Partial<Row> = {}): Row {
     state: "drafted",
     origin: "applai",
     changed_at: "2026-11-20T09:30:00Z",
+    form_url: null,
+    form_url_error: null,
     ...overrides,
   };
 }

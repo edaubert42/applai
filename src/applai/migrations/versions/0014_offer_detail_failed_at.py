@@ -1,14 +1,14 @@
 """Offers keep when their page last failed to be read.
 
-Revision ID: 0013
-Revises: 0012
+Revision ID: 0014
+Revises: 0013
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0013"
-down_revision: str | None = "0012"
+revision = "0014"
+down_revision: str | None = "0013"
 branch_labels: str | None = None
 depends_on: str | None = None
 
@@ -19,5 +19,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # In place (SQLite 3.35+), not by copying offers, which other tables reference.
     op.drop_column("offers", "detail_failed_at")
