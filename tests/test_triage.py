@@ -376,6 +376,18 @@ def test_a_cdd_of_the_minimum_or_more_or_of_unknown_length_passes(
     assert stored.cons == [*CARD["cons"], *added]
 
 
+def test_the_cdd_con_code_adds_keeps_a_full_card_at_five_cons(engine: Engine, profile: Profile):
+    cons = [{"text": f"Doute {n}", "verdict": "?"} for n in range(1, 6)]
+    card = CARD | {"cons": cons, "fixed_term_months": 3}
+    _triage(engine, _with_fixed_term(profile), card, contract="TEMPORARY")
+
+    [stored] = _triages(engine)
+    assert stored.cons == [
+        *cons[:4],
+        {"text": "CDD de moins de 6 mois", "verdict": "\N{MINUS SIGN}"},
+    ]
+
+
 def test_an_offer_without_salary_is_not_screened_out_and_its_salary_tag_is_unknown(
     engine: Engine, profile: Profile
 ):

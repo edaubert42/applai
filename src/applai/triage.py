@@ -34,6 +34,7 @@ NO_DESCRIPTION = "no_description"  # the outcome recorded for an offer with no t
 
 TAGS = ("location", "work_mode", "contract", "experience", "salary")
 PLUS, MINUS, UNKNOWN = "+", "\N{MINUS SIGN}", "?"  # U+2212, not a hyphen
+MAX_CONS = 5  # in the card the agent writes and in the stored card, with what code adds
 # What the offer's page says in its summary (applai.details), sent when known.
 SUMMARY_FIELDS = ("location", "contract", "salary", "work_mode", "years_required")
 type Summary = Mapping[str, str | int | None]
@@ -63,7 +64,7 @@ CARD_SCHEMA: dict[str, Any] = {
         "about": _TEXT,
         "mission": {"type": "array", "items": _TEXT, "minItems": 2, "maxItems": 5},
         "pros": {"type": "array", "items": _TEXT, "maxItems": 5},
-        "cons": {"type": "array", "items": _with_verdict(MINUS, UNKNOWN), "maxItems": 5},
+        "cons": {"type": "array", "items": _with_verdict(MINUS, UNKNOWN), "maxItems": MAX_CONS},
         "fixed_term_months": {"type": ["integer", "null"], "minimum": 1},
     },
     "required": ["score", "tags", "about", "mission", "pros", "cons", "fixed_term_months"],
@@ -233,12 +234,17 @@ def triage_offer(runner: AgentRunner, database: Engine, offer_id: int, profile: 
             about=card["about"],
             mission=card["mission"],
             pros=card["pros"],
-            cons=[*card["cons"], *_fixed_term_cons(profile, offer.contract, months)],
+            cons=_with_code_cons(card["cons"], _fixed_term_cons(profile, offer.contract, months)),
         )
         session.add(triage)
         if screen_triaged(session, offer, profile, months) is None:
             move(session, offer, OfferState.TRIAGED, Actor.TRIAGE)
     return triage
+
+
+def _with_code_cons(cons: list[Any], added: list[Any]) -> list[Any]:
+    """The agent's cons then code's, at most MAX_CONS: the agent's last ones make room."""
+    return [*cons[: MAX_CONS - len(added)], *added]
 
 
 def _fixed_term_cons(profile: Profile, contract: str | None, months: int | None) -> list[Any]:
