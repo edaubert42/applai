@@ -23,6 +23,8 @@ from applai.models import Application, Offer
 ATS_HOSTS = ("ashbyhq.com", "lever.co", "greenhouse.io", "workable.com", "teamtailor.com",
              "welcometothejungle.com", "smartrecruiters.com", "myworkdayjobs.com",
              "myworkdaysite.com", "recruitee.com")  # fmt: skip
+# The alert boards (applai.alerts) whose apply link opens a form on the board itself.
+BOARD_HOSTS = ("hellowork.com", "lesjeudis.com")
 GOOGLE = "alert_google"  # the source of offers from Google's alerts (applai.alerts)
 PASTE = "paste the form's URL"
 _APPLY = re.compile(r"\b(postuler|candidater|apply)\b", re.IGNORECASE)

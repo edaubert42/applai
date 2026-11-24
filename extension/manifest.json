@@ -18,6 +18,8 @@
     "https://*.myworkdayjobs.com/*",
     "https://*.myworkdaysite.com/*",
     "https://*.recruitee.com/*",
+    "https://*.hellowork.com/*",
+    "https://*.lesjeudis.com/*",
     "http://127.0.0.1/*"
   ],
   "background": { "service_worker": "background.js", "type": "module" }
