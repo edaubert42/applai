@@ -9,28 +9,47 @@ no tool, picking among each field's own options or none (ADR 0008); its output s
 them, so a value that is not an option fails the run. Every text field that is not identity
 was drafted as a question (applai.drafting.drafted_fields): none is left to it. A link field
 (LinkedIn, website) Drafting leaves to identity has no value in the profile: it stays empty,
-for the candidate. A failure is kept as the application's fill_error, for a retry by hand.
+for the candidate. With cv_sources in the profile, the CV is rendered for the offer
+(applai.cv: its language, its contract, no photo) to the application's cv.pdf, and a CV that
+fails its checks fails Filling. Served, the CV is named CV_<first>_<last>.pdf. A failure is kept
+as the application's fill_error, for a retry by hand.
 No action sends anything (ADR 0003): the extension fills, attaches, and reports
 (applai.browser).
 """
 
 import json
 import re
+import unicodedata
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner, AgentSpec
+from applai.cv import (
+    CvError,
+    Lang,
+    offer_contract,
+    offer_language,
+    render_cv,
+    source_headlines,
+)
 from applai.drafting import COVER_LETTER, AnswerStatus
-from applai.models import Application, DraftAnswer
+from applai.models import Application, DraftAnswer, Offer
 from applai.orchestrator import ApplicationState
 from applai.pdf import text_pdf
-from applai.profile import Identity, Profile, ProfileError, cv_file, load_profile
+from applai.profile import (
+    Identity,
+    Profile,
+    ProfileError,
+    cv_file,
+    cv_source_file,
+    load_profile,
+)
 from applai.text import fold
 from applai.triage import prompt_facts
 
@@ -39,6 +58,7 @@ FILLING_MODEL = "claude-sonnet-5-5"  # pinned, as the bench measures one version
 CV = "cv"  # the file slots: CV and COVER_LETTER (GET /api/browser/fills/{id}/files/{slot})
 type Slot = Literal["cv", "cover_letter"]
 LETTER_PDF = "cover_letter.pdf"  # in the application's directory
+CV_PDF = "cv.pdf"  # likewise, when the profile has cv_sources
 _CHOICES = ("select", "radio", "checkbox")
 
 # Matched on folded labels, in this order; email and phone fields also by their type.
@@ -56,6 +76,7 @@ _IDENTITY: list[tuple[re.Pattern[str], Callable[[Identity], str]]] = [
 _NAME = re.compile(
     r"^((votre|your) )?(nom|name|nom complet|full name)$|^(nom et prenom|prenom et nom)$"
 )
+_NAME_SEPARATORS = f"[ '{chr(0x2019)}]"  # a space, an apostrophe, a typographic one
 _CV = re.compile(r"\b(cv|resume|curriculum)\b")
 
 SYSTEM_PROMPT = """\
@@ -171,6 +192,29 @@ def _chosen(
             for i in left if output[str(i)]]  # fmt: skip
 
 
+def _render_cv(
+    data_dir: Path, application_id: int, profile: Profile, offer: tuple[str, str | None, str | None]
+) -> None:
+    """Render the CV of the offer's language and contract, no photo, to the application's
+    cv.pdf. A CV that fails its checks is a failure, never a fallback to another CV."""
+    title, description, contract = offer
+    assert profile.cv_sources is not None
+    sources = profile.cv_sources.paths()
+    lang = offer_language(title, description, cast(list[Lang], list(sources)))
+    source = cv_source_file(data_dir, profile, lang)
+    if source is None:
+        raise FillingError(f"The CV source in {lang} is not a file inside the data directory.")
+    headlines = source_headlines(data_dir, source)
+    contract = offer_contract(title, contract, headlines, profile.targets.contracts)
+    rendered = render_cv(data_dir, lang, contract, source_file=source)
+    if rendered.checks.problems:
+        raise FillingError(f"The CV {source.name} fails its checks: "
+                           + "; ".join(rendered.checks.problems))  # fmt: skip
+    directory = data_dir / "applications" / str(application_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / CV_PDF).write_bytes(rendered.pdf)
+
+
 def plan_fill(
     runner: AgentRunner, database: Engine, data_dir: Path, application_id: int, profile: Profile
 ) -> list[FillAction]:
@@ -183,12 +227,19 @@ def plan_fill(
         if application.state != ApplicationState.ANSWERS_CHECKED:
             raise FillingError(f"Application {application_id} is {application.state}.")
         fields, offer_id = application.form_fields or [], application.offer_id
+        offer = session.get_one(Offer, offer_id)
+        offer_text = (offer.title, offer.description, offer.contract)
         checked = session.scalars(select(DraftAnswer).where(
             DraftAnswer.application_id == application_id,
             DraftAnswer.status.in_([AnswerStatus.ACCEPTED, AnswerStatus.EDITED])))  # fmt: skip
         answers = {a.field_index: (a.kind, a.edited_text or a.text) for a in checked}  # as checked
     try:
-        actions, left = by_code(fields, answers, profile, cv_file(data_dir, profile) is not None)
+        has_cv = profile.cv_sources is not None or cv_file(data_dir, profile) is not None
+        actions, left = by_code(fields, answers, profile, has_cv)
+        if profile.cv_sources:
+            (data_dir / "applications" / str(application_id) / CV_PDF).unlink(missing_ok=True)
+            if any(a.kind == "attach" and a.value == CV for a in actions):
+                _render_cv(data_dir, application_id, profile, offer_text)
         if left:
             actions += _chosen(runner, database, offer_id, application_id, fields, left, profile)
         actions.sort(key=lambda action: action.field)
@@ -198,7 +249,7 @@ def plan_fill(
                 directory.mkdir(parents=True, exist_ok=True)
                 (directory / LETTER_PDF).write_bytes(text_pdf(answers[action.field][1]))
     except Exception as error:  # these messages hold no candidate data
-        known = isinstance(error, AgentError | FillingError)
+        known = isinstance(error, AgentError | FillingError | CvError)
         record_failure(database, application_id, str(error) if known else type(error).__name__)
         raise
     with Session(database) as session, session.begin():
@@ -232,9 +283,26 @@ def plan_in_background(
         plan_fill(runner, database, data_dir, application_id, profile)
 
 
-def file_path(data_dir: Path, application_id: int, slot: Slot) -> Path | None:
-    """The file of a slot: the profile's CV, or the application's cover letter PDF."""
+def cv_name(identity: Identity) -> str:
+    """CV_<first>_<last>.pdf: accents removed, spaces and apostrophes turned into hyphens."""
+    parts: list[str] = []
+    for name in (identity.first_name, identity.last_name):
+        hyphenated = re.sub(_NAME_SEPARATORS, "-", name)
+        ascii_name = unicodedata.normalize("NFKD", hyphenated).encode("ascii", "ignore").decode()
+        parts.append(re.sub(r"[^A-Za-z0-9-]", "", ascii_name))
+    return f"CV_{parts[0]}_{parts[1]}.pdf"
+
+
+def file_path(data_dir: Path, application_id: int, slot: Slot) -> tuple[Path, str] | None:
+    """The file of a slot with its name: the CV, or the application's cover letter PDF.
+
+    The CV is the one rendered for the application, or the profile's fixed one; either way
+    it is named after the candidate.
+    """
+    directory = data_dir / "applications" / str(application_id)
     if slot == CV:
-        return cv_file(data_dir, load_profile(data_dir))
-    path = data_dir / "applications" / str(application_id) / LETTER_PDF
-    return path if path.is_file() else None
+        profile = load_profile(data_dir)
+        path = directory / CV_PDF if profile.cv_sources else cv_file(data_dir, profile)
+        return (path, cv_name(profile.identity)) if path and path.is_file() else None
+    path = directory / LETTER_PDF
+    return (path, path.name) if path.is_file() else None

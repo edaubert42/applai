@@ -384,13 +384,14 @@ def application_file(
     if not any(a.get("kind") == "attach" and a.get("value") == slot for a in plan):
         raise HTTPException(404, f"The fill plan attaches no {slot}.")
     try:
-        path = file_path(request.app.state.data_dir, application_id, slot)
+        found = file_path(request.app.state.data_dir, application_id, slot)
     except ProfileError as error:
         raise HTTPException(500, str(error)) from None
-    if path is None:
+    if found is None:
         raise HTTPException(404, f"No {slot} file.")
+    path, name = found
     kind = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return FileResponse(path, media_type=kind, filename=path.name)
+    return FileResponse(path, media_type=kind, filename=name)
 
 
 def _run_gate(session: Session, action: Callable[[], object]) -> None:

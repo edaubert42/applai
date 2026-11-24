@@ -123,7 +123,7 @@ def test_file_preview_serves_planned_pdfs_and_returns_404_when_unplanned_or_miss
     letter = client.get(f"/api/applications/{app_id}/files/cover_letter")
 
     assert cv.status_code == 200 and cv.headers["content-type"] == "application/pdf"
-    assert "jeanne-dupont.pdf" in cv.headers["content-disposition"] and cv.content == CV_BYTES
+    assert "CV_Jeanne_Dupont.pdf" in cv.headers["content-disposition"] and cv.content == CV_BYTES
     assert letter.status_code == 200 and letter.headers["content-type"] == "application/pdf"
     assert "cover_letter.pdf" in letter.headers["content-disposition"]
     assert letter.content == LETTER_BYTES

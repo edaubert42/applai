@@ -440,13 +440,14 @@ def fill_file(application_id: int, slot: Slot, request: Request) -> FileResponse
     if not any(a["kind"] == "attach" and a["value"] == slot for a in plan):
         raise HTTPException(404, f"The fill plan attaches no {slot}.")
     try:
-        path = file_path(data_dir, application_id, slot)
+        found = file_path(data_dir, application_id, slot)
     except ProfileError as error:  # its message holds no value of the profile
         raise HTTPException(500, str(error)) from None
-    if path is None:
+    if found is None:
         raise HTTPException(404, f"No {slot} file.")
+    path, name = found
     kind = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return FileResponse(path, media_type=kind, filename=path.name)
+    return FileResponse(path, media_type=kind, filename=name)
 
 
 @router.post("/fills/{application_id}", status_code=204)

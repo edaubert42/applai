@@ -3,13 +3,13 @@
 The source is refused as a whole when a required key is missing: the error names the key,
 never its value, which may be the real candidate's data (ADR 0001). The HTML comes from
 templates/cv.html.j2 and Chromium (Playwright) prints it. The checks that go with the PDF are
-the page count, em or en dashes, and the free space under the last line. No offer, no agent:
-choosing the language, contract or photo for an offer is not done here.
+the page count, em or en dashes, and the free space under the last line. No agent: code picks
+the language and the contract of an offer (offer_language, offer_contract), this module renders.
 """
 
 import base64
 import re
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self, cast
@@ -19,6 +19,8 @@ from jinja2 import Environment, PackageLoader
 from playwright.sync_api import sync_playwright
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic_core import ErrorDetails
+
+from applai.text import fold
 
 CV_DIR = "cv"
 PHOTO_FILE = "photo.jpg"
@@ -148,12 +150,75 @@ class RenderedCv:
     checks: CvChecks
 
 
-def render_cv(data_dir: Path | str, lang: Lang, contract: str, photo: bool = False) -> RenderedCv:
-    """The PDF of the CV in lang for contract, with a photo or not, and its checks."""
+# Words of one language that are not words of the other, counted to tell an offer's language.
+_FRENCH_WORDS = frozenset({
+    "le", "la", "les", "des", "du", "un", "une", "et", "pour", "avec", "dans", "nous", "vous",
+    "votre", "notre", "vos", "nos", "sur", "au", "aux", "que", "qui", "est", "sont", "ou", "ce",
+    "cette", "ses", "par",
+})  # fmt: skip
+_ENGLISH_WORDS = frozenset({
+    "the", "and", "of", "to", "for", "with", "you", "your", "our", "we", "are", "is", "will", "an",
+    "this", "that", "be", "as", "or", "from", "by", "their",
+})  # fmt: skip
+# What an offer says of its contract, folded, in the profile's contract words.
+_CONTRACTS = {
+    **dict.fromkeys(["cdi", "permanent", "full time"], "permanent"),
+    **dict.fromkeys(["stage", "internship", "intern"], "internship"),
+    **dict.fromkeys(["alternance", "apprentissage", "apprenticeship"], "apprenticeship"),
+    **dict.fromkeys(["cdd", "fixed term"], "fixed_term"),
+}
+
+
+def offer_language(title: str, description: str | None, sources: Collection[Lang]) -> Lang:
+    """fr or en, by the common words of the offer's text; a tie or no text gives fr.
+
+    Only a language the profile has a source for: with one source, that one.
+    """
+    words = fold(f"{title} {description or ''}").split()
+    english = sum(word in _ENGLISH_WORDS for word in words)
+    french = sum(word in _FRENCH_WORDS for word in words)
+    found: Lang = "en" if english > french else "fr"
+    if found in sources:
+        return found
+    return "fr" if "fr" in sources else "en"
+
+
+def offer_contract(
+    title: str, contract: str | None, headlines: Collection[str], targets: Sequence[str]
+) -> str:
+    """The offer's contract in the profile's words: the offer's own, then its title's.
+
+    Unknown or without a headline: the first of targets that has one. CvError when none does.
+    """
+    for text in (contract or "", title):
+        folded = f" {fold(text)} "
+        found = next((word for key, word in _CONTRACTS.items() if f" {key} " in folded), None)
+        if found in headlines:
+            return cast(str, found)
+    for target in targets:
+        if target in headlines:
+            return target
+    raise CvError("the CV source has no headline for any of the profile's target contracts")
+
+
+def source_headlines(data_dir: Path | str, source: Path | str) -> list[str]:
+    """The contracts the CV source (a path inside data_dir) has a headline for."""
+    return list(_load_source(Path(data_dir) / source).headlines)
+
+
+def render_cv(
+    data_dir: Path | str, lang: Lang, contract: str, photo: bool = False,
+    source_file: Path | str | None = None,
+) -> RenderedCv:  # fmt: skip
+    """The PDF of the CV in lang for contract, with a photo or not, and its checks.
+
+    The source is cv/cv_{lang}.yaml, or source_file (a path inside data_dir) when given.
+    """
     directory = Path(data_dir) / CV_DIR
-    source = _load_source(directory / f"cv_{lang}.yaml")
+    path = Path(data_dir) / source_file if source_file else directory / f"cv_{lang}.yaml"
+    source = _load_source(path)
     if contract not in source.headlines:
-        raise CvError(f"{directory / f'cv_{lang}.yaml'}: headlines.{contract}: no headline")
+        raise CvError(f"{path}: headlines.{contract}: no headline")
     photo_uri = None
     if photo:
         photo_file = directory / PHOTO_FILE
