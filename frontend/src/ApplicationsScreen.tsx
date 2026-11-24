@@ -1,23 +1,31 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { GROUPS, api, type Applications, type Row } from "./api";
 import CorrectScreen from "./CorrectScreen";
+import FinalValidationScreen from "./FinalValidationScreen";
 import { Logo } from "./ReviewCard";
 import { useSettings } from "./settings";
 import { button } from "./styles";
 
+const CHECKABLE = ["reviewed", "form_checked", "validated"];
+
 /** The Applications dashboard, or the Correct screen of the application being corrected. */
 export default function ApplicationsScreen() {
   const [correcting, setCorrecting] = useState<Row | null>(null);
+  const [validating, setValidating] = useState<Row | null>(null);
   // The board loads again each time it comes back, so a closed gate shows in the state.
   if (correcting) {
     const back = () => setCorrecting(null);
     return <CorrectScreen row={correcting} onBack={back} onDone={back} />;
   }
-  return <Board onCorrect={setCorrecting} />;
+  if (validating) {
+    const back = () => setValidating(null);
+    return <FinalValidationScreen row={validating} onBack={back} onDone={back} />;
+  }
+  return <Board onCorrect={setCorrecting} onValidate={setValidating} />;
 }
 
 /** Every application in four groups, the latest change first. */
-function Board({ onCorrect }: { onCorrect: (row: Row) => void }) {
+function Board({ onCorrect, onValidate }: { onCorrect: (row: Row) => void; onValidate: (row: Row) => void }) {
   const { t } = useSettings();
   const [groups, setGroups] = useState<Applications | null>(null);
   const [failed, setFailed] = useState(false);
@@ -57,6 +65,7 @@ function Board({ onCorrect }: { onCorrect: (row: Row) => void }) {
                     row={row}
                     extensionConnected={extensionConnected}
                     onCorrect={onCorrect}
+                    onValidate={onValidate}
                   />
                 ))}
               </ul>
@@ -71,10 +80,12 @@ function ApplicationRow({
   row,
   extensionConnected,
   onCorrect,
+  onValidate,
 }: {
   row: Row;
   extensionConnected: boolean;
   onCorrect: (row: Row) => void;
+  onValidate: (row: Row) => void;
 }) {
   const { t, lookup, formatTime } = useSettings();
   const old = row.origin === "old_workflow";
@@ -120,6 +131,11 @@ function ApplicationRow({
       {row.id !== null && row.state === "drafted" && (
         <button type="button" onClick={() => onCorrect(row)} className={button}>
           {t("correct.open")}
+        </button>
+      )}
+      {row.id !== null && row.state !== null && CHECKABLE.includes(row.state) && (
+        <button type="button" onClick={() => onValidate(row)} className={button}>
+          {t("validation.open")}
         </button>
       )}
       {row.state === "answers_checked" && (row.fill_error || !extensionConnected) && (

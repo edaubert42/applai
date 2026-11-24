@@ -112,6 +112,24 @@ export type AnswerDecision =
   | { decision: "edit"; text: string; reason?: string }
   | { decision: "reject"; reason: string };
 
+export type FileSlot = "cv" | "cover_letter";
+
+export interface ReviewedField {
+  field: number; label: string; type: string; required: boolean;
+  value: string | string[] | null; file: string | null; unfilled: string | null; slot: FileSlot | null;
+}
+
+export interface ReviewProblem {
+  severity: "blocking" | "warning"; field: string; message: string;
+}
+
+/** GET /api/applications/{id}/review, as src/applai/review_form.py serves it. */
+export interface FormReview {
+  application_id: number; offer_id: number; title: string; company: string;
+  url: string; form_url: string | null; state: string; fields: ReviewedField[];
+  problems: ReviewProblem[] | null; review_error: string | null; has_screenshot: boolean;
+}
+
 export interface ScanStatus {
   running: boolean;
   last_scan: {
@@ -155,8 +173,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 /** A request whose answer has no body (204). */
-async function requestEmpty(method: string, path: string): Promise<void> {
-  const response = await fetch(path, { method });
+async function requestEmpty(method: string, path: string, body?: unknown): Promise<void> {
+  const response = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
   if (!response.ok) throw new Error(`${method} ${path}: ${response.status}`);
 }
 
@@ -173,6 +195,13 @@ export const api = {
   decideAnswer: (id: number, answer: number, decision: AnswerDecision) =>
     request<Answer>("POST", `/api/applications/${id}/draft/${answer}`, decision),
   answersChecked: (id: number) => requestEmpty("POST", `/api/applications/${id}/answers-checked`),
+  formReview: (id: number) => request<FormReview>("GET", `/api/applications/${id}/review`),
+  formChecked: (id: number, corrected_fields: string[], note?: string) =>
+    requestEmpty("POST", `/api/applications/${id}/form-checked`, note ? { corrected_fields, note } : { corrected_fields }),
+  validateApplication: (id: number) => requestEmpty("POST", `/api/applications/${id}/validate`),
+  markSent: (id: number) => requestEmpty("POST", `/api/applications/${id}/sent`),
+  dropApplication: (id: number, note?: string) =>
+    requestEmpty("POST", `/api/applications/${id}/drop`, note ? { note } : undefined),
   scanStatus: () => request<ScanStatus>("GET", "/api/scan"),
   services: () => request<Services>("GET", "/api/services"),
   startScan: () => request<unknown>("POST", "/api/scan"),
