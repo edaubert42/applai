@@ -7,8 +7,9 @@ candidate, whose rows carry LOCAL_USER_ID. A web page the candidate visits can s
 it, so the app answers only requests for its own host, and writes only from its own origin.
 """
 
+import mimetypes
 import re
-from collections.abc import AsyncGenerator, Iterator
+from collections.abc import AsyncGenerator, Callable, Iterator
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
@@ -26,14 +27,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from applai import browser, correct, reread, review_form
+from applai import browser, correct, reread, review_form, validation
 from applai.agents import AgentError
 from applai.applications import Board, board
 from applai.capture import find_form
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
 from applai.drafting import DraftingError, draft_in_background, redraft_answer
-from applai.filling import plan_in_background
+from applai.filling import Slot, file_path, plan_in_background
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferState, Triage
 from applai.orchestrator import ApplicationState, TransitionError
 from applai.profile import Profile, ProfileError, load_profile
@@ -369,6 +370,75 @@ def application_screenshot(
     if path is None:
         raise HTTPException(404, "no screenshot")
     return FileResponse(path, media_type="image/png")
+
+
+@api.get("/applications/{application_id}/files/{slot}")
+def application_file(
+    application_id: int, slot: Slot, session: _Session, request: Request
+) -> FileResponse:
+    """Serve the CV or cover letter PDF attached by an application's fill plan, or 404."""
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    plan = application.fill_plan or []
+    if not any(a.get("kind") == "attach" and a.get("value") == slot for a in plan):
+        raise HTTPException(404, f"The fill plan attaches no {slot}.")
+    try:
+        path = file_path(request.app.state.data_dir, application_id, slot)
+    except ProfileError as error:
+        raise HTTPException(500, str(error)) from None
+    if path is None:
+        raise HTTPException(404, f"No {slot} file.")
+    kind = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=kind, filename=path.name)
+
+
+def _run_gate(session: Session, action: Callable[[], object]) -> None:
+    try:
+        with session.begin():
+            action()
+    except validation.NotFound:
+        raise HTTPException(404, "no such application") from None
+    except TransitionError as error:
+        raise HTTPException(409, str(error)) from None
+
+
+@api.post("/applications/{application_id}/form-checked", status_code=204)
+def form_checked(
+    application_id: int,
+    session: _Session,
+    body: validation.FormCheckedRequest | None = None,
+) -> None:
+    """Record the candidate's form check as a label and move reviewed -> form_checked."""
+    req = body or validation.FormCheckedRequest()
+    _run_gate(session, lambda: validation.check_form(session, LOCAL_USER_ID, application_id, req))
+
+
+@api.post("/applications/{application_id}/validate", status_code=204)
+def validate_application(application_id: int, session: _Session) -> None:
+    """Record final validation as a label and move form_checked -> validated."""
+    _run_gate(
+        session, lambda: validation.validate_application(session, LOCAL_USER_ID, application_id)
+    )
+
+
+@api.post("/applications/{application_id}/sent", status_code=204)
+def mark_sent(application_id: int, session: _Session) -> None:
+    """Record manual send as a label and move validated -> sent."""
+    _run_gate(session, lambda: validation.mark_sent(session, LOCAL_USER_ID, application_id))
+
+
+@api.post("/applications/{application_id}/drop", status_code=204)
+def drop_application(
+    application_id: int,
+    session: _Session,
+    body: validation.DropRequest | None = None,
+) -> None:
+    """Drop a non-terminal application and record the candidate's decision as a label."""
+    req = body or validation.DropRequest()
+    _run_gate(
+        session, lambda: validation.drop_application(session, LOCAL_USER_ID, application_id, req)
+    )
 
 
 # The type a logo is served with, by file extension; the first type of an extension wins.

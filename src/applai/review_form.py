@@ -65,6 +65,7 @@ class ReviewedField(BaseModel):
     value: str | list[str] | None = None
     file: str | None = None
     unfilled: str | None = None
+    slot: Literal["cv", "cover_letter"] | None = None
 
 
 class FormReview(BaseModel):
@@ -72,6 +73,8 @@ class FormReview(BaseModel):
     offer_id: int
     title: str
     company: str
+    url: str
+    form_url: str | None
     state: str
     fields: list[ReviewedField]
     problems: list[ReviewProblem] | None
@@ -80,15 +83,22 @@ class FormReview(BaseModel):
 
 
 def merged_fields(
-    form_fields: list[dict[str, Any]] | None, filled_fields: list[dict[str, Any]] | None
+    form_fields: list[dict[str, Any]] | None,
+    filled_fields: list[dict[str, Any]] | None,
+    fill_plan: list[dict[str, Any]] | None = None,
 ) -> list[ReviewedField]:
     """Combine captured field definitions with the actual values reported by Filling."""
     by_i = {entry["field"]: entry for entry in (filled_fields or [])}
+    slots: dict[int, Any] = {
+        a["field"]: a["value"]
+        for a in (fill_plan or [])
+        if a.get("kind") == "attach" and a.get("value") in ("cv", "cover_letter")
+    }
     return [
         ReviewedField(
             field=i, label=s["label"], type=s["type"], required=bool(s.get("required", False)),
             value=by_i.get(i, {}).get("value"), file=by_i.get(i, {}).get("file"),
-            unfilled=by_i.get(i, {}).get("unfilled"),
+            unfilled=by_i.get(i, {}).get("unfilled"), slot=slots.get(i),
         )
         for i, s in enumerate(form_fields or [])
     ]  # fmt: skip
@@ -119,7 +129,7 @@ def review_form(
             DraftAnswer.application_id == application_id,
             DraftAnswer.status.in_([AnswerStatus.ACCEPTED, AnswerStatus.EDITED]),
         ).order_by(DraftAnswer.field_index))  # fmt: skip
-        fields = merged_fields(app.form_fields, app.filled_fields)
+        fields = merged_fields(app.form_fields, app.filled_fields, app.fill_plan)
         answers = [{"field_index": a.field_index, "kind": a.kind, "label": a.label,
                     "text": a.edited_text or a.text} for a in checked]  # fmt: skip
         payload = {
@@ -203,7 +213,8 @@ def read_review(session: Session, user_id: int, application_id: int, data_dir: P
     problems = None if raw is None else [ReviewProblem.model_validate(p) for p in raw]
     return FormReview(
         application_id=app.id, offer_id=offer.id, title=offer.title, company=offer.company,
-        state=app.state, fields=merged_fields(app.form_fields, app.filled_fields),
+        url=offer.url, form_url=app.form_url, state=app.state,
+        fields=merged_fields(app.form_fields, app.filled_fields, app.fill_plan),
         problems=problems, review_error=app.review_error,
         has_screenshot=screenshot_path(data_dir, app.id) is not None,
     )  # fmt: skip
