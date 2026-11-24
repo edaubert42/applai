@@ -114,7 +114,11 @@ def main(paths: Sequence[str]) -> int:
             print(f"{name}: binary or document file (allow it in {ALLOWED_FILES_LIST.name})")
             failed = True
             continue
-        for hit in find_pii(path.read_text(encoding="utf-8")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue  # an allowed image: nothing to read as text
+        for hit in find_pii(text):
             print(f"{name}:{hit.line}: {hit.kind}")
             failed = True
     return 1 if failed else 0

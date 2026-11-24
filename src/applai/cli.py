@@ -3,6 +3,7 @@
 applai serve runs ApplAI at http://127.0.0.1:8000 until stopped, and the scan with it
 (applai.scan). applai mail login signs
 in to the candidate's mailbox once; applai mail read records the offers of new job alerts.
+applai cv build renders the candidate's CV to a PDF and checks it (applai.cv).
 """
 
 import argparse
@@ -10,12 +11,14 @@ import os
 from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
+from typing import Literal
 
 import httpx2
 import uvicorn
 
 from applai.agents import AgentRunner, ClaudeCLI
 from applai.app import create_app
+from applai.cv import CvError, render_cv
 from applai.database import DatabaseError, open_database
 from applai.details import watch_client
 from applai.mail import CLIENT_ID_VARIABLE, Mailbox, MailError, read_alerts
@@ -42,15 +45,46 @@ def main(argv: Sequence[str] | None = None, http: httpx2.Client | None = None) -
     mail_commands = mail.add_subparsers(dest="mail_command", required=True)
     mail_commands.add_parser("login", help="sign in to the Outlook.com mailbox once")
     mail_commands.add_parser("read", help="record the offers of the alerts not read yet")
+    cv = commands.add_parser("cv", help="the candidate's CV")
+    cv_commands = cv.add_subparsers(dest="cv_command", required=True)
+    build = cv_commands.add_parser("build", help="render the CV to a one-page PDF and check it")
+    build.add_argument("--lang", choices=["fr", "en"], required=True)
+    build.add_argument("--contract", required=True, help="the contract of the headline")
+    build.add_argument("--photo", action="store_true", help="put cv/photo.jpg in the header")
+    build.add_argument("--out", type=Path, required=True, help="the PDF to write")
     arguments = parser.parse_args(argv)
     if arguments.command == "serve":
         server(arguments.port).run()
+        return
+    if arguments.command == "cv":
+        _cv_build(arguments.lang, arguments.contract, arguments.photo, arguments.out)
         return
     try:
         with httpx2.Client() if http is None else nullcontext(http) as client:
             _mail(arguments.mail_command, client)
     except (MailError, DatabaseError) as error:
         raise SystemExit(str(error)) from None
+
+
+def _cv_build(lang: Literal["fr", "en"], contract: str, photo: bool, out: Path) -> None:
+    data_dir = os.environ.get(DATA_DIR_VARIABLE)
+    if not data_dir:
+        raise SystemExit(
+            f"{DATA_DIR_VARIABLE} is not set: set it to the candidate's data directory."
+        )
+    try:
+        rendered = render_cv(data_dir, lang, contract, photo)
+    except CvError as error:
+        raise SystemExit(str(error)) from None
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(rendered.pdf)
+    checks = rendered.checks
+    print(f"pages: {checks.pages}")
+    print(f"free space: {checks.free_mm} mm")
+    if checks.problems:
+        print(f"FAIL: {'; '.join(checks.problems)}")
+        raise SystemExit(1)
+    print("OK")
 
 
 def _mail(command: str, http: httpx2.Client) -> None:

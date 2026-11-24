@@ -20,6 +20,8 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright
+      # The CV renderer prints its PDF with Chromium (applai.cv).
+      - run: uv run playwright install --with-deps chromium
       - run: uv run pytest
       # Workflows run agents with write access: check their syntax and their security.
       - run: uv run actionlint
