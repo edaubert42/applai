@@ -9,8 +9,9 @@ no tool, picking among each field's own options or none (ADR 0008); its output s
 them, so a value that is not an option fails the run. Every text field that is not identity
 was drafted as a question (applai.drafting.drafted_fields): none is left to it. A link field
 (LinkedIn, website) Drafting leaves to identity has no value in the profile: it stays empty,
-for the candidate. A failure is kept as the application's fill_error, for a retry by hand. No action sends anything (ADR 0003): the
-extension fills, attaches, and reports (applai.browser).
+for the candidate. A failure is kept as the application's fill_error, for a retry by hand.
+No action sends anything (ADR 0003): the extension fills, attaches, and reports
+(applai.browser).
 """
 
 import json
