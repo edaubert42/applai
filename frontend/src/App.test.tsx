@@ -43,7 +43,7 @@ describe("the shell", () => {
     render(<App />);
     await screen.findByText(fr["review.empty"]);
     expect(document.documentElement.lang).toBe("fr");
-    for (const label of [fr["nav.review"], fr["nav.applications"], fr["nav.control"]]) {
+    for (const label of [fr["nav.review"], fr["nav.applications"], fr["nav.control"], fr["nav.settings"]]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
     const french = Object.values(fr);
@@ -52,7 +52,7 @@ describe("the shell", () => {
     fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
 
     expect(document.documentElement.lang).toBe("en");
-    for (const label of [en["nav.review"], en["nav.applications"], en["nav.control"]]) {
+    for (const label of [en["nav.review"], en["nav.applications"], en["nav.control"], en["nav.settings"]]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
     const english = Object.values(en);

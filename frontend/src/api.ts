@@ -85,6 +85,23 @@ export interface ScanStatus {
   linkedin_reads_per_day: number;
 }
 
+export type ServiceState = "green" | "orange" | "red";
+
+/** One row of /api/services; the state and the hint are computed by the API (src/applai/services.py). */
+export interface Service {
+  id: string;
+  state: ServiceState;
+  last_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  /** The sentence that says what to do; null when the state is green. */
+  hint: string | null;
+}
+
+export const CATEGORIES = ["sites", "agents", "mailbox", "applai"] as const;
+export type Category = (typeof CATEGORIES)[number];
+export type Services = Record<Category, Service[]>;
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, {
     method,
@@ -104,5 +121,6 @@ export const api = {
   pasteFormUrl: (id: number, url: string) =>
     request<FormUrl>("PUT", `/api/applications/${id}/form-url`, { url }),
   scanStatus: () => request<ScanStatus>("GET", "/api/scan"),
+  services: () => request<Services>("GET", "/api/services"),
   startScan: () => request<unknown>("POST", "/api/scan"),
 };

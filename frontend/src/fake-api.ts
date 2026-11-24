@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import type { Applications, Card, Row, ScanStatus } from "./api";
+import type { Applications, Card, Row, ScanStatus, Service, Services } from "./api";
 
 export interface Call {
   method: string;
@@ -121,4 +121,23 @@ export function reviewRoutes(
     [REVIEW("screened_out")]: views.screened_out ?? [],
     "GET /api/scan": scan,
   };
+}
+
+/** A fictional service of the Settings page: green unless overridden. */
+export function aService(overrides: Partial<Service> = {}): Service {
+  return {
+    id: "alert_wttj",
+    state: "green",
+    last_at: "2026-11-22T07:02:00Z",
+    last_error: null,
+    last_error_at: null,
+    hint: null,
+    ...overrides,
+  };
+}
+
+/** The route of the Settings page with these services in each category. */
+export function servicesRoutes(services: Partial<Services> = {}) {
+  const status: Services = { sites: [], agents: [], mailbox: [], applai: [], ...services };
+  return { "GET /api/services": status };
 }
