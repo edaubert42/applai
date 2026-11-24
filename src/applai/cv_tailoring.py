@@ -291,9 +291,7 @@ def _render(data_dir: Path, chosen: Chosen, tailored: Tailored) -> tuple[Rendere
     """The tailored CV, None if its changes no longer apply, and its warning."""
     lang, source, contract = chosen
     photo = tailored.photo == "with" and (data_dir / CV_DIR / PHOTO_FILE).is_file()
-    warning = "" if photo or tailored.photo == "without" else NO_PHOTO
-    if tailored.photo == "with" and not photo:
-        warning = NO_PHOTO_FILE
+    warning = {"unknown": NO_PHOTO, "with": "" if photo else NO_PHOTO_FILE}.get(tailored.photo, "")
     changes = [Change(op=c.op, path=c.path, old=c.old_text, new=c.new_text)  # type: ignore[arg-type]
                for c in tailored.changes]  # fmt: skip
     try:
