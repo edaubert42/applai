@@ -129,8 +129,15 @@ async function fillIn(applicationId, url, actions, fetch, browser, wait) {
   return screenshot ? { fields, screenshot } : { fields };
 }
 
+const pendingSendReports = new Map(); // never click submit twice if reporting the result fails
+
 // Submit forms explicitly authorized by the candidate, using only already-open tabs (ADR 0003).
-export async function sendForms(fetch = globalThis.fetch, browser = globalThis.chrome, wait = sleep) {
+export async function sendForms(
+  fetch = globalThis.fetch,
+  browser = globalThis.chrome,
+  wait = sleep,
+  pending = pendingSendReports,
+) {
   let sends;
   try {
     const asked = await fetch(`${APPLAI}/api/browser/sends`, {});
@@ -138,34 +145,41 @@ export async function sendForms(fetch = globalThis.fetch, browser = globalThis.c
     sends = await asked.json();
   } catch { return; }
   for (const { application_id, url } of sends) {
-    let path = "", body = {};
-    try {
-      const tab = ((await browser.tabs.query({})) ?? []).find((t) => sameFormUrl(t.url, url));
-      if (!tab) [path, body] = ["/failure", { reason: "no_tab" }];
-      else {
-        const [ran] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: submitForm });
-        const res = ran?.result;
-        if (!res?.ok) [path, body] = ["/failure", { reason: res?.reason ?? "not_sent" }];
-        else if (!(await confirmedIn(tab.id, url, res.confirmed, browser, wait))) {
-          [path, body] = ["/failure", { reason: "not_confirmed" }];
+    let report = pending.get(application_id);
+    if (!report) {
+      let path = "", body = {};
+      try {
+        const tab = ((await browser.tabs.query({})) ?? []).find((t) => sameFormUrl(t.url, url));
+        if (!tab) [path, body] = ["/failure", { reason: "no_tab" }];
+        else {
+          const [ran] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: submitForm });
+          const res = ran?.result;
+          if (!res?.ok) [path, body] = ["/failure", { reason: res?.reason ?? "not_sent" }];
+          else if (!(await confirmedIn(tab.id, url, res.beforeText ?? "", browser, wait))) {
+            [path, body] = ["/failure", { reason: "not_confirmed" }];
+          }
         }
+      } catch {
+        [path, body] = ["/failure", { reason: "not_sent" }];
       }
-    } catch {
-      [path, body] = ["/failure", { reason: "not_sent" }];
+      report = { path, body };
+      pending.set(application_id, report);
     }
-    await send(fetch, `/api/browser/sends/${application_id}${path}`, body);
+    const posted = await send(fetch, `/api/browser/sends/${application_id}${report.path}`, report.body);
+    if (posted && (posted.ok || posted.status === 404 || posted.status === 409)) pending.delete(application_id);
   }
 }
 
-async function confirmedIn(tabId, url, already, browser, wait) {
-  if (already) return true;
-  for (let tries = 0; tries < TRIES; tries++) {
-    await wait(1000);
+async function confirmedIn(tabId, url, beforeText, browser, wait) {
+  for (let tries = 0; tries <= TRIES; tries++) {
+    if (tries) await wait(1000);
     try {
       const tab = await browser.tabs.get(tabId);
       if (tab?.url && !sameFormUrl(tab.url, url)) return true;
       if (tab?.status === "complete") {
-        const [chk] = await browser.scripting.executeScript({ target: { tabId }, func: isConfirmed, args: [url] });
+        const [chk] = await browser.scripting.executeScript({
+          target: { tabId }, func: isConfirmed, args: [url, beforeText],
+        });
         if (chk?.result) return true;
       }
     } catch { /* tab may be navigating */ }

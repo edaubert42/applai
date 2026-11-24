@@ -8,19 +8,19 @@ export function submitForm(root = document) {
     !el.disabled && !el.hidden && el.getAttribute("aria-hidden") !== "true" && el.checkVisibility?.() !== false;
   const button = [...root.querySelectorAll(SUBMIT)].find(visible);
   if (!button) return { ok: false, reason: "no_button" };
-  const win = root.defaultView ?? globalThis;
-  const before = String(win.location?.href ?? "");
-  const CONFIRMED = /\b(merci|thank\s+you|confirmation|confirmed|confirm[ée]e?|candidature\s+(?:a\s+(?:bien\s+)?[ée]t[ée]\s+)?envoy[ée]e|application\s+(?:has\s+been\s+)?(?:submitted|received))\b/i;
+  const beforeText = (root.body?.textContent ?? root.textContent ?? "").replace(/\s+/g, " ");
   button.click();
-  const after = String(win.location?.href ?? "");
-  const text = (root.body?.textContent ?? root.textContent ?? "").replace(/\s+/g, " ");
-  return { ok: true, confirmed: Boolean((before && after && after !== before) || CONFIRMED.test(text)) };
+  return { ok: true, beforeText };
 }
 
-export function isConfirmed(initialUrl = "", root = document) {
-  const win = root.defaultView ?? globalThis;
-  const href = String(win.location?.href ?? "");
-  const CONFIRMED = /\b(merci|thank\s+you|confirmation|confirmed|confirm[ée]e?|candidature\s+(?:a\s+(?:bien\s+)?[ée]t[ée]\s+)?envoy[ée]e|application\s+(?:has\s+been\s+)?(?:submitted|received))\b/i;
-  const text = (root.body?.textContent ?? root.textContent ?? "").replace(/\s+/g, " ");
-  return Boolean((initialUrl && href && href !== initialUrl) || CONFIRMED.test(text));
+export function isConfirmed(initialUrl = "", beforeText = "", root = document) {
+  const norm = (u) => {
+    try { const p = new URL(u); return `${p.origin}${p.pathname.replace(/\/$/, "")}${p.search}`; }
+    catch { return u; }
+  };
+  const href = String((root.defaultView ?? globalThis).location?.href ?? "");
+  if (initialUrl && href && norm(href) !== norm(initialUrl)) return true;
+  const CONFIRMED = /\b(merci|thank\s+you|candidature\s+(?:a\s+(?:bien\s+)?[ée]t[ée]\s+)?envoy[ée]e|application\s+(?:has\s+been\s+)?(?:submitted|received))\b/i;
+  const afterText = (root.body?.textContent ?? root.textContent ?? "").replace(/\s+/g, " ");
+  return CONFIRMED.test(afterText) && !CONFIRMED.test(beforeText);
 }

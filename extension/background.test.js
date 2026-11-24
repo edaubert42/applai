@@ -233,22 +233,37 @@ function fakeDom({ captcha = false, buttons = [], text = "Formulaire", href = LE
   return doc;
 }
 
-test("submitForm runs self-contained, stops on captcha or missing button, and detects confirmation", () => {
-  const injected = new Function(`return (${submitForm.toString()})`)();
+test("submitForm and isConfirmed ignore pre-existing text, stop on captcha/no button, and detect new confirmation", () => {
+  const runSubmit = new Function(`return (${submitForm.toString()})`)();
+  const runConfirm = new Function(`return (${isConfirmed.toString()})`)();
   const capBtn = { clicked: false };
-  assert.deepEqual(injected(fakeDom({ captcha: true, buttons: [capBtn] })), { ok: false, reason: "captcha" });
+  assert.deepEqual(runSubmit(fakeDom({ captcha: true, buttons: [capBtn] })), { ok: false, reason: "captcha" });
   assert.equal(capBtn.clicked, false);
-  assert.deepEqual(injected(fakeDom({ buttons: [{ disabled: true }, { hidden: true }] })), { ok: false, reason: "no_button" });
+  assert.deepEqual(runSubmit(fakeDom({ buttons: [{ disabled: true }, { hidden: true }] })), { ok: false, reason: "no_button" });
 
+  // Pre-existing "Thank you" / "confirmation" on the form never causes a false positive.
+  const preText = "Thank you for reading our confirmation policy.";
+  const unchanged = fakeDom({ buttons: [{}], text: preText });
+  const r0 = runSubmit(unchanged);
+  assert.equal(r0.ok, true);
+  assert.equal(runConfirm(`${LEVER}/`, r0.beforeText, unchanged), false);
+
+  // Newly appearing confirmation text or normalized URL change confirms submission.
   const btn = {};
-  const byWords = injected(fakeDom({ buttons: [btn], onClick: (doc) => { doc.body.textContent = "Merci, candidature envoyée !"; } }));
-  assert.deepEqual([btn.clicked, byWords], [true, { ok: true, confirmed: true }]);
-  const byUrl = injected(fakeDom({ buttons: [{}], onClick: (_d, loc) => { loc.href = `${LEVER}/thanks`; } }));
-  assert.deepEqual(byUrl, { ok: true, confirmed: true });
-  assert.deepEqual(injected(fakeDom({ buttons: [{}], text: "Confirm email" })), { ok: true, confirmed: false });
+  const byWords = fakeDom({ buttons: [btn], onClick: (doc) => { doc.body.textContent = "Merci, candidature envoyée !"; } });
+  const r1 = runSubmit(byWords);
+  assert.equal(btn.clicked, true);
+  assert.equal(runConfirm(LEVER, r1.beforeText, byWords), true);
+
+  const byUrl = fakeDom({ buttons: [{}], onClick: (_d, loc) => { loc.href = `${LEVER}/thanks`; } });
+  const r2 = runSubmit(byUrl);
+  assert.equal(runConfirm(LEVER, r2.beforeText, byUrl), true);
 });
 
-async function sendFormsWith(sends, { tabs = [{ id: 7, url: LEVER, status: "complete" }], submit = { ok: true, confirmed: true }, tabAfter, confirmedAfter = false } = {}) {
+async function sendFormsWith(
+  sends,
+  { tabs = [{ id: 7, url: LEVER, status: "complete" }], submit = { ok: true, beforeText: "Form" }, tabAfter, confirmedAfter = true, postStatus = 204, pending = new Map() } = {},
+) {
   const calls = [];
   const chrome = {
     tabs: {
@@ -262,31 +277,36 @@ async function sendFormsWith(sends, { tabs = [{ id: 7, url: LEVER, status: "comp
     },
   };
   await sendForms(
-    async (url, init) => calls.push([url, init]) && (url === `${APPLAI}/api/browser/sends` ? Response.json(sends) : new Response(null, { status: 204 })),
+    async (url, init) => {
+      calls.push([url, init]);
+      if (url === `${APPLAI}/api/browser/sends`) return Response.json(sends);
+      if (postStatus === null) throw new Error("down");
+      return new Response(null, { status: postStatus });
+    },
     chrome,
     async () => {},
+    pending,
   );
   return calls;
 }
 
-test("sendForms uses only open tabs, never creates tabs, polls confirmation, and reports failures", async () => {
+test("sendForms uses open tabs only, reports failures, and retries reporting without double-submitting", async () => {
   const noTab = await sendFormsWith([{ application_id: 21, url: LEVER }], { tabs: [{ id: 2, url: OFFER }] });
-  assert.deepEqual(noTab, [
-    [`${APPLAI}/api/browser/sends`, {}],
-    ["query", {}],
-    [`${APPLAI}/api/browser/sends/21/failure`, { ...SENT, body: JSON.stringify({ reason: "no_tab" }) }],
-  ]);
+  assert.deepEqual(noTab.at(-1), [`${APPLAI}/api/browser/sends/21/failure`, { ...SENT, body: JSON.stringify({ reason: "no_tab" }) }]);
 
-  const okNow = await sendFormsWith([{ application_id: 22, url: LEVER }]);
-  assert.deepEqual(okNow.at(-1), [`${APPLAI}/api/browser/sends/22`, { ...SENT, body: "{}" }]);
-
-  const okPolled = await sendFormsWith([{ application_id: 23, url: LEVER }], { submit: { ok: true, confirmed: false }, confirmedAfter: true });
-  assert.equal(okPolled.some(([k, , fn]) => k === "run" && fn === isConfirmed), true);
-  assert.deepEqual(okPolled.at(-1), [`${APPLAI}/api/browser/sends/23`, { ...SENT, body: "{}" }]);
+  const ok = await sendFormsWith([{ application_id: 22, url: LEVER }]);
+  assert.deepEqual(ok.at(-1), [`${APPLAI}/api/browser/sends/22`, { ...SENT, body: "{}" }]);
 
   const captcha = await sendFormsWith([{ application_id: 24, url: LEVER }], { submit: { ok: false, reason: "captcha" } });
   assert.deepEqual(captcha.at(-1), [`${APPLAI}/api/browser/sends/24/failure`, { ...SENT, body: JSON.stringify({ reason: "captcha" }) }]);
 
-  const unconfirmed = await sendFormsWith([{ application_id: 25, url: LEVER }], { submit: { ok: true, confirmed: false } });
+  const unconfirmed = await sendFormsWith([{ application_id: 25, url: LEVER }], { confirmedAfter: false });
   assert.deepEqual(unconfirmed.at(-1), [`${APPLAI}/api/browser/sends/25/failure`, { ...SENT, body: JSON.stringify({ reason: "not_confirmed" }) }]);
+
+  // If the report POST fails, the next poll retries the report and NEVER calls submitForm again.
+  const pending = new Map();
+  await sendFormsWith([{ application_id: 26, url: LEVER }], { postStatus: null, pending });
+  const retry = await sendFormsWith([{ application_id: 26, url: LEVER }], { postStatus: 204, pending });
+  assert.equal(retry.some(([k, , fn]) => k === "run" && fn === submitForm), false);
+  assert.deepEqual(retry.at(-1), [`${APPLAI}/api/browser/sends/26`, { ...SENT, body: "{}" }]);
 });
