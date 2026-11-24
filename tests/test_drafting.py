@@ -16,6 +16,7 @@ from applai.agents import AgentError, AgentResult, AgentRunner, FakeBackend, Usa
 from applai.app import create_app
 from applai.database import open_database
 from applai.drafting import DRAFTING_MODEL, DraftingError, draft_application
+from applai.drafting_judge import JUDGE_MODEL
 from applai.models import AgentRun, Application, DraftAnswer, Offer, StateChange
 from applai.profile import Diffusion, Fact, FactStatus, Profile, load_profile
 from applai.scan import Watch
@@ -55,6 +56,7 @@ def _result(output: dict[str, Any]) -> AgentResult:
 
 
 ANSWER = _result({"answers": {"4": _sentences("F3")}})
+SUPPORTED = _result({"verdicts": [{"supported": True, "reason": None}]})
 
 
 @pytest.fixture
@@ -114,7 +116,7 @@ def test_an_open_question_gets_a_stored_answer_and_the_application_is_drafted(
 
     [answer] = _answers(engine)
     with Session(engine) as session:
-        run = session.scalars(select(AgentRun)).one()
+        run = session.scalars(select(AgentRun).where(AgentRun.agent == "drafting")).one()
         change = session.scalars(select(StateChange)).one()
     assert (answer.application_id, answer.agent_run_id) == (application_id, run.id)
     assert (answer.kind, answer.field_index, answer.label) == ("question", 4, QUESTION["label"])
@@ -132,15 +134,69 @@ def test_only_validated_facts_whose_diffusion_is_not_never_reach_the_prompt(
     engine: Engine, profile: Profile
 ):
     application_id = _application(engine, [*IDENTITY, QUESTION])
-    backend = FakeBackend([ANSWER])
+    backend = FakeBackend([ANSWER, SUPPORTED])
 
     draft_application(AgentRunner(backend), engine, application_id, profile)
 
-    [spec] = backend.specs
+    spec = backend.specs[0]
     sent = spec.system_prompt + spec.input
     shown = {fact.id for fact in profile.facts if fact.text in sent}
     assert shown == {"F1", "F2", "F3"}
     assert all(f'"{fact}"' not in sent for fact in ("F4", "F5", "F6", "F7"))
+
+
+TWO_SENTENCES: list[dict[str, Any]] = [
+    {"text": SENTENCE, "facts": ["F3"]},
+    {"text": "J'ai réduit le pipeline de nuit de 6 heures à 4 minutes.", "facts": ["F2"]},
+]
+REASON = "F2 says 40 minutes, not 4."
+FLAGGED = {"supported": False, "reason": REASON}
+
+
+def test_the_judge_checks_each_sentence_against_its_cited_facts_and_its_flags_are_kept(
+    engine: Engine, profile: Profile
+):
+    application_id = _application(engine, [*IDENTITY, QUESTION])
+    judged = _result({"verdicts": [{"supported": True, "reason": None}, FLAGGED]})
+    backend = FakeBackend([_result({"answers": {"4": TWO_SENTENCES}}), judged])
+
+    draft_application(AgentRunner(backend), engine, application_id, profile)
+
+    [answer] = _answers(engine)
+    assert answer.judge_issues == [{"sentence": 1, "reason": REASON}]
+    assert _get(engine, application_id).state == "drafted"
+    with Session(engine) as session:
+        runs = session.scalars(select(AgentRun).order_by(AgentRun.id)).all()
+        assert [(r.agent, r.application_id, r.outcome) for r in runs] == [
+            ("drafting", application_id, "ok"), ("drafting_judge", application_id, "ok"),
+        ]  # fmt: skip
+    # Each sentence reaches the judge with the text of the facts it cites, and no other fact.
+    judge = backend.specs[1]
+    assert (judge.name, judge.model) == ("drafting_judge", JUDGE_MODEL)
+    facts = {fact.id: fact.text for fact in profile.facts}
+    assert all(sentence["text"] in judge.input for sentence in TWO_SENTENCES)
+    assert facts["F2"] in judge.input and facts["F3"] in judge.input
+    assert all(facts[f] not in judge.input for f in ("F1", "F4", "F5", "F6", "F7"))
+
+
+@pytest.mark.parametrize(
+    ("judged", "issues"),
+    [(SUPPORTED, []), (_result({"verdicts": [FLAGGED]}), [{"sentence": 0, "reason": REASON}]),
+     (_result({"verdicts": []}), None)],
+    ids=["all-supported", "flagged", "judge-failed"],
+)  # fmt: skip
+def test_the_judge_never_blocks_the_application(
+    engine: Engine, profile: Profile, judged: AgentResult, issues: list[Any] | None
+):
+    application_id = _application(engine, [*IDENTITY, QUESTION])
+
+    draft_application(AgentRunner(FakeBackend([ANSWER, judged])), engine, application_id, profile)
+
+    [answer] = _answers(engine)
+    application = _get(engine, application_id)
+    assert (answer.judge_issues, application.state, application.draft_error) == (
+        issues, "drafted", None,
+    )  # fmt: skip
 
 
 @pytest.mark.parametrize(
@@ -194,7 +250,7 @@ def test_a_form_with_only_identity_and_a_cv_is_drafted_with_no_agent_run(
 
 @pytest.fixture
 def client(data_dir: Path, engine: Engine) -> Iterator[TestClient]:
-    runner = AgentRunner(FakeBackend([ANSWER]))
+    runner = AgentRunner(FakeBackend([ANSWER, SUPPORTED]))
     watch = Watch(http=httpx2.Client(), runner=runner, ms_client_id=None)
     app = create_app(data_dir, frontend_dir=data_dir / "none", watch=watch)
     with TestClient(app, base_url="http://127.0.0.1") as client:
