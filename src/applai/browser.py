@@ -12,7 +12,8 @@ after MAX_PAGE_FAILURES the offer is described from its alert's fields, then tri
 
 Form capture: an application created with its form's URL (applai.capture) and no fields is
 listed for the extension, which opens the form in a tab, lists its controls without filling
-anything and sends them back; the application moves to form_captured. A form that fails, or
+anything and sends them back; the application moves to form_captured, and is drafted in the
+background (applai.drafting). A form that fails, or
 shows no field, is asked for again only after the next scan; after MAX_FORM_FAILURES its URL
 is dropped and the candidate pastes one, which counts from zero again.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
@@ -34,6 +35,7 @@ from applai import details, reread
 from applai.agents import AgentRunner
 from applai.capture import PASTE
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
+from applai.drafting import draft_in_background
 from applai.google import describe_google_offer, on_google
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Scan
 from applai.orchestrator import Actor, ApplicationState, TransitionError, move
@@ -290,9 +292,13 @@ def forms(request: Request) -> list[FormToRead]:
 
 
 @router.post("/forms/{application_id}", status_code=204)
-def form_sent(application_id: int, body: FormSent, request: Request) -> None:
-    """Store a waiting application's fields and move it to form_captured; none is a failure."""
-    with Session(request.app.state.engine) as session:
+def form_sent(
+    application_id: int, body: FormSent, request: Request, later: BackgroundTasks
+) -> None:
+    """Store a waiting application's fields and move it to form_captured, then draft it in
+    the background with the watch's runner (applai.drafting); no fields is a failure."""
+    state = request.app.state
+    with Session(state.engine) as session:
         application = _waiting_form(session, application_id)
         if not body.fields:
             _form_failed(application, "no_field", request.app.state.clock())
@@ -303,6 +309,10 @@ def form_sent(application_id: int, body: FormSent, request: Request) -> None:
             except TransitionError as error:  # another post moved it meanwhile
                 raise HTTPException(409, str(error)) from None
         session.commit()
+    watch: Watch | None = state.watch
+    if body.fields and watch is not None:
+        later.add_task(draft_in_background, state.engine, state.data_dir, watch.runner,
+                       application_id)  # fmt: skip
 
 
 @router.post("/forms/{application_id}/failure", status_code=204)

@@ -31,6 +31,7 @@ from applai.applications import Board, board
 from applai.capture import find_form
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
+from applai.drafting import draft_in_background
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferState, Triage
 from applai.orchestrator import ApplicationState, TransitionError
 from applai.reread import RereadRefused
@@ -207,6 +208,23 @@ def paste_form_url(application_id: int, body: FormUrl, session: _Session) -> For
     application.form_failures, application.form_failed_at = 0, None
     session.commit()
     return FormUrlRecorded(form_url=body.url)
+
+
+@api.post("/applications/{application_id}/draft", status_code=202)
+def draft(application_id: int, session: _Session, request: Request, later: BackgroundTasks) -> None:
+    """Draft a form_captured application again, after a failure, in the background."""
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    if application.state != ApplicationState.FORM_CAPTURED:
+        raise HTTPException(409, f"Application {application_id} is not waiting for Drafting.")
+    watch: Watch | None = request.app.state.watch
+    if watch is None:
+        raise HTTPException(503, "The watch is off: ApplAI was started without it.")
+    application.draft_error = None
+    session.commit()
+    s = request.app.state
+    later.add_task(draft_in_background, s.engine, s.data_dir, watch.runner, application_id)
 
 
 # The type a logo is served with, by file extension; the first type of an extension wins.
