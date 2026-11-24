@@ -53,9 +53,9 @@ def judge_spec(sentences: list[dict[str, Any]], profile: Profile) -> AgentSpec:
                 "maxItems": len(sentences)}  # fmt: skip
     schema = {"type": "object", "properties": {"verdicts": verdicts}, "required": ["verdicts"],
               "additionalProperties": False}  # fmt: skip
+    sent_input = json.dumps({"sentences": sent}, ensure_ascii=False, indent=2)
     return AgentSpec(name=JUDGE, model=JUDGE_MODEL, system_prompt=JUDGE_PROMPT,
-                     json_schema=schema,
-                     input=json.dumps({"sentences": sent}, ensure_ascii=False, indent=2))  # fmt: skip
+                     json_schema=schema, input=sent_input)  # fmt: skip
 
 
 def judge_answers(
@@ -82,5 +82,8 @@ def judge_answers(
     verdicts = iter(result.output["verdicts"])
     for answer in answers:
         judged = [next(verdicts) for _ in answer.sentences]
-        answer.judge_issues = [{"sentence": i, "reason": verdict["reason"]}
-                               for i, verdict in enumerate(judged) if not verdict["supported"]]  # fmt: skip
+        answer.judge_issues = [
+            {"sentence": i, "reason": verdict["reason"]}
+            for i, verdict in enumerate(judged)
+            if not verdict["supported"]
+        ]

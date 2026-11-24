@@ -1,0 +1,9 @@
+title: Data engineer
+company: Mistral Grid
+description: >-
+  Mistral Grid balances renewable power across French regional grids. Our nightly batch
+  jobs are too slow for the morning forecasts. Permanent contract, remote in France.
+questions:
+  - Why do you want to join Mistral Grid?
+  - Tell us about a time you made a slow data pipeline faster.
+trap: question in English

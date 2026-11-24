@@ -1,0 +1,13 @@
+sentences:
+  - text: Après avoir construit une prévision utilisée par 120 entrepôts, je souhaite continuer à résoudre ce type de problème.
+    facts: [F3]
+    expected: supported
+    trap: motivation
+  - text: J'ai été promue après avoir livré la prévision des délais de livraison.
+    facts: [F3]
+    expected: unsupported
+    trap: invented result
+  - text: Je maîtrise dbt et Airflow depuis six ans.
+    facts: [F1]
+    expected: unsupported
+    trap: invented skill

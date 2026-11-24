@@ -145,11 +145,12 @@ def test_only_validated_facts_whose_diffusion_is_not_never_reach_the_prompt(
     assert all(f'"{fact}"' not in sent for fact in ("F4", "F5", "F6", "F7"))
 
 
-TWO_SENTENCES = [
+TWO_SENTENCES: list[dict[str, Any]] = [
     {"text": SENTENCE, "facts": ["F3"]},
     {"text": "J'ai réduit le pipeline de nuit de 6 heures à 4 minutes.", "facts": ["F2"]},
 ]
-FLAGGED = {"supported": False, "reason": "F2 says 40 minutes, not 4."}
+REASON = "F2 says 40 minutes, not 4."
+FLAGGED = {"supported": False, "reason": REASON}
 
 
 def test_the_judge_checks_each_sentence_against_its_cited_facts_and_its_flags_are_kept(
@@ -162,7 +163,7 @@ def test_the_judge_checks_each_sentence_against_its_cited_facts_and_its_flags_ar
     draft_application(AgentRunner(backend), engine, application_id, profile)
 
     [answer] = _answers(engine)
-    assert answer.judge_issues == [{"sentence": 1, "reason": FLAGGED["reason"]}]
+    assert answer.judge_issues == [{"sentence": 1, "reason": REASON}]
     assert _get(engine, application_id).state == "drafted"
     with Session(engine) as session:
         runs = session.scalars(select(AgentRun).order_by(AgentRun.id)).all()
@@ -180,7 +181,7 @@ def test_the_judge_checks_each_sentence_against_its_cited_facts_and_its_flags_ar
 
 @pytest.mark.parametrize(
     ("judged", "issues"),
-    [(SUPPORTED, []), (_result({"verdicts": [FLAGGED]}), [{"sentence": 0, "reason": FLAGGED["reason"]}]),
+    [(SUPPORTED, []), (_result({"verdicts": [FLAGGED]}), [{"sentence": 0, "reason": REASON}]),
      (_result({"verdicts": []}), None)],
     ids=["all-supported", "flagged", "judge-failed"],
 )  # fmt: skip
