@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import type { Applications, Card, Row, ScanStatus, Service, Services } from "./api";
+import type { Answer, Applications, Card, Draft, Row, ScanStatus, Service, Services } from "./api";
 
 export interface Call {
   method: string;
@@ -7,13 +7,13 @@ export interface Call {
   body: unknown;
 }
 
-type Answer = unknown;
+type Reply = unknown;
 
 /**
  * Fakes the network, and only it: fetch answers by "METHOD /path?query", as the API would.
  * A route that is not listed answers 404. Returns every call made, in order.
  */
-export function fakeApi(routes: Record<string, Answer | ((call: Call) => Answer)>): Call[] {
+export function fakeApi(routes: Record<string, Reply | ((call: Call) => Reply)>): Call[] {
   const calls: Call[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
@@ -25,7 +25,7 @@ export function fakeApi(routes: Record<string, Answer | ((call: Call) => Answer)
     calls.push(call);
     const route = routes[`${call.method} ${url.pathname}${url.search}`];
     if (route === undefined) return new Response("not found", { status: 404 });
-    const answer = typeof route === "function" ? route(call) : route;
+    const answer = await (typeof route === "function" ? route(call) : route);
     return answer instanceof Response ? answer : Response.json(answer);
   });
   return calls;
@@ -140,4 +140,44 @@ export function aService(overrides: Partial<Service> = {}): Service {
 export function servicesRoutes(services: Partial<Services> = {}) {
   const status: Services = { sites: [], agents: [], mailbox: [], applai: [], ...services };
   return { "GET /api/services": status };
+}
+
+/** A fictional drafted answer, still pending. */
+export function anAnswer(overrides: Partial<Answer> = {}): Answer {
+  return {
+    id: 1,
+    kind: "question",
+    field_index: 0,
+    label: "Pourquoi ce poste ?",
+    sentences: [
+      {
+        text: "J’ai organisé les quais d’un entrepôt de 40 personnes.",
+        facts: [{ id: "#F1", text: "Responsable de quai chez Silo Nord, équipe de 40 personnes." }],
+      },
+      {
+        text: "J’ai réduit les retards de 20 %.",
+        facts: [{ id: "#F2", text: "Retards de livraison réduits de 20 % en 2024." }],
+      },
+    ],
+    text: "J’ai organisé les quais d’un entrepôt de 40 personnes. J’ai réduit les retards de 20 %.",
+    edited_text: null,
+    status: "pending",
+    warnings: [],
+    ...overrides,
+  };
+}
+
+/** A fictional application's draft. */
+export function aDraft(answers: Answer[] = [anAnswer()], overrides: Partial<Draft> = {}): Draft {
+  return {
+    application_id: 1,
+    offer_id: 1,
+    title: "Chef de quai",
+    company: "Brindille Logistique",
+    state: "drafted",
+    draft_error: null,
+    answers,
+    resolved: answers.every((a) => a.status === "accepted" || a.status === "edited"),
+    ...overrides,
+  };
 }
