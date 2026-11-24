@@ -89,6 +89,7 @@ class Offer(Base):
     salary: Mapped[str | None]  # as the offer's page gives it
     logo: Mapped[str | None]  # a file name in the data directory's logos/; none: initials
     detail_error: Mapped[str | None]  # why the offer's page could not be read (applai.details)
+    detail_failed_at: Mapped[datetime | None]  # the last of them, never cleared
     page_failures: Mapped[int] = mapped_column(server_default="0")  # by the extension
     page_failed_at: Mapped[datetime | None]  # the last of them (applai.browser)
     state: Mapped[str] = mapped_column(server_default="new")

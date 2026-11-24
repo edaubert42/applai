@@ -151,6 +151,7 @@ def _failed(session: Session, offer: Offer, error: str, now: datetime) -> bool:
     offer.detail_error = error
     offer.page_failures += 1
     offer.page_failed_at = now.astimezone(UTC).replace(tzinfo=None)  # as the scans' times
+    offer.detail_failed_at = offer.page_failed_at
     if offer.page_failures < MAX_PAGE_FAILURES:
         return False
     fields = (offer.title, offer.company, offer.location, offer.contract)

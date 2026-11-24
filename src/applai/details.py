@@ -17,6 +17,7 @@ import json
 from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from html.parser import HTMLParser
 from importlib.metadata import version
 from pathlib import Path
@@ -130,6 +131,7 @@ def describe_offer(
         base, details = _read(http, offer.url) if html is None else _parse(offer.url, html)
     except PageError as error:
         offer.detail_error = str(error)
+        offer.detail_failed_at = datetime.now(UTC).replace(tzinfo=None)
         raise
     offer.description = details.description
     for name in ("company", "location", "contract", "salary"):

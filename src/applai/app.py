@@ -33,6 +33,7 @@ from applai.models import LOCAL_USER_ID, Offer, OfferState
 from applai.orchestrator import TransitionError
 from applai.review import Card, DecisionRequest, OfferNotFound, View, cards, decide
 from applai.scan import Clock, Scanner, ScanRefused, ScanStatus, Watch, local_now, run_scan
+from applai.services import ServicesStatus, services_status
 from applai.settings import SettingsError, extension_id, review_min_score
 
 # Where the frontend's build lands in a checkout of this repository.
@@ -166,6 +167,15 @@ _Scanner = Annotated[Scanner, Depends(_scanner)]
 @api.get("/scan")
 def scan_status(scanner: _Scanner) -> ScanStatus:
     return scanner.status()
+
+
+@api.get("/services")
+def services(request: Request, session: _Session) -> ServicesStatus:
+    """The state of every service ApplAI depends on, by category."""
+    s = request.app.state
+    return services_status(
+        session, LOCAL_USER_ID, s.data_dir, s.clock, s.extension_asked_at, s.scanner, s.watch
+    )
 
 
 @api.post("/scan", status_code=202)

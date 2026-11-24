@@ -1,0 +1,149 @@
+"""Service health API (/api/services): real SQLite, real migrations, real FastAPI app."""
+
+import shutil
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import httpx2
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from applai.app import create_app
+from applai.database import open_database
+from applai.details import PageError, describe_offer
+from applai.linkedin import COMMAND_VARIABLE
+from applai.models import AgentRun, Offer, OfferOrigin, OfferState, Scan, StateChange
+from applai.triage import TRIAGE_MODEL
+
+DEMO_DIR = Path(__file__).parents[1] / "demo" / "candidate"
+NOON = datetime(2026, 11, 20, 12, 0, tzinfo=ZoneInfo("Europe/Paris"))
+
+
+def _utc(moment: datetime) -> datetime:
+    return moment.astimezone(UTC).replace(tzinfo=None)
+
+
+@pytest.fixture
+def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    shutil.copy(DEMO_DIR / "profile.yaml", tmp_path)
+    for var in (COMMAND_VARIABLE, "APPLAI_MS_CLIENT_ID", "APPLAI_NOTION_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    return tmp_path
+
+
+def _services(data_dir: Path, *rows: object) -> dict[str, list[dict[str, object]]]:
+    if rows:
+        engine = open_database(data_dir)
+        with Session(engine) as s:
+            s.add_all(rows)
+            s.commit()
+        engine.dispose()
+    app = create_app(data_dir, frontend_dir=data_dir / "no-frontend", clock=lambda: NOON)
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        response = client.get("/api/services")
+    assert response.status_code == 200
+    return response.json()
+
+
+def _offer(slug: str, source: str, state: OfferState = OfferState.NEW, **kw: object) -> Offer:
+    url = str(kw.pop("url", f"https://jobs.example.org/{source}/{slug}"))
+    d: dict[str, object] = {"user_id": 1, "url": url, "title": "Data engineer"}
+    return Offer(**d, company="Pivoine Analytics", source=source, state=state, **kw)
+
+
+def _http(code: int, text: str = "") -> httpx2.Client:
+    return httpx2.Client(transport=httpx2.MockTransport(lambda _: httpx2.Response(code, text=text)))
+
+
+def test_sites_report_offer_counts_error_count_and_state(data_dir: Path):
+    hw = (OfferState.NEW, OfferState.DESCRIBED, OfferState.SCREENED_OUT, OfferState.TRIAGED)
+    rows = [_offer(f"hw-{i}", "alert_hellowork", st) for i, st in enumerate(hw)]
+    wt_at = _utc(NOON - timedelta(minutes=10))
+    rows += [
+        _offer("wt-1", "alert_wttj", detail_error="HTTP 403"),
+        _offer("wt-2", "alert_wttj", OfferState.DESCRIBED, detail_failed_at=wt_at),
+        _offer("jt-1", "alert_custom", url="https://ecole.jobteaser.com/offers/1"),
+        _offer("gg-1", "alert_google", OfferState.TRIAGED, board="Indeed"),
+    ]
+    sites = {row["id"]: row for row in _services(data_dir, *rows)["sites"]}
+    h, w = sites["alert_hellowork"], sites["alert_wttj"]
+    assert h["counts"] == {"new": 1, "described": 1, "screened_out": 1, "triaged": 1}
+    assert (h["error_count"], h["state"]) == (0, "green")
+    assert (w["error_count"], w["state"], w["last_error"]) == (1, "red", "HTTP 403")
+    assert sites["alert_custom"]["how_read"] == "extension"
+    assert sites["alert_google"]["boards"] == ["Indeed"]
+
+
+def test_site_state_is_red_orange_or_green_from_page_history(data_dir: Path):
+    engine = open_database(data_dir)
+    fail_http, ok_http = _http(503), _http(200, "<main><p>Brindille.</p></main>")
+    with Session(engine) as s:
+        pairs = (("red", "alert_hellowork"), ("orange", "alert_wttj"), ("green", "alert_lesjeudis"))
+        offers = [_offer(n, src) for n, src in pairs]
+        s.add_all(offers)
+        s.flush()
+        for o, fail_ago, read_ago in zip(offers, (1, 3, 25), (None, 1, 24), strict=True):
+            with pytest.raises(PageError):
+                describe_offer(s, o, data_dir, fail_http)
+            failed_at = _utc(NOON - timedelta(hours=fail_ago))
+            o.detail_failed_at = failed_at
+            if read_ago is not None:
+                describe_offer(s, o, data_dir, ok_http)
+                assert o.detail_error is None and o.detail_failed_at == failed_at
+                sc = StateChange
+                q = select(sc).where(sc.offer_id == o.id, sc.to_state == OfferState.DESCRIBED)
+                ch = s.scalar(q)
+                assert ch is not None
+                ch.changed_at = _utc(NOON - timedelta(hours=read_ago))
+        s.commit()
+    engine.dispose()
+
+    sites = {row["id"]: row for row in _services(data_dir)["sites"]}
+    got = [sites[k]["state"] for k in ("alert_hellowork", "alert_wttj", "alert_lesjeudis")]
+    assert got == ["red", "orange", "green"]
+
+
+def test_unconnected_mailbox_and_unset_linkedin_mcp_are_red_with_what_to_do(data_dir: Path):
+    old_at = _utc(NOON - timedelta(hours=2))
+    t0, t1 = _utc(NOON - timedelta(minutes=10)), _utc(NOON - timedelta(minutes=8))
+    old = _offer("old-1", "alert_hellowork", origin=OfferOrigin.OLD_WORKFLOW, updated_at=old_at)
+    data = _services(data_dir, old, Scan(user_id=1, by_hand=False, started_at=t0, finished_at=t1))
+    assert list(data.keys()) == ["sites", "agents", "mailbox", "applai"]
+    mb, sites = data["mailbox"][0], {row["id"]: row for row in data["sites"]}
+    assert mb["connected"] is False and mb["state"] == "red" and mb["hint"]
+    li = sites["alert_linkedin"]
+    assert li["connected"] is False and li["state"] == "red" and li["hint"]
+    assert sites["extension"]["state"] == "red" and sites["extension"]["hint"]
+    assert [r["state"] for r in data["applai"]] == ["green", "green", "green", "red"]
+    assert data["applai"][-1]["connected"] is False and data["applai"][-1]["last_at"] is not None
+
+
+def test_failed_triage_agent_run_is_red_and_sums_todays_cost(data_dir: Path):
+    engine = open_database(data_dir)
+    with Session(engine) as s:
+        offer = _offer("triaged-1", "alert_wttj", OfferState.DESCRIBED)
+        s.add(offer)
+        s.flush()
+        d: dict[str, object] = {"user_id": 1, "offer_id": offer.id, "agent": "triage"}
+        for h, cost, out in ((24, 0.09, "ok"), (2, 0.012, "ok"), (0.2, None, "exit")):
+            at = _utc(NOON - timedelta(hours=h))
+            s.add(
+                AgentRun(
+                    **d,
+                    model=TRIAGE_MODEL,
+                    started_at=at,
+                    duration_ms=300,
+                    cost_usd=cost,
+                    outcome=out,
+                )
+            )
+        s.commit()
+    engine.dispose()
+
+    triage = _services(data_dir)["agents"][0]
+    assert triage["id"] == "triage" and triage["model"] == TRIAGE_MODEL
+    assert triage["state"] == "red" and triage["last_error"] == "exit"
+    assert triage["cost_today_usd"] == pytest.approx(0.012) and triage["hint"]

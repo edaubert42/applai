@@ -67,6 +67,12 @@ def back_up(database: Path, backup_dir: Path) -> Path:
     return target
 
 
+def last_backup_at(data_dir: Path) -> datetime | None:
+    """The UTC timestamp of the newest backup copy for data_dir, or None when none exists."""
+    copies = _copies(backup_directory(data_dir))
+    return copies[-1][0].replace(tzinfo=None) if copies else None
+
+
 def back_up_if_due(database: Path, backup_dir: Path) -> Path | None:
     """back_up() when the newest copy is more than 24 hours old or missing, then prune."""
     copies = _copies(backup_dir)
