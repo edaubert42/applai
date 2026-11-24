@@ -15,6 +15,8 @@ listed for the extension, which opens the form in a tab, lists its controls with
 anything and sends them back; the application moves to form_captured. A form that fails, or
 shows no field, is asked for again only after the next scan; after MAX_FORM_FAILURES its URL
 is dropped and the candidate pastes one, which counts from zero again.
+The pages also list the triaged offers the candidate asked to read again (applai.reread); the
+page received for one is read for its text, and the offer is triaged again in the background.
 """
 
 from collections.abc import Callable
@@ -28,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
-from applai import details
+from applai import details, reread
 from applai.agents import AgentRunner
 from applai.capture import PASTE
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
@@ -36,9 +38,9 @@ from applai.google import describe_google_offer, on_google
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Scan
 from applai.orchestrator import Actor, ApplicationState, TransitionError, move
 from applai.profile import Profile, ProfileError, load_profile
-from applai.scan import Watch
+from applai.scan import Clock, Watch
 from applai.screening import screen_offer
-from applai.triage import triage_offer
+from applai.triage import retriage_offer, triage_offer
 
 CONNECTED_FOR = timedelta(minutes=5)  # after the extension's last ask
 MAX_FORM_FAILURES = 2
@@ -126,13 +128,15 @@ def pages(request: Request) -> list[PageToRead]:
         listed = [o for o in new if _waiting(o, last_scan)]
         waiting = [o for o in listed if not screen_offer(session, o, profile)]
         session.commit()  # the offers screening set aside
-        return [PageToRead(offer_id=o.id, url=o.url) for o in waiting]
+        return [PageToRead(offer_id=o.id, url=o.url) for o in [*waiting, *reread.asked(session)]]
 
 
 @router.post("/pages/{offer_id}", status_code=204)
 def page_sent(offer_id: int, body: PageSent, request: Request, later: BackgroundTasks) -> None:
     """Describe a waiting offer from its page's HTML; a page with no text is a failure."""
     clock, data_dir = request.app.state.clock, request.app.state.data_dir
+    if _asked_again(request, offer_id):
+        return _receive_again(request, offer_id, later, body.html)
 
     def read(session: Session, offer: Offer, watch: Watch, profile: Profile) -> bool:
         try:
@@ -154,6 +158,10 @@ def page_failed(offer_id: int, body: PageFailed, request: Request, later: Backgr
     """Record a page the extension could not read."""
     error = f"the page answered HTTP {body.status}" if body.status else "the page was not fetched"
     clock = request.app.state.clock
+    if _asked_again(request, offer_id):
+        with Session(request.app.state.engine) as session, session.begin():
+            reread.fail(session.get_one(Offer, offer_id), error, utc(clock()))
+        return
     _receive(request, offer_id, later, lambda s, o, _w, _p: _failed(s, o, error, clock()))
 
 
@@ -190,12 +198,55 @@ def _receive(
         later.add_task(_triage, engine, data_dir, watch.runner, offer_id)
 
 
+def utc(moment: datetime) -> datetime:
+    return moment.astimezone(UTC).replace(tzinfo=None)  # as the scans' times
+
+
+def _asked_again(request: Request, offer_id: int) -> bool:
+    """Whether the candidate asked to read this offer again and no answer ended the ask."""
+    with Session(request.app.state.engine) as session:
+        offer = session.get(Offer, offer_id)
+        return (
+            offer is not None and offer.user_id == LOCAL_USER_ID and bool(offer.reread_requested_at)
+        )
+
+
+def _receive_again(request: Request, offer_id: int, later: BackgroundTasks, html: str) -> None:
+    """Read the page of an offer asked again; with a text, triage it again in the background."""
+    watch: Watch | None = request.app.state.watch
+    if watch is None:
+        raise HTTPException(503, "The watch is off: ApplAI was started without it.")
+    state = request.app.state
+    try:
+        profile = load_profile(state.data_dir)
+    except ProfileError as error:
+        raise HTTPException(409, f"Offer {offer_id} cannot be read again: {error}") from None
+    with Session(state.engine) as session:
+        offer = session.get_one(Offer, offer_id)
+        now = utc(state.clock())
+        text = reread.read_page(session, offer, html, profile, watch.http, now)
+        session.commit()
+    if text is not None:
+        args = (state.engine, state.data_dir, watch.runner, offer_id, text, state.clock)
+        later.add_task(_triage_again, *args)
+
+
+def _triage_again(
+    engine: Engine, data_dir: Path, runner: AgentRunner, offer_id: int, text: str, clock: Clock
+) -> None:
+    """Triage the offer on its new text; a failure is recorded on the offer, as its reason."""
+    try:
+        retriage_offer(runner, engine, offer_id, text, load_profile(data_dir))
+    except Exception as error:
+        reread.failed_triage(engine, offer_id, error, utc(clock()))
+
+
 def _failed(session: Session, offer: Offer, error: str, now: datetime) -> bool:
     """Record a failed page, asked for again after the next scan; after the last one allowed,
     describe the offer from its alert's fields. Whether it was described."""
     offer.detail_error = error
     offer.page_failures += 1
-    offer.page_failed_at = now.astimezone(UTC).replace(tzinfo=None)  # as the scans' times
+    offer.page_failed_at = utc(now)
     offer.detail_failed_at = offer.page_failed_at
     if offer.page_failures < MAX_PAGE_FAILURES:
         return False
@@ -287,5 +338,10 @@ def status(request: Request) -> BrowserStatus:
     asked: datetime | None = request.app.state.extension_asked_at
     if asked is None:
         return BrowserStatus(connected=False, last_asked_at=None)
-    lately = request.app.state.clock() - asked <= CONNECTED_FOR
-    return BrowserStatus(connected=lately, last_asked_at=asked.astimezone(UTC))
+    return BrowserStatus(connected=is_connected(request), last_asked_at=asked.astimezone(UTC))
+
+
+def is_connected(request: Request) -> bool:
+    """Whether the extension asked for its pages within CONNECTED_FOR."""
+    asked: datetime | None = request.app.state.extension_asked_at
+    return asked is not None and request.app.state.clock() - asked <= CONNECTED_FOR
