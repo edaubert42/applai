@@ -24,6 +24,7 @@ export default function CorrectScreen({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [failed, setFailed] = useState(id === null);
   const [refused, setRefused] = useState(false);
+  const [validating, setValidating] = useState(false);
 
   useEffect(() => {
     if (id === null) return;
@@ -44,9 +45,13 @@ export default function CorrectScreen({
   }
 
   function validate() {
-    if (id === null) return;
+    if (id === null || validating) return;
     setRefused(false);
-    api.answersChecked(id).then(onDone, () => setRefused(true));
+    setValidating(true);
+    api.answersChecked(id).then(onDone, () => {
+      setValidating(false);
+      setRefused(true);
+    });
   }
 
   const ready = draft !== null && draft.answers.every((a) => RESOLVED.includes(a.status));
@@ -81,7 +86,7 @@ export default function CorrectScreen({
             </ul>
           )}
           {refused && <p role="alert" className="text-minus">{t("correct.validate_failed")}</p>}
-          <button type="button" disabled={!ready} onClick={validate} className={button}>
+          <button type="button" disabled={!ready || validating} onClick={validate} className={button}>
             {t("correct.validate")}
           </button>
         </>

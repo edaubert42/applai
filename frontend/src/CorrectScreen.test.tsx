@@ -283,6 +283,21 @@ describe("the answers gate", () => {
     expect((screen.getByRole("button", { name: words["correct.validate"] }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("posts answers-checked once when Validate is clicked twice", async () => {
+    let release: (reply: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => (release = resolve));
+    const { calls, words } = await openCorrect({ [CHECKED]: () => pending }, "fr", aDraft([anAnswer({ status: "accepted" })]));
+    const validate = screen.getByRole("button", { name: words["correct.validate"] }) as HTMLButtonElement;
+
+    fireEvent.click(validate);
+    fireEvent.click(validate);
+
+    expect(calls.filter((c) => c.path.endsWith("/answers-checked"))).toHaveLength(1);
+    expect(validate.disabled).toBe(true);
+    release(new Response("no", { status: 409 }));
+    await waitFor(() => expect(validate.disabled).toBe(false));
+  });
+
   it("stays on the screen and says so when the gate refuses", async () => {
     const { words } = await openCorrect(
       { [CHECKED]: new Response("no", { status: 409 }) },
