@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from applai import browser, correct, reread
+from applai import browser, correct, reread, review_form
 from applai.agents import AgentError
 from applai.applications import Board, board
 from applai.capture import find_form
@@ -323,6 +323,52 @@ def plan_again(
     session.commit()
     s = request.app.state
     later.add_task(plan_in_background, s.engine, s.data_dir, watch.runner, application_id)
+
+
+@api.get("/applications/{application_id}/review")
+def read_review(application_id: int, session: _Session, request: Request) -> review_form.FormReview:
+    """Filled fields and Review problems for an application."""
+    try:
+        return review_form.read_review(
+            session, LOCAL_USER_ID, application_id, request.app.state.data_dir
+        )
+    except review_form.NotFound:
+        raise HTTPException(404, "no such application") from None
+
+
+@api.post("/applications/{application_id}/review", status_code=202)
+def retry_review(
+    application_id: int, session: _Session, request: Request, later: BackgroundTasks
+) -> None:
+    """Run Review again in the background on a filled application."""
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    if application.state != ApplicationState.FILLED:
+        raise HTTPException(409, f"Application {application_id} is not waiting for Review.")
+    watch: Watch | None = request.app.state.watch
+    if watch is None:
+        raise HTTPException(503, "The watch is off: ApplAI was started without it.")
+    application.review_error = None
+    session.commit()
+    s = request.app.state
+    later.add_task(
+        review_form.review_in_background, s.engine, s.data_dir, watch.runner, application_id
+    )
+
+
+@api.get("/applications/{application_id}/screenshot")
+def application_screenshot(
+    application_id: int, session: _Session, request: Request
+) -> FileResponse:
+    """Serve the stored PNG screenshot of a filled form, or 404 when absent."""
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    path = review_form.screenshot_path(request.app.state.data_dir, application_id)
+    if path is None:
+        raise HTTPException(404, "no screenshot")
+    return FileResponse(path, media_type="image/png")
 
 
 # The type a logo is served with, by file extension; the first type of an extension wins.
