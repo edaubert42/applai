@@ -121,7 +121,8 @@ describe("FinalValidationScreen", () => {
     fireEvent.click(validateBtn);
     const sentBtn = await screen.findByRole("button", { name: words["validation.mark_sent"] });
     expect(screen.getByRole("link", { name: words["validation.open_form"] }).getAttribute("href")).toBe(review.url);
-    expect(screen.queryByRole("button", { name: /submit|soumett|autoris|authoriz/i })).toBeNull();
+    expect(screen.getByRole("button", { name: words["validation.authorize_send"] })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /submit|soumett/i })).toBeNull();
 
     fireEvent.click(sentBtn);
     expect(await screen.findByText(words["applications.state.sent"])).toBeTruthy();
@@ -153,5 +154,24 @@ describe("FinalValidationScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: words["validation.drop_confirm"] }));
     expect(await screen.findByText(words["applications.state.dropped"])).toBeTruthy();
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(2);
+  });
+
+  it.each(["fr", "en"] as const)("shows send_error alert and authorizes ApplAI to send in %s", async (language) => {
+    const review = aFormReview({ state: "validated", send_error: "No open tab matches the form URL." });
+    const { calls, words } = await openValidation({
+      "POST /api/applications/1/authorize-send": new Response(null, { status: 204 }),
+    }, language, review);
+
+    expect(screen.getByRole("alert").textContent).toContain("No open tab matches the form URL.");
+    const authorizeBtn = screen.getByRole("button", { name: words["validation.authorize_send"] }) as HTMLButtonElement;
+    expect(authorizeBtn.disabled).toBe(false);
+
+    fireEvent.click(authorizeBtn);
+    const authorizedBtn = await screen.findByRole("button", { name: words["validation.send_authorized"] }) as HTMLButtonElement;
+    expect(authorizedBtn.disabled).toBe(true);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([
+      { method: "POST", path: "/api/applications/1/authorize-send", body: undefined },
+    ]);
   });
 });

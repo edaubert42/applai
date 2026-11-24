@@ -80,6 +80,8 @@ class FormReview(BaseModel):
     problems: list[ReviewProblem] | None
     review_error: str | None
     has_screenshot: bool
+    send_authorized: bool = False
+    send_error: str | None = None
 
 
 def merged_fields(
@@ -217,4 +219,5 @@ def read_review(session: Session, user_id: int, application_id: int, data_dir: P
         fields=merged_fields(app.form_fields, app.filled_fields, app.fill_plan),
         problems=problems, review_error=app.review_error,
         has_screenshot=screenshot_path(data_dir, app.id) is not None,
+        send_authorized=app.send_authorized_at is not None, send_error=app.send_error,
     )  # fmt: skip
