@@ -39,6 +39,7 @@ class Row(BaseModel):
     changed_at: datetime
     form_url: str | None = None  # where its form lives, or why not (applai.capture)
     form_url_error: str | None = None
+    fill_error: str | None = None  # why Filling failed: the plan, or the extension (applai.browser)
 
     @field_serializer("changed_at")
     def _utc(self, value: datetime) -> str:
@@ -79,6 +80,7 @@ def board(session: Session, user_id: int) -> Board:
                 changed_at=changed_at or application.created_at,
                 form_url=application.form_url,
                 form_url_error=application.form_url_error,
+                fill_error=application.fill_error,
             ),
         )
         for application, offer, changed_at in applications

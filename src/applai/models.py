@@ -167,6 +167,11 @@ class Application(Base):
     form_failures: Mapped[int] = mapped_column(server_default="0")  # by the extension
     form_failed_at: Mapped[datetime | None]  # the last of them
     draft_error: Mapped[str | None]  # why the last Drafting failed (applai.drafting)
+    # Filling (applai.filling): the actions planned, then what the extension reports it entered.
+    fill_plan: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    filled_fields: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    fill_error: Mapped[str | None]  # why the last plan or fill failed, until a fill succeeds
+    fill_failed_at: Mapped[datetime | None]  # the last fill the extension failed
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=_utc_now, onupdate=_utc_now)
 
