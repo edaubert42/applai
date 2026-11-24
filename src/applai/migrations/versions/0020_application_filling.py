@@ -1,14 +1,14 @@
 """Filling of an application: its fill plan, the filled state the extension reports, its error.
 
-Revision ID: 0019
-Revises: 0018
+Revision ID: 0020
+Revises: 0019
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0019"
-down_revision: str | None = "0018"
+revision = "0020"
+down_revision: str | None = "0019"
 branch_labels: str | None = None
 depends_on: str | None = None
 
