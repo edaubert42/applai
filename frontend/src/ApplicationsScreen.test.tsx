@@ -129,4 +129,25 @@ describe("the Applications dashboard", () => {
 
     expect((await screen.findByRole("alert")).textContent).toBe(fr["applications.error"]);
   });
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("warns an answers_checked row to check the Chrome extension when disconnected or failed, in %s", async (language, words) => {
+    const waiting = aRow({ id: 8, offer_id: 8, state: "answers_checked" });
+    const errored = aRow({ id: 9, offer_id: 9, title: "Chef de produit", state: "answers_checked", fill_error: "form not loaded" });
+    await openScreen(
+      {
+        ...applicationsRoutes({ in_progress: [waiting, errored] }),
+        "GET /api/browser/status": { connected: false, last_asked_at: null },
+      },
+      language,
+    );
+
+    const rows = groupNamed(fill(words["applications.group.in_progress"], { n: 2 })).getAllByRole("listitem");
+    expect(within(rows[0] as HTMLElement).getByRole("alert").textContent).toContain(
+      words["applications.fill.extension_disconnected"],
+    );
+    expect(within(rows[1] as HTMLElement).getByRole("alert").textContent).toContain("form not loaded");
+  });
 });

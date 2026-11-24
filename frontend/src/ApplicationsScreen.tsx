@@ -21,12 +21,17 @@ function Board({ onCorrect }: { onCorrect: (row: Row) => void }) {
   const { t } = useSettings();
   const [groups, setGroups] = useState<Applications | null>(null);
   const [failed, setFailed] = useState(false);
+  const [extensionConnected, setExtensionConnected] = useState(true);
 
   useEffect(() => {
     let current = true;
     api.applications().then(
       (loaded) => current && setGroups(loaded),
       () => current && setFailed(true),
+    );
+    api.browserStatus().then(
+      (status) => current && setExtensionConnected(status.connected),
+      () => current && setExtensionConnected(false),
     );
     return () => {
       current = false;
@@ -47,7 +52,12 @@ function Board({ onCorrect }: { onCorrect: (row: Row) => void }) {
             ) : (
               <ul className="space-y-3">
                 {groups[group].map((row) => (
-                  <ApplicationRow key={row.offer_id} row={row} onCorrect={onCorrect} />
+                  <ApplicationRow
+                    key={row.offer_id}
+                    row={row}
+                    extensionConnected={extensionConnected}
+                    onCorrect={onCorrect}
+                  />
                 ))}
               </ul>
             )}
@@ -57,7 +67,15 @@ function Board({ onCorrect }: { onCorrect: (row: Row) => void }) {
   );
 }
 
-function ApplicationRow({ row, onCorrect }: { row: Row; onCorrect: (row: Row) => void }) {
+function ApplicationRow({
+  row,
+  extensionConnected,
+  onCorrect,
+}: {
+  row: Row;
+  extensionConnected: boolean;
+  onCorrect: (row: Row) => void;
+}) {
   const { t, lookup, formatTime } = useSettings();
   const old = row.origin === "old_workflow";
   // An application's state is translated; a Notion status stays as written.
@@ -103,6 +121,13 @@ function ApplicationRow({ row, onCorrect }: { row: Row; onCorrect: (row: Row) =>
         <button type="button" onClick={() => onCorrect(row)} className={button}>
           {t("correct.open")}
         </button>
+      )}
+      {row.state === "answers_checked" && (row.fill_error || !extensionConnected) && (
+        <p role="alert" className="basis-full text-sm text-minus">
+          {row.fill_error
+            ? t("applications.fill.error", { error: row.fill_error })
+            : t("applications.fill.extension_disconnected")}
+        </p>
       )}
       {canPaste && (
         <form onSubmit={(event) => paste(event, id)} className="flex basis-full flex-wrap items-center gap-3">

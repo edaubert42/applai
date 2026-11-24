@@ -61,6 +61,12 @@ export interface Row {
   /** Where the offer's form lives, or why it was not found: the candidate pastes it. */
   form_url: string | null;
   form_url_error: string | null;
+  fill_error: string | null;
+}
+
+export interface BrowserStatus {
+  connected: boolean;
+  last_asked_at: string | null;
 }
 
 export interface FormUrl {
@@ -160,6 +166,7 @@ export const api = {
     request<unknown>("POST", `/api/offers/${id}/decision`, decision),
   reread: (id: number) => request<unknown>("POST", `/api/offers/${id}/reread`),
   applications: () => request<Applications>("GET", "/api/applications"),
+  browserStatus: () => request<BrowserStatus>("GET", "/api/browser/status"),
   pasteFormUrl: (id: number, url: string) =>
     request<FormUrl>("PUT", `/api/applications/${id}/form-url`, { url }),
   draft: (id: number) => request<Draft>("GET", `/api/applications/${id}/draft`),

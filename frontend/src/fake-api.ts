@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import type { Answer, Applications, Card, Draft, Row, ScanStatus, Service, Services } from "./api";
+import type { Answer, Applications, BrowserStatus, Card, Draft, Row, ScanStatus, Service, Services } from "./api";
 
 export interface Call {
   method: string;
@@ -81,6 +81,7 @@ export function aRow(overrides: Partial<Row> = {}): Row {
     changed_at: "2026-11-20T09:30:00Z",
     form_url: null,
     form_url_error: null,
+    fill_error: null,
     ...overrides,
   };
 }
@@ -88,7 +89,11 @@ export function aRow(overrides: Partial<Row> = {}): Row {
 /** The routes of the Applications dashboard with these rows in each group. */
 export function applicationsRoutes(groups: Partial<Applications> = {}) {
   const board: Applications = { in_progress: [], waiting: [], sent: [], dropped: [], ...groups };
-  return { "GET /api/applications": board };
+  const status: BrowserStatus = { connected: true, last_asked_at: "2026-11-22T07:02:00Z" };
+  return {
+    "GET /api/applications": board,
+    "GET /api/browser/status": status,
+  };
 }
 
 /** The scan status after a clean scan that ended long ago. */
