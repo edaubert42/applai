@@ -26,14 +26,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from applai import browser, reread
+from applai import browser, correct, reread
+from applai.agents import AgentError
 from applai.applications import Board, board
 from applai.capture import find_form
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
-from applai.drafting import draft_in_background
+from applai.drafting import DraftingError, draft_in_background, redraft_answer
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferState, Triage
 from applai.orchestrator import ApplicationState, TransitionError
+from applai.profile import Profile, ProfileError, load_profile
 from applai.reread import RereadRefused
 from applai.review import Card, Decision, DecisionRequest, OfferNotFound, View, cards, decide
 from applai.scan import Clock, Scanner, ScanRefused, ScanStatus, Watch, local_now, run_scan
@@ -225,6 +227,74 @@ def draft(application_id: int, session: _Session, request: Request, later: Backg
     session.commit()
     s = request.app.state
     later.add_task(draft_in_background, s.engine, s.data_dir, watch.runner, application_id)
+
+
+def _profile(request: Request) -> Profile:
+    try:
+        return load_profile(request.app.state.data_dir)
+    except ProfileError as error:  # its message holds no value of the profile
+        raise HTTPException(500, str(error)) from None
+
+
+_Profile = Annotated[Profile, Depends(_profile)]
+
+
+@api.get("/applications/{application_id}/draft")
+def read_draft(application_id: int, session: _Session, profile: _Profile) -> correct.Draft:
+    """The answers drafted for an application, each with the facts its sentences cite."""
+    try:
+        return correct.draft(session, LOCAL_USER_ID, application_id, profile)
+    except correct.NotFound:
+        raise HTTPException(404, "no such application") from None
+
+
+@api.post("/applications/{application_id}/draft/{answer_id}")
+def decide_answer(
+    application_id: int,
+    answer_id: int,
+    body: correct.AnswerRequest,
+    session: _Session,
+    profile: _Profile,
+    request: Request,
+) -> correct.Answer:
+    """Accept, edit or reject an answer, recorded as a label (applai.correct).
+
+    A rejected answer is then drafted again with the reason, while the candidate waits; if
+    that fails (502) it stays rejected, and the candidate rejects or edits it again.
+    """
+    rejects = body.decision == correct.AnswerDecision.REJECT
+    watch: Watch | None = request.app.state.watch
+    if rejects and watch is None:
+        raise HTTPException(503, "The watch is off: ApplAI was started without it.")
+    try:
+        with session.begin():
+            answer = correct.decide(session, LOCAL_USER_ID, application_id, answer_id, body)
+            decided = correct.answer_view(answer, profile)
+    except correct.NotFound:
+        raise HTTPException(404, "no such answer") from None
+    except correct.GateRefused as error:
+        raise HTTPException(409, str(error)) from None
+    if not rejects or watch is None:
+        return decided
+    try:
+        answer = redraft_answer(
+            watch.runner, request.app.state.engine, answer_id, body.reason or "", profile
+        )
+    except (AgentError, DraftingError) as error:  # these messages hold no candidate data
+        raise HTTPException(502, str(error)) from None
+    return correct.answer_view(answer, profile)
+
+
+@api.post("/applications/{application_id}/answers-checked", status_code=204)
+def answers_checked(application_id: int, session: _Session) -> None:
+    """Close the answers gate: 409 until every answer is accepted or edited."""
+    try:
+        with session.begin():
+            correct.check_answers(session, LOCAL_USER_ID, application_id)
+    except correct.NotFound:
+        raise HTTPException(404, "no such application") from None
+    except (correct.GateRefused, TransitionError) as error:
+        raise HTTPException(409, str(error)) from None
 
 
 # The type a logo is served with, by file extension; the first type of an extension wins.
