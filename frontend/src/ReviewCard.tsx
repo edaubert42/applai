@@ -116,7 +116,7 @@ export function Header({ card, compact = false }: { card: Card; compact?: boolea
         <p className="mt-4 text-sm text-muted">
           {card.source && <span>{t("card.seen", { source: sourceName(card.source) })}</span>}
           {card.source && " · "}
-          <a href={card.url} target="_blank" rel="noreferrer" className="text-link underline">
+          <a href={card.url} target="_blank" rel="noreferrer" className="text-link underline hover:opacity-80">
             {t("card.original")}
           </a>
           {!card.full_text_read && " · "}
@@ -167,7 +167,7 @@ export function OfferRow({ card, onOpen }: { card: Card; onOpen: () => void }) {
   );
 }
 
-const button = `min-h-13 flex-1 rounded-pill px-6 font-semibold ${focus}`;
+const button = `min-h-13 flex-1 cursor-pointer rounded-pill px-6 font-semibold ${focus}`;
 
 /** An offer's card, with its three decisions. */
 export function ReviewCard({
@@ -226,15 +226,15 @@ export function ReviewCard({
         </Block>
       </div>
       <div className="flex flex-wrap gap-3">
-        <button type="button" onClick={onNotInterested} className={`${button} border border-outline`}>
+        <button type="button" onClick={onNotInterested} className={`${button} border border-outline hover:bg-raised`}>
           {t("card.notInterested")}
         </button>
         {card.state !== "later" && (
-          <button type="button" onClick={onLater} className={`${button} bg-raised`}>
+          <button type="button" onClick={onLater} className={`${button} bg-raised hover:bg-border`}>
             {t("card.later")}
           </button>
         )}
-        <button type="button" onClick={onInterested} className={`${button} bg-primary text-on-primary`}>
+        <button type="button" onClick={onInterested} className={`${button} bg-primary text-on-primary hover:brightness-90`}>
           {t("card.interested")}
         </button>
       </div>

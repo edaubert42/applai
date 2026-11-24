@@ -193,8 +193,8 @@ export default function ReviewScreen() {
                 setView(name);
                 openOnly(null);
               }}
-              className={`min-h-11 rounded-pill px-5 font-medium ${focus} ${
-                name === view ? "bg-primary text-on-primary" : "text-muted hover:text-text"
+              className={`min-h-11 cursor-pointer rounded-pill px-5 font-medium ${focus} ${
+                name === view ? "bg-primary text-on-primary hover:brightness-90" : "text-muted hover:text-text"
               }`}
             >
               {t(`review.tab.${name}`, { n: lists?.[name].length ?? 0 })}
@@ -261,7 +261,7 @@ function ScreenedOut({ cards, onRescue }: { cards: Card[]; onRescue: (card: Card
             <button
               type="button"
               onClick={() => onRescue(card)}
-              className={`min-h-11 rounded-pill border border-outline px-5 font-semibold text-link ${focus}`}
+              className={`min-h-11 cursor-pointer rounded-pill border border-outline px-5 font-semibold text-link hover:bg-raised ${focus}`}
             >
               {t("screened.rescue")}
             </button>

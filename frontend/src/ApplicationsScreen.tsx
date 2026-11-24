@@ -67,7 +67,7 @@ function ApplicationRow({ row }: { row: Row }) {
         href={row.url}
         target="_blank"
         rel="noreferrer"
-        className="inline-flex min-h-11 items-center rounded-pill border border-outline px-5 font-semibold text-link focus-visible:outline-2 focus-visible:outline-link"
+        className="inline-flex min-h-11 cursor-pointer items-center rounded-pill border border-outline px-5 font-semibold text-link hover:bg-raised focus-visible:outline-2 focus-visible:outline-link"
       >
         {t("applications.offer")}
       </a>

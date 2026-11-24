@@ -101,7 +101,9 @@ export default function ScanBar({ onScanned }: { onScanned: () => void }) {
         disabled={disabled}
         onClick={() => void start()}
         className={`min-h-11 rounded-pill px-5 font-semibold focus-visible:outline-2 focus-visible:outline-link ${
-          disabled ? "border border-outline text-muted" : "bg-primary text-on-primary"
+          disabled
+            ? "cursor-not-allowed border border-outline text-muted"
+            : "cursor-pointer bg-primary text-on-primary hover:brightness-90"
         }`}
       >
         {label}

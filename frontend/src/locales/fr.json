@@ -56,6 +56,7 @@
   "decline.note": "Préciser (facultatif)",
   "decline.cancel": "Annuler",
   "decline.save": "Enregistrer · Entrée",
+  "decline.needReason": "Choisis au moins une raison",
   "decline.keys": "Touches 1 à 7 : choisir une raison · Entrée : enregistrer · Échap : annuler",
   "reason.company": "Entreprise",
   "reason.mission": "Mission",
