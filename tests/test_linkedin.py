@@ -208,7 +208,8 @@ def test_without_the_variable_linkedin_offers_stay_new_with_an_error_naming_it(
 
     errors = _run(engine)
 
-    assert len(errors) == 2
+    assert len(errors) == 1  # the variable is missing once, whatever the offers
+    assert COMMAND_VARIABLE in errors[0]
     for offer_id in (first, second):
         offer = _get(engine, offer_id)
         assert offer.state == "new"

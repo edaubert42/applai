@@ -27,6 +27,7 @@ export default function DeclinePanel({
 }) {
   const { t } = useSettings();
   const noteId = useId();
+  const hintId = useId();
   const [chosen, setChosen] = useState<readonly Reason[]>([]);
   const [note, setNote] = useState("");
   // The reasons stay in the order of the list, whatever the order they were chosen in.
@@ -66,8 +67,10 @@ export default function DeclinePanel({
             type="button"
             aria-pressed={chosen.includes(reason)}
             onClick={() => toggle(reason)}
-            className={`${action} flex items-center gap-2 border ${
-              chosen.includes(reason) ? "border-primary bg-primary text-on-primary" : "border-outline"
+            className={`${action} flex cursor-pointer items-center gap-2 border ${
+              chosen.includes(reason)
+                ? "border-primary bg-primary text-on-primary hover:brightness-90"
+                : "border-outline hover:bg-raised"
             }`}
           >
             <kbd className="font-mono text-sm opacity-80">{index + 1}</kbd>
@@ -89,14 +92,20 @@ export default function DeclinePanel({
         />
       </div>
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <button type="button" onClick={onCancel} className={`${action} text-link`}>
+        {ordered.length === 0 && (
+          <p id={hintId} className="text-sm text-muted">
+            {t("decline.needReason")}
+          </p>
+        )}
+        <button type="button" onClick={onCancel} className={`${action} cursor-pointer text-link hover:bg-raised`}>
           {t("decline.cancel")}
         </button>
         <button
           type="button"
           disabled={ordered.length === 0}
+          aria-describedby={ordered.length === 0 ? hintId : undefined}
           onClick={() => onSave(ordered, note.trim())}
-          className={`${action} bg-primary text-on-primary disabled:bg-raised disabled:text-muted`}
+          className={`${action} enabled:cursor-pointer disabled:cursor-not-allowed bg-primary text-on-primary enabled:hover:brightness-90 disabled:bg-raised disabled:text-muted`}
         >
           {t("decline.save")}
         </button>

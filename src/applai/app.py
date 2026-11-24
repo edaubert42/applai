@@ -13,26 +13,29 @@ from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
 from alembic.runtime.migration import MigrationContext
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.datastructures import Headers
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from applai import browser
 from applai.applications import Board, board
+from applai.capture import find_form
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
-from applai.models import LOCAL_USER_ID, Offer, OfferState
-from applai.orchestrator import TransitionError
-from applai.review import Card, DecisionRequest, OfferNotFound, View, cards, decide
+from applai.models import LOCAL_USER_ID, Application, Offer, OfferState
+from applai.orchestrator import ApplicationState, TransitionError
+from applai.review import Card, Decision, DecisionRequest, OfferNotFound, View, cards, decide
 from applai.scan import Clock, Scanner, ScanRefused, ScanStatus, Watch, local_now, run_scan
+from applai.services import ServicesStatus, services_status
 from applai.settings import SettingsError, extension_id, review_min_score
 
 # Where the frontend's build lands in a checkout of this repository.
@@ -117,17 +120,67 @@ def review(view: View, session: _Session, min_score: _MinScore) -> list[Card]:
 
 @api.post("/offers/{offer_id}/decision", status_code=201)
 def decision(
-    offer_id: int, body: DecisionRequest, session: _Session, min_score: _MinScore
+    offer_id: int,
+    body: DecisionRequest,
+    session: _Session,
+    min_score: _MinScore,
+    request: Request,
+    later: BackgroundTasks,
 ) -> LabelRecorded:
-    """Record the candidate's decision on an offer as a label, and move the offer."""
+    """Record the candidate's decision on an offer as a label, and move the offer.
+
+    An accepted offer's application then gets its form's URL in the background, with the
+    watch's HTTP client (applai.capture); without the watch, the candidate pastes it.
+    """
     try:
         with session.begin():
             label = decide(session, LOCAL_USER_ID, offer_id, body, min_score)
-            return LabelRecorded.model_validate(label)
+            recorded = LabelRecorded.model_validate(label)
+            application_id = session.scalar(
+                select(Application.id).where(Application.offer_id == offer_id)
+            )
     except OfferNotFound:
         raise HTTPException(status_code=404, detail="no such offer") from None
     except TransitionError as error:
         raise HTTPException(status_code=409, detail=str(error)) from None
+    watch: Watch | None = request.app.state.watch
+    if body.decision == Decision.INTERESTED and application_id and watch:
+        later.add_task(find_form, request.app.state.engine, application_id, watch.http)
+    return recorded
+
+
+class FormUrl(BaseModel):
+    """A form's URL the candidate pastes: http or https only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(max_length=2000)
+
+    @field_validator("url")
+    @classmethod
+    def _http(cls, url: str) -> str:
+        parts = urlsplit(url.strip())
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError("the form's URL starts with http:// or https://")
+        return url.strip()
+
+
+class FormUrlRecorded(BaseModel):
+    form_url: str
+    form_url_error: None = None
+
+
+@api.put("/applications/{application_id}/form-url")
+def paste_form_url(application_id: int, body: FormUrl, session: _Session) -> FormUrlRecorded:
+    """Record the form's URL the candidate pasted on an application still created."""
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    if application.state != ApplicationState.CREATED:
+        raise HTTPException(409, f"Application {application_id} is past form capture.")
+    application.form_url, application.form_url_error = body.url, None
+    session.commit()
+    return FormUrlRecorded(form_url=body.url)
 
 
 # The type a logo is served with, by file extension; the first type of an extension wins.
@@ -166,6 +219,15 @@ _Scanner = Annotated[Scanner, Depends(_scanner)]
 @api.get("/scan")
 def scan_status(scanner: _Scanner) -> ScanStatus:
     return scanner.status()
+
+
+@api.get("/services")
+def services(request: Request, session: _Session) -> ServicesStatus:
+    """The state of every service ApplAI depends on, by category."""
+    s = request.app.state
+    return services_status(
+        session, LOCAL_USER_ID, s.data_dir, s.clock, s.extension_asked_at, s.scanner, s.watch
+    )
 
 
 @api.post("/scan", status_code=202)
@@ -252,7 +314,9 @@ def create_app(
         app.state.scanner = None
         app.state.watch, app.state.clock, app.state.extension_asked_at = watch, clock, None
         if watch is not None:
-            app.state.scanner = Scanner(engine, partial(run_scan, engine, data_dir, watch), clock)
+            app.state.scanner = Scanner(
+                engine, partial(run_scan, engine, data_dir, watch, clock=clock), clock
+            )
             app.state.scanner.start_schedule()
         try:
             yield

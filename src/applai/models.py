@@ -83,11 +83,13 @@ class Offer(Base):
     screened_rule: Mapped[str | None]  # the rule that set it aside (applai.screening)
     screen_note: Mapped[str | None]  # remote or grande_couronne: Triage marks it down
     source: Mapped[str | None]  # where the watch found it: alert_linkedin…
+    board: Mapped[str | None]  # the job board its alert says it comes via (Google's)
     received_at: Mapped[datetime | None]  # when the job alert listing it was received
     description: Mapped[str | None]  # the offer's text; Triage refuses an offer without it
     salary: Mapped[str | None]  # as the offer's page gives it
     logo: Mapped[str | None]  # a file name in the data directory's logos/; none: initials
     detail_error: Mapped[str | None]  # why the offer's page could not be read (applai.details)
+    detail_failed_at: Mapped[datetime | None]  # the last of them, never cleared
     page_failures: Mapped[int] = mapped_column(server_default="0")  # by the extension
     page_failed_at: Mapped[datetime | None]  # the last of them (applai.browser)
     state: Mapped[str] = mapped_column(server_default="new")
@@ -155,6 +157,8 @@ class Application(Base):
     user_id: Mapped[int]
     offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"), unique=True)
     state: Mapped[str]
+    form_url: Mapped[str | None]  # where the offer's form lives (applai.capture)
+    form_url_error: Mapped[str | None]  # why it was not found: the candidate pastes it
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=_utc_now, onupdate=_utc_now)
 

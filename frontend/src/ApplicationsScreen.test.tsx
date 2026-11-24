@@ -83,6 +83,35 @@ describe("the Applications dashboard", () => {
     expect(ownRow?.queryByText(words["applications.origin.old_workflow"])).toBeNull();
   });
 
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("shows why the form was not found and sends a pasted URL, in %s", async (language, words) => {
+    const error = "The offer's page links to no form: paste the form's URL.";
+    const created = aRow({ id: 7, offer_id: 7, state: "created", form_url_error: error });
+    const lever = "https://jobs.lever.co/brindille-logistique/chef-de-quai";
+    const calls = fakeApi({
+      ...reviewRoutes(),
+      ...applicationsRoutes({ in_progress: [created] }),
+      "PUT /api/applications/7/form-url": { form_url: lever, form_url_error: null },
+    });
+    render(<App />);
+    if (language === "en") fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
+    fireEvent.click(screen.getByRole("button", { name: words["nav.applications"] }));
+    const row = within(await screen.findByRole("listitem"));
+
+    expect(row.getByText(error)).toBeTruthy();
+    fireEvent.change(row.getByLabelText(words["applications.form_url.label"]), { target: { value: lever } });
+    fireEvent.click(row.getByRole("button", { name: words["applications.form_url.save"] }));
+
+    const link = await row.findByRole("link", { name: words["applications.form"] });
+    expect(link.getAttribute("href")).toBe(lever);
+    expect(row.queryByText(error)).toBeNull();
+    expect(calls.filter((call) => call.method === "PUT")).toEqual([
+      { method: "PUT", path: "/api/applications/7/form-url", body: { url: lever } },
+    ]);
+  });
+
   it("stays one column on a phone: stacked groups, wrapping rows, no grid", async () => {
     await openScreen();
 

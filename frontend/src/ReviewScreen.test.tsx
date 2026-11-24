@@ -1,9 +1,12 @@
+import { existsSync, readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { DECISION, aCard, aScan, fakeApi, reviewRoutes } from "./fake-api";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
+
+const indexCss = readFileSync(existsSync("src/index.css") ? "src/index.css" : "frontend/src/index.css", "utf8");
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -98,6 +101,19 @@ describe("a card", () => {
     for (const block of [pour, contre]) expect(block?.className).toMatch(/basis-70\b.*min-w-0/);
     expect(pour?.parentElement?.className).toMatch(/\bflex-wrap\b/);
     expect(screen.getByRole("main").className).toMatch(/\bmin-w-0\b|\boverflow-x-clip\b/);
+  });
+
+  it("gives the card's decision buttons cursor: pointer and a hover class", async () => {
+    await openScreen();
+    const card = within(screen.getByRole("article", { name: /Ingénieur logiciel/ }));
+
+    for (const key of ["card.notInterested", "card.later", "card.interested"] as const) {
+      const button = card.getByRole("button", { name: fr[key] });
+      expect(button.className).toMatch(/\bcursor-pointer\b/);
+      expect(button.className).toMatch(/\bhover:/);
+    }
+    expect(indexCss).toMatch(/button:not\(:disabled\)[\s\S]*cursor:\s*pointer/);
+    expect(indexCss).toMatch(/button:disabled[\s\S]*cursor:\s*not-allowed/);
   });
 });
 
@@ -319,6 +335,53 @@ describe("not interested", () => {
     expect(screen.queryByText(fr["decline.title"])).toBeNull();
     expect(screen.getByRole("heading", { name: "Ingénieur logiciel" })).toBeTruthy();
     expect(decisions(calls)).toEqual([]);
+  });
+
+  it("gives enabled buttons cursor: pointer and a hover class, and disabled Save cursor: not-allowed", async () => {
+    await openScreen();
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+
+    const cancel = screen.getByRole("button", { name: fr["decline.cancel"] });
+    const reasonPill = screen.getByRole("button", { name: new RegExp(fr["reason.company"]) });
+    for (const button of [cancel, reasonPill]) {
+      expect(button.className).toMatch(/\bcursor-pointer\b/);
+      expect(button.className).toMatch(/\bhover:/);
+    }
+
+    expect(save().disabled).toBe(true);
+    expect(save().className).toContain("disabled:cursor-not-allowed");
+    expect(save().className).not.toMatch(/(?:^|\s)hover:/);
+
+    fireEvent.click(reasonPill);
+    expect(save().disabled).toBe(false);
+    expect(save().className).toMatch(/\bcursor-pointer\b/);
+    expect(save().className).toMatch(/\bhover:/);
+  });
+
+  it("shows a hint while no reason is chosen with a note typed, then hides it and saves once chosen", async () => {
+    const calls = await openScreen();
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+
+    const note = screen.getByLabelText(fr["decline.note"]);
+    fireEvent.change(note, { target: { value: "Salaire non indiqué" } });
+
+    expect(fr["decline.needReason"]).toBe("Choisis au moins une raison");
+    expect(screen.getByText(fr["decline.needReason"])).toBeTruthy();
+    expect(save().disabled).toBe(true);
+    fireEvent.click(save());
+    fireEvent.keyDown(note, { key: "Enter" });
+    expect(decisions(calls)).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(fr["reason.salary"]) }));
+    expect(screen.queryByText(fr["decline.needReason"])).toBeNull();
+    expect(save().disabled).toBe(false);
+
+    fireEvent.click(save());
+    await waitFor(() => expect(decisions(calls)).toHaveLength(1));
+    expect(decisions(calls)[0]).toEqual([
+      "/api/offers/1/decision",
+      { decision: "not_interested", reasons: ["salary"], note: "Salaire non indiqué" },
+    ]);
   });
 });
 

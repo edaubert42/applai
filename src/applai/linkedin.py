@@ -89,24 +89,38 @@ def describe_linkedin_offers(
     offers = [offer for offer in _new_offers(session, user_id) if _is_linkedin(offer.url)]
     command = os.environ.get(COMMAND_VARIABLE, "").strip()
     if offers and not command:
+        message = f"{COMMAND_VARIABLE} is not set: it starts the LinkedIn MCP server"
         for offer in offers:
-            _fail(
-                describing,
-                offer,
-                f"{COMMAND_VARIABLE} is not set: it starts the LinkedIn MCP server",
-            )
+            offer.detail_error = message
+            offer.detail_failed_at = now
+        describing.errors.append(message)  # once, not once per offer
         session.commit()
         return describing
     for offer in offers:
         match = _JOB_ID.search(urlsplit(offer.url).path)
         if match is None:
-            _fail(describing, offer, "the LinkedIn URL has no job id")
+            _fail(describing, offer, "the LinkedIn URL has no job id", now)
             continue
         if _may_read(session, user_id, now):
             _describe(session, offer, command, match.group(1), now, describing)
         break
     session.commit()
     return describing
+
+
+def read_linkedin_offer(session: Session, offer: Offer, url: str, now: datetime) -> str:
+    """Read one LinkedIn offer URL through the MCP server within pacing; return its text."""
+    command = os.environ.get(COMMAND_VARIABLE, "").strip()
+    if not command:
+        raise LinkedInError(f"{COMMAND_VARIABLE} is not set: it starts the LinkedIn MCP server")
+    match = _JOB_ID.search(urlsplit(url).path)
+    if match is None:
+        raise LinkedInError("the LinkedIn URL has no job id")
+    if not _may_read(session, offer.user_id, now):
+        raise LinkedInError("LinkedIn's daily limit or read interval is reached")
+    session.add(LinkedInRead(user_id=offer.user_id, offer_id=offer.id, read_at=now))
+    session.commit()
+    return _posting(call_tool(command, TOOL, {"job_id": match.group(1)}))
 
 
 def _describe(
@@ -118,7 +132,7 @@ def _describe(
     try:
         offer.description = _posting(call_tool(command, TOOL, {"job_id": job_id}))
     except LinkedInError as error:
-        _fail(into, offer, str(error))
+        _fail(into, offer, str(error), now)
         return
     offer.detail_error = None
     move(session, offer, OfferState.DESCRIBED, Actor.WATCH)
@@ -138,15 +152,26 @@ def _new_offers(session: Session, user_id: int) -> Sequence[Offer]:
     ).all()
 
 
+def reads_today(session: Session, now: datetime, user_id: int = LOCAL_USER_ID) -> int:
+    """The reads made on now's UTC day, failed calls included; now has no time zone."""
+    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return (
+        session.scalar(
+            select(func.count())
+            .select_from(LinkedInRead)
+            .where(LinkedInRead.user_id == user_id, LinkedInRead.read_at >= day)
+        )
+        or 0
+    )
+
+
 def _may_read(session: Session, user_id: int, now: datetime) -> bool:
     """Whether a read now stays within the daily limit and the interval between reads."""
-    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    mine = LinkedInRead.user_id == user_id
-    last = session.scalar(select(func.max(LinkedInRead.read_at)).where(mine))
-    today = session.scalar(
-        select(func.count()).select_from(LinkedInRead).where(mine, LinkedInRead.read_at >= day)
+    last = session.scalar(
+        select(func.max(LinkedInRead.read_at)).where(LinkedInRead.user_id == user_id)
     )
-    return (today or 0) < MAX_READS_PER_DAY and (last is None or now - last >= MIN_INTERVAL)
+    within_interval = last is None or now - last >= MIN_INTERVAL
+    return reads_today(session, now, user_id) < MAX_READS_PER_DAY and within_interval
 
 
 def _posting(text: str) -> str:
@@ -174,9 +199,10 @@ async def _call(argv: list[str], tool: str, arguments: dict[str, Any], timeout: 
     return "".join(block.text for block in result.content if isinstance(block, TextContent))
 
 
-def _fail(describing: Describing, offer: Offer, error: str) -> None:
+def _fail(describing: Describing, offer: Offer, error: str, failed_at: datetime) -> None:
     """Record on the offer why it could not be read; it stays new."""
     offer.detail_error = error
+    offer.detail_failed_at = failed_at
     describing.errors.append(f"offer {offer.id}: {error}")
 
 
