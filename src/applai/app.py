@@ -33,6 +33,7 @@ from applai.capture import find_form
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
 from applai.drafting import DraftingError, draft_in_background, redraft_answer
+from applai.filling import plan_in_background
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferState, Triage
 from applai.orchestrator import ApplicationState, TransitionError
 from applai.profile import Profile, ProfileError, load_profile
@@ -286,8 +287,11 @@ def decide_answer(
 
 
 @api.post("/applications/{application_id}/answers-checked", status_code=204)
-def answers_checked(application_id: int, session: _Session) -> None:
-    """Close the answers gate: 409 until every answer is accepted or edited."""
+def answers_checked(
+    application_id: int, session: _Session, request: Request, later: BackgroundTasks
+) -> None:
+    """Close the answers gate: 409 until every answer is accepted or edited. The fill is
+    then planned in the background with the watch's runner (applai.filling)."""
     try:
         with session.begin():
             correct.check_answers(session, LOCAL_USER_ID, application_id)
@@ -295,6 +299,30 @@ def answers_checked(application_id: int, session: _Session) -> None:
         raise HTTPException(404, "no such application") from None
     except (correct.GateRefused, TransitionError) as error:
         raise HTTPException(409, str(error)) from None
+    watch: Watch | None = request.app.state.watch
+    if watch is not None:
+        s = request.app.state
+        later.add_task(plan_in_background, s.engine, s.data_dir, watch.runner, application_id)
+
+
+@api.post("/applications/{application_id}/fill", status_code=202)
+def plan_again(
+    application_id: int, session: _Session, request: Request, later: BackgroundTasks
+) -> None:
+    """Plan an answers_checked application's fill again, after a failure, in the background;
+    the extension is asked to fill it at once."""
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    if application.state != ApplicationState.ANSWERS_CHECKED:
+        raise HTTPException(409, f"Application {application_id} is not waiting for Filling.")
+    watch: Watch | None = request.app.state.watch
+    if watch is None:
+        raise HTTPException(503, "The watch is off: ApplAI was started without it.")
+    application.fill_error, application.fill_failed_at = None, None
+    session.commit()
+    s = request.app.state
+    later.add_task(plan_in_background, s.engine, s.data_dir, watch.runner, application_id)
 
 
 # The type a logo is served with, by file extension; the first type of an extension wins.
@@ -365,7 +393,7 @@ _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 # The ApplAI extension's routes (applai.browser), whatever the method.
-_EXTENSION_PATHS = re.compile(r"/api/browser/(pages|forms)(/[0-9]+(/failure)?)?")
+_EXTENSION_PATHS = re.compile(r"/api/browser/(pages|forms|fills)(/.*)?")
 
 
 class SameOriginWrites:

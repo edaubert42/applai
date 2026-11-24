@@ -19,24 +19,33 @@ is asked for again only after the next scan; after MAX_FORM_FAILURES its URL is 
 candidate pastes one, which counts from zero again.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
 page received for one is read for its text, and the offer is triaged again in the background.
+
+Filling: an answers_checked application with a fill plan (applai.filling) is listed with its
+actions; the extension fetches the files they attach, fills the form without sending it,
+then sends back each field's state and a screenshot, and the application moves to filled. A
+fill that fails is kept as its fill_error, and asked for again only after the next scan.
 """
 
+import base64
+import mimetypes
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from pydantic import BaseModel, Field
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from applai import details, reread
 from applai.agents import AgentRunner
-from applai.capture import MAX_FIELDS, PASTE, FormField, read_fields
+from applai.capture import MAX_FIELDS, MAX_LABEL, PASTE, FormField, read_fields
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
 from applai.drafting import draft_in_background
+from applai.filling import FillAction, Slot, file_path
 from applai.google import describe_google_offer, on_google
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Scan
 from applai.orchestrator import Actor, ApplicationState, TransitionError, move
@@ -54,6 +63,13 @@ _FORM_FAILURES = {
     "not_loaded": "did not load",
     "not_read": "could not be read",
     "no_field": "shows no field ApplAI recognizes",
+}
+MAX_SCREENSHOT = 20_000_000  # characters of base64: a full page's PNG
+# Why a form was not filled, as the extension reports it, in the error the dashboard shows.
+_FILL_FAILURES = {
+    "not_allowed": "is on a site the ApplAI extension does not reach",
+    "not_loaded": "did not load",
+    "not_filled": "could not be filled",
 }
 
 router = APIRouter(prefix="/api/browser")
@@ -341,6 +357,137 @@ def _form_failed(application: Application, reason: str, now: datetime) -> None:
     if application.form_failures >= MAX_FORM_FAILURES:
         application.form_url = None
         application.form_url_error = f"The form {_FORM_FAILURES[reason]}: {PASTE}."
+
+
+class FillToDo(BaseModel):
+    application_id: int
+    url: str
+    actions: list[FillAction]  # none sends: ADR 0003
+
+
+_Text = Annotated[str, Field(max_length=MAX_TEXT)]
+
+
+class FieldFilled(BaseModel):
+    """One field as the extension left it: its value, the file attached, or why not filled."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: int = Field(ge=0)
+    value: _Text | list[_Text] | None = None
+    file: str | None = Field(None, max_length=MAX_LABEL)
+    unfilled: str | None = Field(None, max_length=MAX_LABEL)
+
+
+class FormFilled(BaseModel):
+    fields: list[FieldFilled] = Field(max_length=MAX_FIELDS)
+    screenshot: str | None = Field(None, max_length=MAX_SCREENSHOT)  # a PNG, in base64
+
+
+class FillFailed(BaseModel):
+    reason: Literal["not_allowed", "not_loaded", "not_filled"]
+
+
+def _fill_waiting(application: Application, last_scan: datetime | None) -> bool:
+    """answers_checked with a plan, and not failed since the last scan finished."""
+    failed = application.fill_failed_at
+    return (
+        application.user_id == LOCAL_USER_ID
+        and application.state == ApplicationState.ANSWERS_CHECKED
+        and application.fill_plan is not None
+        and application.form_url is not None
+        and (failed is None or (last_scan is not None and last_scan > failed))
+    )
+
+
+def _waiting_fill(session: Session, application_id: int) -> Application:
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    if not _fill_waiting(application, _last_scan(session)):
+        raise HTTPException(409, f"Application {application_id} is not waiting to be filled.")
+    return application
+
+
+@router.get("/fills")
+def fills(request: Request) -> list[FillToDo]:
+    """The applications waiting for the extension to fill their form."""
+    with Session(request.app.state.engine) as session:
+        last_scan = _last_scan(session)
+        checked = session.scalars(
+            select(Application)
+            .where(Application.state == ApplicationState.ANSWERS_CHECKED)
+            .order_by(Application.id)
+        )
+        return [
+            FillToDo(application_id=a.id, url=a.form_url, actions=_actions(a.fill_plan))
+            for a in checked
+            if a.form_url is not None and a.fill_plan is not None and _fill_waiting(a, last_scan)
+        ]
+
+
+def _actions(plan: list[dict[str, Any]]) -> list[FillAction]:
+    return [FillAction.model_validate(action) for action in plan]
+
+
+@router.get("/fills/{application_id}/files/{slot}")
+def fill_file(application_id: int, slot: Slot, request: Request) -> FileResponse:
+    """The CV or the cover letter PDF a waiting application's plan attaches; else a 404."""
+    data_dir: Path = request.app.state.data_dir
+    with Session(request.app.state.engine) as session:
+        plan = _waiting_fill(session, application_id).fill_plan or []
+    if not any(a["kind"] == "attach" and a["value"] == slot for a in plan):
+        raise HTTPException(404, f"The fill plan attaches no {slot}.")
+    try:
+        path = file_path(data_dir, application_id, slot)
+    except ProfileError as error:  # its message holds no value of the profile
+        raise HTTPException(500, str(error)) from None
+    if path is None:
+        raise HTTPException(404, f"No {slot} file.")
+    kind = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=kind, filename=path.name)
+
+
+@router.post("/fills/{application_id}", status_code=204)
+def fill_sent(application_id: int, body: FormFilled, request: Request) -> None:
+    """Store the form as the extension filled it, and its screenshot; move it to filled."""
+    screenshot = _png(body.screenshot) if body.screenshot else None
+    with Session(request.app.state.engine) as session:
+        application = _waiting_fill(session, application_id)
+        application.filled_fields = [field.model_dump() for field in body.fields]
+        application.fill_error = None
+        try:
+            move(session, application, ApplicationState.FILLED, Actor.FILLING)
+        except TransitionError as error:  # another post moved it meanwhile
+            raise HTTPException(409, str(error)) from None
+        if screenshot is not None:
+            directory = request.app.state.data_dir / "applications" / str(application_id)
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "filled.png").write_bytes(screenshot)
+        session.commit()
+
+
+def _png(screenshot: str) -> bytes:
+    try:
+        png = base64.b64decode(screenshot, validate=True)
+    except ValueError:
+        png = b""
+    if not png.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(422, "The screenshot is not a PNG in base64.")
+    return png
+
+
+@router.post("/fills/{application_id}/failure", status_code=204)
+def fill_failed(application_id: int, body: FillFailed, request: Request) -> None:
+    """Record a form the extension could not fill; asked for again after the next scan."""
+    with Session(request.app.state.engine) as session:
+        application = _waiting_fill(session, application_id)
+        application.fill_error = (
+            f"Filling failed: the form {_FILL_FAILURES[body.reason]}. Check that the ApplAI"
+            " extension is enabled in Chrome; the form is filled again after the next scan."
+        )
+        application.fill_failed_at = utc(request.app.state.clock())
+        session.commit()
 
 
 @router.get("/status")
