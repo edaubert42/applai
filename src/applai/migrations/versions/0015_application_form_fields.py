@@ -1,14 +1,14 @@
 """Applications keep their form's fields, and count the forms the extension could not read.
 
-Revision ID: 0014
-Revises: 0013
+Revision ID: 0015
+Revises: 0014
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0014"
-down_revision: str | None = "0013"
+revision = "0015"
+down_revision: str | None = "0014"
 branch_labels: str | None = None
 depends_on: str | None = None
 
