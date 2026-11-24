@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from applai.details import MAX_PAGE_FAILURES
+from applai.details import ALERT_ONLY, MAX_PAGE_FAILURES
 from applai.models import Label, Offer, OfferState, Triage
 from applai.orchestrator import Actor, move
 
@@ -147,7 +147,8 @@ def cards(session: Session, user_id: int, view: View, min_score: int) -> list[Ca
 
 def _card(offer: Offer, triage: Triage | None) -> Card:
     card = Card.model_validate(offer)
-    card.full_text_read = offer.page_failures < MAX_PAGE_FAILURES
+    from_alert = (offer.description or "").startswith(ALERT_ONLY)
+    card.full_text_read = offer.page_failures < MAX_PAGE_FAILURES and not from_alert
     if offer.state == OfferState.SCREENED_OUT:
         card.rule = offer.screened_rule
     if triage is not None:

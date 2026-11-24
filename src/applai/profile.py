@@ -113,6 +113,7 @@ class TriageRules(_Section):
     exclude_title_words: tuple[str, ...]  # a word or a phrase of the title, whole
     max_years_required: int
     stretch_locations: tuple[str, ...]  # pass, and Triage marks them down
+    trusted_boards: tuple[str, ...] = ()  # boards ApplAI may read a Google offer from
 
 
 class Fact(_Section):

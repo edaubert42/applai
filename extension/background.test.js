@@ -37,7 +37,17 @@ test("it asks ApplAI, fetches each page with the browser's session, and posts it
   ]);
 });
 
-test("it fetches no page outside JobTeaser, whatever ApplAI asks", async () => {
+test("it fetches Google offer pages with the browser's session too", async () => {
+  const google = "https://www.google.fr/search?q=Data+engineer&udm=8&htidocid=1";
+  const headers = { "Content-Type": "application/json" };
+  assert.deepEqual(await readWith([{ offer_id: 9, url: google }]), [
+    [`${APPLAI}/api/browser/pages`, {}],
+    [google, { credentials: "include" }],
+    [`${APPLAI}/api/browser/pages/9`, { method: "POST", headers, body: JSON.stringify({ html: `<html>${google}</html>` }) }],
+  ]);
+});
+
+test("it fetches no page outside JobTeaser and Google, whatever ApplAI asks", async () => {
   const calls = await readWith([{ offer_id: 8, url: "https://jobs.example.org/8" }]);
 
   assert.deepEqual(calls, [[`${APPLAI}/api/browser/pages`, {}]]);
