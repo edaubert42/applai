@@ -50,6 +50,7 @@ from applai.google import describe_google_offer, on_google
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Scan
 from applai.orchestrator import Actor, ApplicationState, TransitionError, move
 from applai.profile import Profile, ProfileError, load_profile
+from applai.review_form import review_in_background
 from applai.scan import Clock, Watch
 from applai.screening import screen_offer
 from applai.triage import retriage_offer, triage_offer
@@ -449,10 +450,14 @@ def fill_file(application_id: int, slot: Slot, request: Request) -> FileResponse
 
 
 @router.post("/fills/{application_id}", status_code=204)
-def fill_sent(application_id: int, body: FormFilled, request: Request) -> None:
-    """Store the form as the extension filled it, and its screenshot; move it to filled."""
+def fill_sent(
+    application_id: int, body: FormFilled, request: Request, later: BackgroundTasks
+) -> None:
+    """Store the form as the extension filled it, and its screenshot; move it to filled,
+    then review it in the background with the watch's runner (applai.review_form)."""
     screenshot = _png(body.screenshot) if body.screenshot else None
-    with Session(request.app.state.engine) as session:
+    state = request.app.state
+    with Session(state.engine) as session:
         application = _waiting_fill(session, application_id)
         application.filled_fields = [field.model_dump() for field in body.fields]
         application.fill_error = None
@@ -461,10 +466,14 @@ def fill_sent(application_id: int, body: FormFilled, request: Request) -> None:
         except TransitionError as error:  # another post moved it meanwhile
             raise HTTPException(409, str(error)) from None
         if screenshot is not None:
-            directory = request.app.state.data_dir / "applications" / str(application_id)
+            directory = state.data_dir / "applications" / str(application_id)
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "filled.png").write_bytes(screenshot)
         session.commit()
+    if state.watch is not None:
+        later.add_task(
+            review_in_background, state.engine, state.data_dir, state.watch.runner, application_id
+        )
 
 
 def _png(screenshot: str) -> bytes:

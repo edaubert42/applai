@@ -172,6 +172,12 @@ class Application(Base):
     filled_fields: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     fill_error: Mapped[str | None]  # why the last plan or fill failed, until a fill succeeds
     fill_failed_at: Mapped[datetime | None]  # the last fill the extension failed
+    # Review (applai.review_form): problems found on the filled form, and the run that checked it.
+    review_problems: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    review_agent_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agent_runs.id", use_alter=True)
+    )
+    review_error: Mapped[str | None]  # why the last Review failed, until a review succeeds
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=_utc_now, onupdate=_utc_now)
 
