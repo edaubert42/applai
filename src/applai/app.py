@@ -26,13 +26,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from applai import browser
+from applai import browser, reread
 from applai.applications import Board, board
 from applai.capture import find_form
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
-from applai.models import LOCAL_USER_ID, Application, Offer, OfferState
+from applai.models import LOCAL_USER_ID, Application, Offer, OfferState, Triage
 from applai.orchestrator import ApplicationState, TransitionError
+from applai.reread import RereadRefused
 from applai.review import Card, Decision, DecisionRequest, OfferNotFound, View, cards, decide
 from applai.scan import Clock, Scanner, ScanRefused, ScanStatus, Watch, local_now, run_scan
 from applai.services import ServicesStatus, services_status
@@ -147,6 +148,29 @@ def decision(
     if body.decision == Decision.INTERESTED and application_id and watch:
         later.add_task(find_form, request.app.state.engine, application_id, watch.http)
     return recorded
+
+
+@api.post("/offers/{offer_id}/reread", status_code=202)
+def reread_offer(offer_id: int, session: _Session, min_score: _MinScore, request: Request) -> None:
+    """Ask the extension for the page of an offer described from its alert only, once more.
+
+    409 when the offer cannot be read again, one is pending, or the extension is not connected
+    (applai.reread); the extension answers within a minute or so, the card shows the result.
+    """
+    offer = session.scalar(
+        select(Offer).where(Offer.id == offer_id, Offer.user_id == LOCAL_USER_ID)
+    )
+    if offer is None:
+        raise HTTPException(404, "no such offer")
+    triage = session.scalar(select(Triage).where(Triage.offer_id == offer_id))
+    try:
+        reread.request(offer, triage, min_score, browser.utc(request.app.state.clock()))
+    except RereadRefused as error:
+        raise HTTPException(409, str(error)) from None
+    if not browser.is_connected(request):
+        session.rollback()
+        raise HTTPException(409, "The ApplAI extension is not connected: open Chrome.")
+    session.commit()
 
 
 class FormUrl(BaseModel):
