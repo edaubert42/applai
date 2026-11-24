@@ -135,6 +135,7 @@ def test_identity_and_checked_answers_are_planned_by_code_and_only_choices_ask_s
 
     plan_fill(AgentRunner(no_run), engine, data_dir, plain, profile)
     plan_fill(AgentRunner(sonnet), engine, data_dir, ambiguous, profile)
+    chosen = _planned(engine, ambiguous)
     with pytest.raises(AgentError, match="schema_mismatch"):
         plan_fill(AgentRunner(invented), engine, data_dir, ambiguous, profile)
 
@@ -146,8 +147,8 @@ def test_identity_and_checked_answers_are_planned_by_code_and_only_choices_ask_s
     }  # fmt: skip
     [spec] = sonnet.specs
     assert "Contrat souhaité" in spec.input and WHY not in spec.input
-    chosen = _planned(engine, ambiguous)  # the invented choice left it as it was
     assert chosen[7] == ("choose", ["CDI"]) and 8 not in chosen
+    assert _get(engine, ambiguous).fill_plan is None  # the invented choice dropped the old plan
     with Session(engine) as session:
         run, _ = session.scalars(select(AgentRun).where(AgentRun.agent == "filling"))
         offer_id = session.get_one(Application, ambiguous).offer_id
@@ -167,6 +168,37 @@ def test_a_name_field_drafting_leaves_to_identity_is_filled_with_the_name(
 
     assert _planned(engine, alone) == {0: ("fill", "Jeanne Dupont")}
     assert _planned(engine, with_first) == {0: ("fill", "Jeanne"), 1: ("fill", "Dupont")}
+
+
+def test_a_label_that_is_not_the_candidates_own_name_or_phone_is_left_empty(
+    data_dir: Path, engine: Engine
+):
+    profile = load_profile(data_dir)
+    fields = [_field("Nom de l'école", "text"), _field("Company name", "text"),
+              _field("Êtes-vous mobile ?", "text"), _field("Nom complet *", "text"),
+              _field("Numéro de mobile", "text")]  # fmt: skip
+    application_id = _application(engine, fields)
+
+    plan_fill(AgentRunner(FakeBackend([])), engine, data_dir, application_id, profile)
+
+    assert _planned(engine, application_id) == {
+        3: ("fill", "Jeanne Dupont"),
+        4: ("fill", profile.identity.phone),
+    }
+
+
+def test_a_failed_replan_drops_the_old_plan_so_the_extension_is_not_offered_it(
+    data_dir: Path, engine: Engine
+):
+    profile = load_profile(data_dir)
+    application_id = _application(engine, [*IDENTITY, CONTRACT], fill_plan=PLAN)
+    invented = _choices({"6": ["Freelance"]})
+
+    with pytest.raises(AgentError):
+        plan_fill(AgentRunner(FakeBackend([invented])), engine, data_dir, application_id, profile)
+
+    failed = _get(engine, application_id)
+    assert (failed.fill_plan, "Filling failed" in (failed.fill_error or "")) == (None, True)
 
 
 def _pdf_text(pdf: bytes) -> str:

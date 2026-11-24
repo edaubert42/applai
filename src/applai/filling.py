@@ -47,12 +47,15 @@ _IDENTITY: list[tuple[re.Pattern[str], Callable[[Identity], str]]] = [
     (_FIRST_NAME, lambda i: i.first_name),
     (re.compile(r"\b(nom de famille|last name|family name|surname)\b"), lambda i: i.last_name),
     (re.compile(r"\b(e ?mail|courriel)\b"), lambda i: i.email),
-    (re.compile(r"\b(telephone|phone|tel|mobile|portable)\b"), lambda i: i.phone),
+    (re.compile(r"\b(telephone|phone|tel)\b|\b(numero|number)\b.*\b(mobile|portable)\b"
+                r"|^(mobile|portable)$"), lambda i: i.phone),
     (re.compile(r"\b(ville|city)\b"), lambda i: i.city),
 ]  # fmt: skip
-# Any other name, as Drafting leaves it to identity: the last name when the form also asks
-# for the first one, else the full name.
-_NAME = re.compile(r"\b(nom|name)\b")
+# The candidate's own name, as Drafting leaves it to identity: the last name when the form
+# also asks for the first one, else the full name. "Nom de l'école" is not one.
+_NAME = re.compile(
+    r"^((votre|your) )?(nom|name|nom complet|full name)$|^(nom et prenom|prenom et nom)$"
+)
 _CV = re.compile(r"\b(cv|resume|curriculum)\b")
 
 SYSTEM_PROMPT = """\
@@ -208,11 +211,12 @@ def plan_fill(
 
 
 def record_failure(database: Engine, application_id: int, error: str) -> None:
-    """Keep why Filling failed on an application still answers_checked."""
+    """Keep why Filling failed on an application still answers_checked, and drop its plan."""
     with Session(database) as session, session.begin():
         application = session.get_one(Application, application_id)
         if application.state == ApplicationState.ANSWERS_CHECKED:
             application.fill_error = f"Filling failed: {error}"
+            application.fill_plan = None  # an old plan is not offered after a failed re-plan
 
 
 def plan_in_background(
