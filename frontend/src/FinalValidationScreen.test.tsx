@@ -1,0 +1,157 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import App from "./App";
+import type { FormReview } from "./api";
+import { aFormReview, aReviewedField, aRow, applicationsRoutes, fakeApi, reviewRoutes } from "./fake-api";
+import en from "./locales/en.json";
+import fr from "./locales/fr.json";
+
+afterEach(() => { vi.unstubAllGlobals(); localStorage.clear(); });
+
+const wordsOf = (language: "fr" | "en") => (language === "en" ? en : fr);
+
+async function openValidation(routes: Record<string, unknown> = {}, language: "fr" | "en" = "fr", review: FormReview = aFormReview()) {
+  const row = aRow({ id: review.application_id, state: review.state, form_url: review.form_url });
+  const calls = fakeApi({
+    ...reviewRoutes(),
+    ...applicationsRoutes({ waiting: [row] }),
+    [`GET /api/applications/${review.application_id}/review`]: review,
+    ...routes,
+  });
+  if (language === "en") localStorage.setItem("applai.language", "en");
+  const words = wordsOf(language);
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: words["nav.applications"] }));
+  fireEvent.click(await screen.findByRole("button", { name: words["validation.open"] }));
+  await screen.findByRole("heading", { name: review.title });
+  return { calls, words };
+}
+
+describe("FinalValidationScreen", () => {
+  it("shows Check only for reviewed, form_checked and validated rows, and Back reloads the board", async () => {
+    const calls = fakeApi({
+      ...reviewRoutes(),
+      ...applicationsRoutes({
+        in_progress: [aRow({ id: 5, offer_id: 5, state: "filled" })],
+        waiting: [
+          aRow({ id: 1, offer_id: 1, state: "reviewed" }), aRow({ id: 2, offer_id: 2, state: "form_checked" }),
+          aRow({ id: 3, offer_id: 3, state: "validated" }), aRow({ id: 4, offer_id: 4, state: "drafted" }),
+        ],
+        sent: [aRow({ id: 6, offer_id: 6, state: "sent" })],
+      }),
+      "GET /api/applications/1/review": aFormReview(),
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: fr["nav.applications"] }));
+    const buttons = await screen.findAllByRole("button", { name: fr["validation.open"] });
+    expect(buttons).toHaveLength(3);
+
+    fireEvent.click(buttons[0] as HTMLElement);
+    await screen.findByRole("heading", { name: "Chef de quai" });
+    fireEvent.click(screen.getByRole("button", { name: fr["correct.back"] }));
+    await screen.findAllByRole("region");
+    expect(calls.filter((c) => c.method === "GET" && c.path === "/api/applications")).toHaveLength(2);
+  });
+
+  it.each(["fr", "en"] as const)("shows offer links, problems, fields, PDFs, missing file and screenshot in %s", async (language) => {
+    const review = aFormReview({
+      fields: [
+        aReviewedField(),
+        aReviewedField({ field: 1, label: "Compétences", type: "checkbox", value: ["Python", "SQL"] }),
+        aReviewedField({ field: 2, label: "CV", type: "file", value: null, file: "cv-camille.pdf", slot: "cv" }),
+        aReviewedField({ field: 3, label: "Lettre", type: "file", value: null, file: null, slot: "cover_letter" }),
+      ],
+      problems: [
+        { severity: "blocking", field: "Lettre", message: "Fichier obligatoire absent." },
+        { severity: "warning", field: "Compétences", message: "Vérifier l’ordre." },
+      ],
+    });
+    const { words } = await openValidation({}, language, review);
+
+    expect(screen.getByRole("link", { name: words["applications.offer"] }).getAttribute("href")).toBe(review.url);
+    expect(screen.getByRole("link", { name: words["applications.form"] }).getAttribute("href")).toBe(review.form_url);
+    expect(screen.getByText(words["validation.severity.blocking"])).toBeTruthy();
+    expect(screen.getByText("Fichier obligatoire absent.")).toBeTruthy();
+    expect(screen.getByText(words["validation.severity.warning"])).toBeTruthy();
+    expect(screen.getByText("Vérifier l’ordre.")).toBeTruthy();
+    expect(screen.getByText("camille@example.org")).toBeTruthy();
+    expect(screen.getByText("Python, SQL")).toBeTruthy();
+    expect(screen.getByText("cv-camille.pdf")).toBeTruthy();
+    expect(screen.getByText(words["validation.field.missing_file"])).toBeTruthy();
+    const pdfs = screen.getAllByRole("link", { name: words["validation.field.see_pdf"] });
+    expect(pdfs.map((a) => a.getAttribute("href"))).toEqual(["/api/applications/1/files/cv", "/api/applications/1/files/cover_letter"]);
+    expect(pdfs[0]?.getAttribute("target")).toBe("_blank");
+    expect(pdfs[0]?.getAttribute("rel")).toBe("noreferrer");
+    expect(screen.getByAltText(words["validation.screenshot.alt"]).getAttribute("src")).toBe("/api/applications/1/screenshot");
+  });
+
+  it("shows clean message when no problem, omits screenshot when absent, and alerts on load error", async () => {
+    const { words } = await openValidation({}, "fr", aFormReview({ problems: [], has_screenshot: false, form_url: null }));
+    expect(screen.getByText(words["validation.problems.none"])).toBeTruthy();
+    expect(screen.queryByAltText(words["validation.screenshot.alt"])).toBeNull();
+    expect(screen.queryByRole("link", { name: words["applications.form"] })).toBeNull();
+
+    vi.unstubAllGlobals();
+    fakeApi({ ...reviewRoutes(), ...applicationsRoutes({ waiting: [aRow({ state: "reviewed" })] }) });
+    fireEvent.click(screen.getByRole("button", { name: words["correct.back"] }));
+    fireEvent.click(await screen.findByRole("button", { name: fr["validation.open"] }));
+    expect((await screen.findByRole("alert")).textContent).toBe(fr["validation.error"]);
+  });
+
+  it.each(["fr", "en"] as const)("walks reviewed -> form_checked -> validated -> sent and reloads dashboard in %s", async (language) => {
+    let board = applicationsRoutes({ waiting: [aRow({ state: "reviewed" })] });
+    const review = aFormReview({ form_url: null });
+    const { calls, words } = await openValidation({
+      "GET /api/applications": () => board["GET /api/applications"],
+      "POST /api/applications/1/form-checked": new Response(null, { status: 204 }),
+      "POST /api/applications/1/validate": new Response(null, { status: 204 }),
+      "POST /api/applications/1/sent": () => {
+        board = applicationsRoutes({ sent: [aRow({ state: "sent" })] });
+        return new Response(null, { status: 204 });
+      },
+    }, language, review);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Téléphone/ }));
+    fireEvent.click(screen.getByRole("button", { name: words["validation.form_checked"] }));
+    const validateBtn = await screen.findByRole("button", { name: words["validation.validate"] });
+    expect(calls.filter((c) => c.method === "POST")).toEqual([
+      { method: "POST", path: "/api/applications/1/form-checked", body: { corrected_fields: ["Téléphone"] } },
+    ]);
+
+    fireEvent.click(validateBtn);
+    const sentBtn = await screen.findByRole("button", { name: words["validation.mark_sent"] });
+    expect(screen.getByRole("link", { name: words["validation.open_form"] }).getAttribute("href")).toBe(review.url);
+    expect(screen.queryByRole("button", { name: /submit|soumett|autoris|authoriz/i })).toBeNull();
+
+    fireEvent.click(sentBtn);
+    expect(await screen.findByText(words["applications.state.sent"])).toBeTruthy();
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.path)).toEqual([
+      "/api/applications/1/form-checked", "/api/applications/1/validate", "/api/applications/1/sent",
+    ]);
+  });
+
+  it.each(["fr", "en"] as const)("confirms drop inline, returns to dashboard, and handles action failure in %s", async (language) => {
+    let board = applicationsRoutes({ waiting: [aRow({ state: "validated" })] });
+    let failOnce = true;
+    const { calls, words } = await openValidation({
+      "GET /api/applications": () => board["GET /api/applications"],
+      "POST /api/applications/1/drop": () => {
+        if (failOnce) { failOnce = false; return new Response("conflict", { status: 409 }); }
+        board = applicationsRoutes({ dropped: [aRow({ state: "dropped" })] });
+        return new Response(null, { status: 204 });
+      },
+    }, language, aFormReview({ state: "validated" }));
+
+    fireEvent.click(screen.getByRole("button", { name: words["validation.drop"] }));
+    fireEvent.click(screen.getByRole("button", { name: words["correct.cancel"] }));
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: words["validation.drop"] }));
+    fireEvent.click(screen.getByRole("button", { name: words["validation.drop_confirm"] }));
+    expect((await screen.findByRole("alert")).textContent).toBe(words["validation.action_failed"]);
+
+    fireEvent.click(screen.getByRole("button", { name: words["validation.drop_confirm"] }));
+    expect(await screen.findByText(words["applications.state.dropped"])).toBeTruthy();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(2);
+  });
+});
