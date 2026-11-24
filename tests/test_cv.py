@@ -165,10 +165,10 @@ def test_a_contract_with_no_headline_is_refused_with_the_key_and_no_pdf(
 ) -> None:
     out = tmp_path / "cv.pdf"
 
-    with pytest.raises(CvError, match=r"headlines\.internship"):
-        render_cv(data_dir, "fr", "internship")
-    with pytest.raises(SystemExit, match=r"headlines\.internship"):
-        main(["cv", "build", "--lang", "fr", "--contract", "internship", "--out", str(out)])
+    with pytest.raises(CvError, match=r"headlines\.apprenticeship"):
+        render_cv(data_dir, "fr", "apprenticeship")
+    with pytest.raises(SystemExit, match=r"headlines\.apprenticeship"):
+        main(["cv", "build", "--lang", "fr", "--contract", "apprenticeship", "--out", str(out)])
 
     assert not out.exists()
 

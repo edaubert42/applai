@@ -109,6 +109,22 @@ class Targets(_Section):
     fixed_term_min_months: Annotated[int, Field(ge=1)] | None = None
 
 
+class CvSources(_Section):
+    """The CV sources Filling picks from for an offer: files inside the data directory."""
+
+    fr: str | None = None
+    en: str | None = None
+
+    @model_validator(mode="after")
+    def _has_one(self) -> Self:
+        if self.fr is None and self.en is None:
+            raise PydanticCustomError("no_cv_source", "needs a fr or an en source")
+        return self
+
+    def paths(self) -> dict[str, str]:
+        return {lang: path for lang, path in (("fr", self.fr), ("en", self.en)) if path}
+
+
 class TriageRules(_Section):
     """What the first screening, by code, sets aside (applai.screening)."""
 
@@ -138,6 +154,8 @@ class Profile(_Section):
     triage: TriageRules
     facts: tuple[Fact, ...]
     cv: str | None = None  # the CV Filling attaches: a file's path inside the data directory
+    # Instead of cv: Filling renders the CV of the offer's language and contract from these.
+    cv_sources: CvSources | None = None
 
     @model_validator(mode="after")
     def _fact_ids_are_unique(self) -> Self:
@@ -164,27 +182,47 @@ def load_profile(data_dir: Path | str | None = None) -> Profile:
     except ValidationError as error:
         problems = [_describe(detail, content) for detail in error.errors()]
     else:
-        if profile.cv is None or cv_file(data_dir, profile) is not None:
+        problems = [
+            f"{key}: not a file inside the data directory"
+            for key, path in _cv_paths(profile)
+            if _inside(data_dir, path) is None
+        ]
+        if not problems:
             return profile
-        problems = ["cv: not a file inside the data directory"]
     # Raised outside the except clause, so the ValidationError, whose text holds the
     # refused values, is not even chained to the ProfileError.
     raise _refused(path, problems)
 
 
-def cv_file(data_dir: Path | str, profile: Profile) -> Path | None:
-    """The profile's CV, or None when it has none or it is not a file inside data_dir.
+def _cv_paths(profile: Profile) -> list[tuple[str, str]]:
+    """The profile's CV files, each with the key that names it."""
+    found = [("cv", profile.cv)] if profile.cv is not None else []
+    sources = profile.cv_sources.paths() if profile.cv_sources else {}
+    return found + [(f"cv_sources.{lang}", path) for lang, path in sources.items()]
+
+
+def _inside(data_dir: Path | str, relative: str) -> Path | None:
+    """The file `relative` names, or None when it is not a file inside data_dir.
 
     Resolved first: neither "..", an absolute path nor a link leads out of data_dir.
     """
-    if profile.cv is None:
-        return None
     root = Path(data_dir).resolve()
     try:
-        path = (root / profile.cv).resolve()
+        path = (root / relative).resolve()
         return path if path.is_relative_to(root) and path.is_file() else None
     except (OSError, ValueError):
         return None
+
+
+def cv_file(data_dir: Path | str, profile: Profile) -> Path | None:
+    """The profile's fixed CV, or None when it has none or it is not a file inside data_dir."""
+    return None if profile.cv is None else _inside(data_dir, profile.cv)
+
+
+def cv_source_file(data_dir: Path | str, profile: Profile, lang: str) -> Path | None:
+    """The profile's CV source in lang, or None when it has none or it is not inside data_dir."""
+    path = profile.cv_sources.paths().get(lang) if profile.cv_sources else None
+    return None if path is None else _inside(data_dir, path)
 
 
 def _no_data_dir() -> str:
