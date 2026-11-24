@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { DECISION, aCard, aScan, fakeApi, reviewRoutes } from "./fake-api";
+import { DECISION, REVIEW, aCard, aScan, fakeApi, reviewRoutes } from "./fake-api";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
 
@@ -16,7 +16,10 @@ const fill = (template: string, values: Record<string, string | number>) =>
 const bob = aCard({ id: 2, title: "Développeuse web", company: "Globex Studio", logo: null, score: 74 });
 
 /** The screen with its offers as rows; the first one opened unless told not to. */
-async function openScreen(routes = reviewRoutes({ to_review: [aCard(), bob] }), opened = true) {
+async function openScreen(
+  routes: Record<string, unknown> = reviewRoutes({ to_review: [aCard(), bob] }),
+  opened = true,
+) {
   const calls = fakeApi({ ...routes, ...Object.fromEntries([1, 2, 3, 4].map((id) => [DECISION(id), {}])),
     "POST /api/scan": {},
   });
@@ -91,6 +94,35 @@ describe("a card", () => {
     expect(screen.queryByText(fr["card.fullTextNotRead"])).toBeNull();
     fireEvent.click(rowOf(/Data engineer/));
     expect(screen.getAllByText(fr["card.fullTextNotRead"])).toHaveLength(1);
+  });
+
+  it("offers to read again only an offer that can be, then shows it is pending and why it failed", async () => {
+    let cards = [aCard({ can_reread: true, full_text_read: false }), bob];
+    const routes = { ...reviewRoutes(), [REVIEW("to_review")]: () => cards, "POST /api/offers/1/reread": {} };
+    const calls = await openScreen(routes, false);
+    fireEvent.click(rowOf(/Développeuse web/));
+    expect(screen.queryByRole("button", { name: fr["card.reread"] })).toBeNull();
+    fireEvent.click(rowOf(/Ingénieur logiciel/));
+
+    cards = [aCard({ rereading: true, full_text_read: false }), bob];
+    fireEvent.click(screen.getByRole("button", { name: fr["card.reread"] }));
+
+    expect((await screen.findByRole("status")).textContent).toBe(fr["card.rereading"]);
+    expect(calls.some((call) => call.method === "POST" && call.path === "/api/offers/1/reread")).toBe(true);
+    expect(screen.queryByRole("button", { name: fr["card.reread"] })).toBeNull();
+  });
+
+  it("says why the last read failed, and that the extension is not connected when refused", async () => {
+    const failed = aCard({ can_reread: true, reread_error: "the page answered HTTP 404" });
+    await openScreen(reviewRoutes({ to_review: [failed] }));
+    expect(screen.getByRole("alert").textContent).toBe(
+      fill(fr["card.rereadError"], { reason: "the page answered HTTP 404" }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: fr["card.reread"] })); // no route: refused
+
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+    expect(screen.getByText(fr["card.rereadRefused"])).toBeTruthy();
   });
 
   it("stacks Pour and Contre on a phone: they wrap, and nothing is wider than the screen", async () => {

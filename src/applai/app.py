@@ -26,13 +26,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from applai import browser
+from applai import browser, reread
 from applai.applications import Board, board
 from applai.capture import find_form
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
-from applai.models import LOCAL_USER_ID, Application, Offer, OfferState
+from applai.models import LOCAL_USER_ID, Application, Offer, OfferState, Triage
 from applai.orchestrator import ApplicationState, TransitionError
+from applai.reread import RereadRefused
 from applai.review import Card, Decision, DecisionRequest, OfferNotFound, View, cards, decide
 from applai.scan import Clock, Scanner, ScanRefused, ScanStatus, Watch, local_now, run_scan
 from applai.services import ServicesStatus, services_status
@@ -149,6 +150,29 @@ def decision(
     return recorded
 
 
+@api.post("/offers/{offer_id}/reread", status_code=202)
+def reread_offer(offer_id: int, session: _Session, min_score: _MinScore, request: Request) -> None:
+    """Ask the extension for the page of an offer described from its alert only, once more.
+
+    409 when the offer cannot be read again, one is pending, or the extension is not connected
+    (applai.reread); the extension answers within a minute or so, the card shows the result.
+    """
+    offer = session.scalar(
+        select(Offer).where(Offer.id == offer_id, Offer.user_id == LOCAL_USER_ID)
+    )
+    if offer is None:
+        raise HTTPException(404, "no such offer")
+    triage = session.scalar(select(Triage).where(Triage.offer_id == offer_id))
+    try:
+        reread.request(offer, triage, min_score, browser.utc(request.app.state.clock()))
+    except RereadRefused as error:
+        raise HTTPException(409, str(error)) from None
+    if not browser.is_connected(request):
+        session.rollback()
+        raise HTTPException(409, "The ApplAI extension is not connected: open Chrome.")
+    session.commit()
+
+
 class FormUrl(BaseModel):
     """A form's URL the candidate pastes: http or https only."""
 
@@ -172,13 +196,15 @@ class FormUrlRecorded(BaseModel):
 
 @api.put("/applications/{application_id}/form-url")
 def paste_form_url(application_id: int, body: FormUrl, session: _Session) -> FormUrlRecorded:
-    """Record the form's URL the candidate pasted on an application still created."""
+    """Record the form's URL the candidate pasted on an application still created; the
+    extension reads it at once, the failures of the form before forgotten (applai.browser)."""
     application = session.get(Application, application_id)
     if application is None or application.user_id != LOCAL_USER_ID:
         raise HTTPException(404, "no such application")
     if application.state != ApplicationState.CREATED:
         raise HTTPException(409, f"Application {application_id} is past form capture.")
     application.form_url, application.form_url_error = body.url, None
+    application.form_failures, application.form_failed_at = 0, None
     session.commit()
     return FormUrlRecorded(form_url=body.url)
 
@@ -251,7 +277,7 @@ _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 # The ApplAI extension's routes (applai.browser), whatever the method.
-_EXTENSION_PATHS = re.compile(r"/api/browser/pages(/[0-9]+(/failure)?)?")
+_EXTENSION_PATHS = re.compile(r"/api/browser/(pages|forms)(/[0-9]+(/failure)?)?")
 
 
 class SameOriginWrites:

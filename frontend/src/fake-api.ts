@@ -61,6 +61,9 @@ export function aCard(overrides: Partial<Card> = {}): Card {
     ],
     rule: null,
     full_text_read: true,
+    can_reread: false,
+    rereading: false,
+    reread_error: null,
     ...overrides,
   };
 }

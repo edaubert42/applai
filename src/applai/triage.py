@@ -18,7 +18,7 @@ import textwrap
 from collections.abc import Mapping
 from typing import Any
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentRunner, AgentSpec
@@ -275,6 +275,47 @@ def _fixed_term_cons(profile: Profile, contract: str | None, months: int | None)
     if months is None and FIXED_TERM in contracts(contract):
         return [{"text": "durée du CDD non précisée", "verdict": UNKNOWN}]
     return []
+
+
+def retriage_offer(
+    runner: AgentRunner, database: Engine, offer_id: int, description: str, profile: Profile
+) -> Triage:
+    """Run the Triage agent again on a triaged offer with a text read later.
+
+    The text and the card replace the old ones in one transaction: the offer keeps its
+    state and its triages row, which gets the new run's id. A run that fails raises its
+    AgentError and nothing changes. So does an offer the candidate decided on meanwhile.
+    The read-again request of the offer ends with it (applai.reread).
+    """
+    with Session(database) as session:
+        offer = session.get_one(Offer, offer_id)
+        if offer.state != OfferState.TRIAGED:
+            raise TriageError(f"offer {offer_id} is {offer.state}, not {OfferState.TRIAGED}")
+        title, company = offer.title, offer.company
+        summary = {name: getattr(offer, name) for name in SUMMARY_FIELDS}
+    result = runner.run_agent(
+        triage_spec(title, company, description, profile, summary),
+        database=database,
+        offer_id=offer_id,
+    )
+    if result.run_id is None:
+        raise TriageError(f"offer {offer_id}: the agent run was not recorded")
+    with Session(database, expire_on_commit=False) as session, session.begin():
+        offer = session.get_one(Offer, offer_id)
+        if offer.state != OfferState.TRIAGED:
+            raise TriageError(f"offer {offer_id} is {offer.state}, not {OfferState.TRIAGED}")
+        triage = session.scalars(select(Triage).where(Triage.offer_id == offer_id)).one()
+        card = result.output
+        triage.agent_run_id = result.run_id
+        for name in ("score", "tags", "about", "mission", "pros"):
+            setattr(triage, name, card[name])
+        months: int | None = card["fixed_term_months"]
+        triage.cons = _with_code_cons(
+            card["cons"], _fixed_term_cons(profile, offer.contract, months)
+        )
+        offer.description, offer.page_failures = description, 0  # its text is read now
+        offer.reread_requested_at = offer.reread_error = offer.reread_failed_at = None
+    return triage
 
 
 def _record_refusal(database: Engine, offer_id: int) -> None:

@@ -39,6 +39,9 @@ export interface Card {
   cons: Point[] | null;
   rule: string | null;
   full_text_read: boolean; // false: described from its job alert only
+  can_reread: boolean; // the button "Relire l'offre" shows
+  rereading: boolean; // the extension was asked and has not answered
+  reread_error: string | null; // one line: why the last read again failed
 }
 
 export const GROUPS = ["in_progress", "waiting", "sent", "dropped"] as const;
@@ -96,6 +99,7 @@ export const api = {
   cards: (view: View) => request<Card[]>("GET", `/api/review?view=${view}`),
   decide: (id: number, decision: Decision) =>
     request<unknown>("POST", `/api/offers/${id}/decision`, decision),
+  reread: (id: number) => request<unknown>("POST", `/api/offers/${id}/reread`),
   applications: () => request<Applications>("GET", "/api/applications"),
   pasteFormUrl: (id: number, url: string) =>
     request<FormUrl>("PUT", `/api/applications/${id}/form-url`, { url }),

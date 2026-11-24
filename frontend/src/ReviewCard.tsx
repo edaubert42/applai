@@ -175,16 +175,29 @@ export function ReviewCard({
   onInterested,
   onNotInterested,
   onLater,
+  onReread,
 }: {
   card: Card;
   onInterested: () => void;
   onNotInterested: () => void;
   onLater: () => void;
+  onReread: () => void;
 }) {
   const { t } = useSettings();
   return (
     <>
       <Header card={card} />
+      {(card.can_reread || card.rereading || card.reread_error) && (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          {card.can_reread && (
+            <button type="button" onClick={onReread} className={`min-h-11 cursor-pointer rounded-pill border border-outline px-5 font-semibold text-link hover:bg-raised ${focus}`}>
+              {t("card.reread")}
+            </button>
+          )}
+          {card.rereading && <span role="status">{t("card.rereading")}</span>}
+          {card.reread_error && <span role="alert" className="text-minus">{t("card.rereadError", { reason: card.reread_error })}</span>}
+        </div>
+      )}
       {card.about && (
         <div>
           <h3 className={label}>{t("card.about")}</h3>

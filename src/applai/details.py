@@ -161,6 +161,11 @@ def describe_offer(
     move(session, offer, OfferState.DESCRIBED, Actor.WATCH)
 
 
+def read_description(http: httpx2.Client, url: str) -> str:
+    """The text of the page at url, or PageError; the caller's offer is not touched."""
+    return _read(http, url)[1].description
+
+
 def read_page(html: str) -> Details:
     """What an offer's page says: from its JobPosting JSON-LD, else from its main text."""
     page = _Page.of(html)

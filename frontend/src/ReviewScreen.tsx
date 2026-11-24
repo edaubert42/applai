@@ -8,6 +8,7 @@ import { useSettings } from "./settings";
 type Lists = Record<View, Card[]>;
 
 const focus = "focus-visible:outline-2 focus-visible:outline-link";
+const REREAD_POLL_MS = 5000;
 
 /**
  * The To review screen: the scan, the three views, and the offers with their decisions.
@@ -19,6 +20,7 @@ export default function ReviewScreen() {
   const [lists, setLists] = useState<Lists | null>(null);
   const [failed, setFailed] = useState(false);
   const [problem, setProblem] = useState(false); // a decision the API refused
+  const [rereadFailed, setRereadFailed] = useState(false);
   const [declining, setDeclining] = useState<number | null>(null);
   const [open, setOpen] = useState<number | null>(null); // the card open among the rows of To review
   const refocus = useRef<number | null>(null); // the row to give the focus back to once its card closed
@@ -118,6 +120,24 @@ export default function ReviewScreen() {
     }
   }
 
+  // The extension answers within a minute or so: the cards load again until no read is pending.
+  const waiting = lists?.to_review.some((card) => card.rereading) ?? false;
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(reload, REREAD_POLL_MS);
+    return () => clearInterval(timer);
+  }, [waiting, reload]);
+
+  async function reread(card: Card) {
+    try {
+      await api.reread(card.id);
+      setRereadFailed(false);
+      reload();
+    } catch {
+      setRereadFailed(true); // not connected, or not an offer to read again
+    }
+  }
+
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const target = event.target instanceof HTMLElement ? event.target : null;
@@ -172,6 +192,7 @@ export default function ReviewScreen() {
             onInterested={() => void decide(card, { decision: "interested" })}
             onNotInterested={() => setDeclining(card.id)}
             onLater={() => void decide(card, { decision: "later" })}
+            onReread={() => void reread(card)}
           />
         )}
       </article>
@@ -209,6 +230,7 @@ export default function ReviewScreen() {
       </div>
       {failed && <p role="alert" className="text-minus">{t("review.error")}</p>}
       {problem && <p role="alert" className="text-minus">{t("decision.error")}</p>}
+      {rereadFailed && <p role="alert" className="text-minus">{t("card.rereadRefused")}</p>}
       {view === "screened_out" ? (
         <ScreenedOut cards={shown} onRescue={(card) => void decide(card, { decision: "interested" })} />
       ) : (

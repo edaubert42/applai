@@ -1,11 +1,26 @@
 {
   "manifest_version": 3,
   "name": "ApplAI",
-  "version": "0.1.0",
-  "description": "Reads the JobTeaser and Google offer pages ApplAI asks for, with this Chrome's session.",
-  "permissions": ["alarms"],
+  "version": "0.2.0",
+  "description": "Reads the JobTeaser and Google offer pages and the application forms ApplAI asks for, with this Chrome's session. Never fills nor sends.",
+  "permissions": ["alarms", "scripting"],
   "host_permissions": [
-    "https://*.jobteaser.com/*", "https://*.google.com/*", "https://*.google.fr/*", "http://127.0.0.1/*"
+    "https://*.jobteaser.com/*",
+    "https://*.google.com/*",
+    "https://*.google.fr/*",
+    "https://*.ashbyhq.com/*",
+    "https://*.lever.co/*",
+    "https://*.greenhouse.io/*",
+    "https://*.workable.com/*",
+    "https://*.teamtailor.com/*",
+    "https://*.welcometothejungle.com/*",
+    "https://*.smartrecruiters.com/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.myworkdaysite.com/*",
+    "https://*.recruitee.com/*",
+    "https://*.hellowork.com/*",
+    "https://*.lesjeudis.com/*",
+    "http://127.0.0.1/*"
   ],
   "background": { "service_worker": "background.js", "type": "module" }
 }

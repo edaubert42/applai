@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from applai.details import ALERT_ONLY, MAX_PAGE_FAILURES
 from applai.models import Label, Offer, OfferState, Triage
 from applai.orchestrator import Actor, move
+from applai.reread import rereadable
 
 OFFER_LEVEL = "offer"
 
@@ -97,6 +98,9 @@ class Card(BaseModel):
     cons: list[dict[str, Any]] | None = None
     rule: str | None = None  # the rule that screened the offer out
     full_text_read: bool = True  # else described from its alert's fields (applai.browser)
+    can_reread: bool = False  # the button "Relire l'offre" shows (applai.reread)
+    rereading: bool = False  # the extension has been asked and has not answered
+    reread_error: str | None = None  # one line: why the last read again failed
 
 
 def cards(session: Session, user_id: int, view: View, min_score: int) -> list[Card]:
@@ -112,7 +116,9 @@ def cards(session: Session, user_id: int, view: View, min_score: int) -> list[Ca
                 .where(*mine, Offer.state == OfferState.TRIAGED, Triage.score >= min_score)
                 .order_by(Triage.score.desc(), Offer.id)
             )
-            return [_card(offer, triage) for offer, triage in session.execute(query)]
+            return [
+                _card(offer, triage, rereadable(offer)) for offer, triage in session.execute(query)
+            ]
         case View.LATER:
             kept_at = (
                 select(Label.offer_id, func.max(Label.id).label("label_id"))
@@ -145,8 +151,10 @@ def cards(session: Session, user_id: int, view: View, min_score: int) -> list[Ca
             ]
 
 
-def _card(offer: Offer, triage: Triage | None) -> Card:
+def _card(offer: Offer, triage: Triage | None, can_reread: bool = False) -> Card:
     card = Card.model_validate(offer)
+    card.can_reread = can_reread
+    card.rereading = offer.reread_requested_at is not None
     from_alert = (offer.description or "").startswith(ALERT_ONLY)
     card.full_text_read = offer.page_failures < MAX_PAGE_FAILURES and not from_alert
     if offer.state == OfferState.SCREENED_OUT:

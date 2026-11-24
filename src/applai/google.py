@@ -182,6 +182,30 @@ def parse_google_offer(
     return tuple(chosen.links()), loc, contract
 
 
+def read_google_text(
+    session: Session, offer: Offer, html: str, profile: Profile,
+    http: httpx2.Client, now: datetime,
+) -> str:  # fmt: skip
+    """The full text of a Google offer, from its first allowed link that reads; else PageError.
+
+    Reads the links as describe_google_offer does, LinkedIn's pacing included, and changes
+    nothing on the offer: applai.reread decides what a text read later replaces.
+    """
+    links, _, _ = parse_google_offer(html, offer.title, offer.company, offer.location)
+    allowed = order_allowed_links(links, offer.company, profile.triage.trusted_boards)
+    if not allowed:
+        raise details.PageError(UNTRUSTED_ONLY)
+    error = "no allowed link could be read"
+    for url in allowed:
+        try:
+            if details.on_linkedin(url):
+                return read_linkedin_offer(session, offer, url, now)
+            return details.read_description(http, url)
+        except (details.PageError, LinkedInError) as failure:
+            error = str(failure)
+    raise details.PageError(error)
+
+
 def describe_google_offer(
     session: Session, offer: Offer, html: str, profile: Profile,
     data_dir: Path, http: httpx2.Client, now: datetime,
