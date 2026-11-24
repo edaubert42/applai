@@ -175,7 +175,8 @@ class DraftAnswer(Base):
     """One answer, or the cover letter, the Drafting agent wrote for a field of a form.
 
     sentences are the agent's, each {text, facts} citing validated facts (ADR 0008); text
-    is them joined without the facts' ids. status is pending until the candidate's label.
+    is them joined without the facts' ids. status is pending until the candidate's label
+    (applai.correct); edited_text is the candidate's, when they edited it.
     """
 
     __tablename__ = "draft_answers"
@@ -189,6 +190,7 @@ class DraftAnswer(Base):
     label: Mapped[str]  # the field's
     sentences: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     text: Mapped[str]
+    edited_text: Mapped[str | None]
     status: Mapped[str] = mapped_column(server_default="pending")  # accepted, edited, rejected
     # The judge's unsupported sentences, [{sentence, reason}]; None if it did not judge.
     judge_issues: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
@@ -268,8 +270,10 @@ class Triage(Base):
 class Label(Base):
     """A decision the candidate recorded at a gate, with its reasons (GLOSSARY: label).
 
-    level is "offer" for now. correction says the decision went against the agents'
-    proposal (applai.review). reasons is a list, empty unless the offer was declined.
+    level is "offer" (applai.review) or "answers" (applai.correct), whose labels also name
+    their application. correction says the decision went against the agents' proposal.
+    reasons is a list, empty unless the offer was declined. diff is an edited answer's,
+    word by word against the drafted text.
     """
 
     __tablename__ = "labels"
@@ -277,11 +281,13 @@ class Label(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int]
     offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"), index=True)
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("applications.id"))
     level: Mapped[str]
     decision: Mapped[str]
     reasons: Mapped[list[str]] = mapped_column(JSON)
     note: Mapped[str | None]
     correction: Mapped[bool]
+    diff: Mapped[list[dict[str, str]] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 

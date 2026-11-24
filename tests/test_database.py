@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from applai.database import BUSY_TIMEOUT_MS, DatabaseError, open_database
-from applai.models import Application, Base, Offer
+from applai.models import Application, Base, Label, Offer
 
 TABLES = {
     "offers", "applications", "state_changes", "agent_runs", "triages", "mails_read",
@@ -272,6 +272,31 @@ def test_the_triages_migration_keeps_every_offer_with_no_description(
     with Session(engine) as session:
         offer = session.scalars(select(Offer)).one()
         assert (offer.url, offer.state, offer.description) == (OFFER_URL, "described", None)
+
+
+def test_the_answer_labels_migration_keeps_every_offer_label(tmp_path: Path, open_db: Opener):
+    with open_db(tmp_path).begin() as connection:
+        command.downgrade(_alembic(connection), "0017")
+    with closing(sqlite3.connect(tmp_path / "applai.db")) as connection, connection:
+        connection.execute(
+            "INSERT INTO offers (id, user_id, url, title, company, state, created_at, updated_at)"
+            " VALUES (7, 1, ?, 'Data engineer', 'Brindille Logistique', 'declined', ?, ?)",
+            (OFFER_URL, "2026-11-19", "2026-11-19"),
+        )
+        connection.execute(
+            "INSERT INTO labels (id, user_id, offer_id, level, decision, reasons, note,"
+            " correction, created_at) VALUES (3, 1, 7, 'offer', 'not_interested',"
+            " '[\"salary\"]', 'Trop loin.', 1, '2026-11-19')"
+        )
+
+    engine = open_db(tmp_path)
+
+    with Session(engine) as session:
+        label = session.scalars(select(Label)).one()
+    assert (label.id, label.offer_id, label.decision, label.reasons, label.note) == (
+        3, 7, "not_interested", ["salary"], "Trop loin.",
+    )  # fmt: skip
+    assert (label.correction, label.application_id, label.diff) == (True, None, None)
 
 
 def test_migrations_head_names_the_last_migration():
