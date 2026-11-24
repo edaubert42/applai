@@ -55,6 +55,14 @@ export interface Row {
   state: string | null;
   origin: "applai" | "old_workflow";
   changed_at: string;
+  /** Where the offer's form lives, or why it was not found: the candidate pastes it. */
+  form_url: string | null;
+  form_url_error: string | null;
+}
+
+export interface FormUrl {
+  form_url: string;
+  form_url_error: null;
 }
 
 export type Applications = Record<Group, Row[]>;
@@ -89,6 +97,8 @@ export const api = {
   decide: (id: number, decision: Decision) =>
     request<unknown>("POST", `/api/offers/${id}/decision`, decision),
   applications: () => request<Applications>("GET", "/api/applications"),
+  pasteFormUrl: (id: number, url: string) =>
+    request<FormUrl>("PUT", `/api/applications/${id}/form-url`, { url }),
   scanStatus: () => request<ScanStatus>("GET", "/api/scan"),
   startScan: () => request<unknown>("POST", "/api/scan"),
 };
