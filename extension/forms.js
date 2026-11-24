@@ -59,3 +59,35 @@ export function readForm(root = document) {
   }
   return fields;
 }
+
+// The visible text of a form's page, sent when readForm finds no control (a custom widget, a
+// shadow DOM) so ApplAI's form_capture agent reads the fields in it. It only reads, as readForm,
+// and Chrome sends it alone too. Tested on a fictional page: frontend/src/extension-forms.test.ts.
+export function readText(root = document) {
+  const MAX_TEXT = 20000; // what ApplAI accepts (applai.browser.MAX_TEXT)
+  const SKIPPED = ["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"];
+  const parts = [];
+  let size = 0;
+  const add = (words) => {
+    const text = (words ?? "").replace(/\s+/g, " ").trim();
+    if (text) parts.push(text);
+    size += text.length + 1;
+  };
+  const read = (node) => {
+    for (const child of node.childNodes) {
+      if (size > MAX_TEXT) return;
+      if (child.nodeType === 3) add(child.data); // text
+      if (child.nodeType !== 1) continue; // not an element
+      const hidden = child.hidden || child.getAttribute("aria-hidden") === "true" ||
+        child.checkVisibility?.() === false; // jsdom has no checkVisibility
+      if (hidden || SKIPPED.includes(child.tagName.toUpperCase())) continue;
+      add(child.getAttribute("aria-label")); // a custom widget's name is often only there
+      add(child.getAttribute("placeholder"));
+      if (child.shadowRoot) read(child.shadowRoot); // an open one; a closed one is not readable
+      read(child);
+    }
+  };
+  read(root.body ?? root);
+  const text = parts.join(" ").slice(0, MAX_TEXT);
+  return /[\ud800-\udbff]$/.test(text) ? text.slice(0, -1) : text; // no half of a character
+}

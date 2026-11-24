@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { APPLAI, readForms, readPages } from "./background.js";
-import { readForm } from "./forms.js";
+import { readForm, readText } from "./forms.js";
 import manifest from "./manifest.json" with { type: "json" };
 
 const OFFER = "https://ecole-des-tilleuls.jobteaser.com/fr/job-offers/4521-data-engineer";
@@ -59,8 +59,8 @@ const LEVER = "https://jobs.lever.co/pivoine-analytics/4f2a-data-engineer/apply"
 const FIELDS = [{ label: "CV", type: "file", required: true, options: [] }];
 const SENT = { method: "POST", headers: { "Content-Type": "application/json" } };
 
-// Chrome's tabs and scripting, mocked: a tab with this status, a form with these fields.
-function chromeWith(calls, { status = "complete", fields = FIELDS } = {}) {
+// Chrome's tabs and scripting, mocked: a tab with this status, a form with these fields and text.
+function chromeWith(calls, { status = "complete", fields = FIELDS, text = "" } = {}) {
   return {
     runtime: { getManifest: () => manifest },
     tabs: {
@@ -69,7 +69,8 @@ function chromeWith(calls, { status = "complete", fields = FIELDS } = {}) {
       remove: async (id) => calls.push(["close", id]),
     },
     scripting: {
-      executeScript: async ({ target, func }) => calls.push(["run", target, func]) && [{ result: fields }],
+      executeScript: async ({ target, func }) =>
+        calls.push(["run", target, func]) && [{ result: func === readText ? text : fields }],
     },
   };
 }
@@ -120,4 +121,23 @@ test("it opens no form outside its hosts, and reports a form that does not load"
     ["close", 3],
     [`${APPLAI}/api/browser/forms/6/failure`, { ...SENT, body: JSON.stringify({ reason: "not_loaded" }) }],
   ]);
+});
+
+test("a form with no control it knows sends the page's text, and only reads in the page", async () => {
+  const text = "Pivoine Analytics recrute. Nom complet * CV * Envoyer";
+  const calls = await readFormsWith([{ application_id: 5, url: LEVER }], { fields: [], text });
+
+  assert.deepEqual(calls.slice(1), [
+    ["open", { url: LEVER, active: false }],
+    ["run", { tabId: 3 }, readForm],
+    ["run", { tabId: 3 }, readForm],
+    ["run", { tabId: 3 }, readForm],
+    ["run", { tabId: 3 }, readText],
+    ["close", 3],
+    [`${APPLAI}/api/browser/forms/5`, { ...SENT, body: JSON.stringify({ fields: [], text }) }],
+  ]);
+  // Only the two readers run in the page; that neither dispatches an input, click or submit
+  // event is tested on a fictional page by the frontend (frontend/src/extension-forms.test.ts).
+  const run = new Set(calls.filter(([kind]) => kind === "run").map(([, , func]) => func));
+  assert.deepEqual(run, new Set([readForm, readText]));
 });

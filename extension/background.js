@@ -1,7 +1,7 @@
 // The ApplAI extension's service worker: it reads the offer pages and the forms ApplAI asks for,
 // with this Chrome's session, so the candidate never signs in anywhere for ApplAI. It reads
 // only: no click, no typing, no submit. Setup: docs/extension.md.
-import { readForm } from "./forms.js";
+import { readForm, readText } from "./forms.js";
 
 export const APPLAI = "http://127.0.0.1:8000"; // applai serve's address
 const READ = "read-pages";
@@ -35,8 +35,9 @@ export async function readPages(fetch = globalThis.fetch) {
 }
 
 // Ask ApplAI for the forms to read; open each in an inactive tab, read its controls there
-// (forms.js), close the tab, send the fields back. A form outside the manifest's hosts is
-// reported, never opened. ApplAI asks again for a failed form only after its next scan.
+// (forms.js), close the tab, send the fields back, or the page's text when it shows no control
+// the reader knows. A form outside the manifest's hosts is reported, never opened. ApplAI asks
+// again for a failed form only after its next scan.
 export async function readForms(fetch = globalThis.fetch, browser = globalThis.chrome, wait = sleep) {
   let forms;
   try {
@@ -49,7 +50,7 @@ export async function readForms(fetch = globalThis.fetch, browser = globalThis.c
   for (const { application_id, url } of forms) {
     let path = "", body;
     try {
-      body = { fields: await readIn(url, browser, wait) };
+      body = await readIn(url, browser, wait);
     } catch (error) {
       const reason = ["not_allowed", "not_loaded"].includes(error?.message) ? error.message : "not_read";
       [path, body] = ["/failure", { reason }];
@@ -76,7 +77,10 @@ async function readIn(url, browser, wait) {
       const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readForm });
       fields = read?.result ?? [];
     }
-    return fields;
+    if (fields.length) return { fields };
+    // No control it knows: ApplAI's agent reads the fields in the page's text.
+    const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readText });
+    return { fields, text: read?.result ?? "" };
   } finally {
     await browser.tabs.remove(tab.id).catch(() => {}); // the candidate closed it already
   }
