@@ -65,6 +65,9 @@ export default function FinalValidationScreen({
           {review.review_error && (
             <p role="alert" className="text-sm text-minus">{t("validation.review_error", { error: review.review_error })}</p>
           )}
+          {review.send_error && (
+            <p role="alert" className="text-sm text-minus">{t("validation.send_error", { error: review.send_error })}</p>
+          )}
 
           <section aria-labelledby="validation-problems" className="space-y-3">
             <h3 id="validation-problems" className="text-lg font-semibold">{t("validation.problems.title")}</h3>
@@ -158,6 +161,12 @@ export default function FinalValidationScreen({
             {review.state === "validated" && (
               <>
                 <a href={review.form_url ?? review.url} target="_blank" rel="noreferrer" className={button}>{t("validation.open_form")}</a>
+                <button
+                  type="button" disabled={busy || review.send_authorized} className={button}
+                  onClick={() => run(() => api.authorizeSend(id), () => setReview((old) => old && { ...old, send_authorized: true, send_error: null }))}
+                >
+                  {t(review.send_authorized ? "validation.send_authorized" : "validation.authorize_send")}
+                </button>
                 <button type="button" disabled={busy} onClick={() => run(() => api.markSent(id), onDone)} className={button}>{t("validation.mark_sent")}</button>
               </>
             )}

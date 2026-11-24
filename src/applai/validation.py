@@ -44,6 +44,8 @@ def _record(
     app = session.get(Application, application_id)
     if app is None or app.user_id != user_id:
         raise NotFound(application_id)
+    if to_state in (ApplicationState.SENT, ApplicationState.DROPPED):
+        app.send_authorized_at, app.send_error = None, None
     move(session, app, to_state, Actor.CANDIDATE)
     label = Label(
         user_id=user_id, offer_id=app.offer_id, application_id=app.id, level=level,

@@ -178,6 +178,8 @@ class Application(Base):
         ForeignKey("agent_runs.id", use_alter=True)
     )
     review_error: Mapped[str | None]  # why the last Review failed, until a review succeeds
+    send_authorized_at: Mapped[datetime | None]  # per-application permission to send (ADR 0003)
+    send_error: Mapped[str | None]  # why the extension could not submit or confirm
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=_utc_now, onupdate=_utc_now)
 

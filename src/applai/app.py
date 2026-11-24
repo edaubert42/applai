@@ -422,6 +422,19 @@ def validate_application(application_id: int, session: _Session) -> None:
     )
 
 
+@api.post("/applications/{application_id}/authorize-send", status_code=204)
+def authorize_send(application_id: int, session: _Session, request: Request) -> None:
+    """Record send authorization for one validated application (ADR 0003)."""
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    if application.state != ApplicationState.VALIDATED:
+        raise HTTPException(409, f"Application {application_id} is not validated.")
+    application.send_authorized_at = browser.utc(request.app.state.clock())
+    application.send_error = None
+    session.commit()
+
+
 @api.post("/applications/{application_id}/sent", status_code=204)
 def mark_sent(application_id: int, session: _Session) -> None:
     """Record manual send as a label and move validated -> sent."""
@@ -509,7 +522,7 @@ _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 # The ApplAI extension's routes (applai.browser), whatever the method.
-_EXTENSION_PATHS = re.compile(r"/api/browser/(pages|forms|fills)(/.*)?")
+_EXTENSION_PATHS = re.compile(r"/api/browser/(pages|forms|fills|sends)(/.*)?")
 
 
 class SameOriginWrites:

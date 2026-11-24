@@ -40,7 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
-from applai import details, reread
+from applai import details, reread, validation
 from applai.agents import AgentRunner
 from applai.capture import MAX_FIELDS, MAX_LABEL, PASTE, FormField, read_fields
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
@@ -497,6 +497,72 @@ def fill_failed(application_id: int, body: FillFailed, request: Request) -> None
         )
         application.fill_failed_at = utc(request.app.state.clock())
         session.commit()
+
+
+type SendReason = Literal["no_tab", "captcha", "no_button", "not_confirmed", "not_sent"]
+_SEND_FAILURES: dict[SendReason, str] = {
+    "no_tab": "No open tab matches the form URL in Chrome.",
+    "captcha": "A captcha blocks submission: complete it in Chrome.",
+    "no_button": "No submit button was found on the form.",
+    "not_confirmed": "No confirmation page was detected: check Chrome before retrying.",
+    "not_sent": "The form could not be submitted in Chrome.",
+}
+
+
+class SendToDo(BaseModel):
+    application_id: int
+    url: str
+
+
+class SendFailed(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: SendReason
+
+
+def _waiting_send(session: Session, application_id: int) -> Application:
+    app = session.get(Application, application_id)
+    if app is None or app.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    if app.state != ApplicationState.VALIDATED or app.send_authorized_at is None:
+        raise HTTPException(409, f"Application {application_id} is not authorized to send.")
+    return app
+
+
+@router.get("/sends")
+def sends(request: Request) -> list[SendToDo]:
+    """Validated applications with an active send authorization and form URL (ADR 0003)."""
+    with Session(request.app.state.engine) as session:
+        rows = session.scalars(
+            select(Application)
+            .where(
+                Application.user_id == LOCAL_USER_ID,
+                Application.state == ApplicationState.VALIDATED,
+                Application.send_authorized_at.is_not(None),
+                Application.form_url.is_not(None),
+            )
+            .order_by(Application.id)
+        )
+        return [SendToDo(application_id=a.id, url=a.form_url) for a in rows if a.form_url]
+
+
+@router.post("/sends/{application_id}", status_code=204)
+def send_done(application_id: int, request: Request) -> None:
+    """Record a form submitted and confirmed by the extension, moving validated -> sent."""
+    with Session(request.app.state.engine) as session, session.begin():
+        _waiting_send(session, application_id)
+        try:
+            validation.mark_sent(session, LOCAL_USER_ID, application_id)
+        except TransitionError as error:
+            raise HTTPException(409, str(error)) from None
+
+
+@router.post("/sends/{application_id}/failure", status_code=204)
+def send_failed(application_id: int, body: SendFailed, request: Request) -> None:
+    """Record a send failure and clear send_authorized_at so it is never retried blindly."""
+    with Session(request.app.state.engine) as session, session.begin():
+        app = _waiting_send(session, application_id)
+        app.send_authorized_at = None
+        app.send_error = _SEND_FAILURES[body.reason]
 
 
 @router.get("/status")
