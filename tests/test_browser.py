@@ -44,7 +44,7 @@ CARD = {
     "mission": ["Construire les pipelines de données", "Écrire du Python et du SQL"],
     "pros": ["Data engineering"],
     "cons": [],
-    "fixed_term_months": None,
+    "fixed_term_months": None, "work_mode": None, "years_required": None,
 }  # fmt: skip
 
 

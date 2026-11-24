@@ -415,15 +415,18 @@ def _lenient(profile: Profile) -> Profile:
     return profile.model_copy(update={"triage": triage})
 
 
+@pytest.mark.parametrize(
+    ("page_years", "years"),
+    [pytest.param(None, 5, id="page gave none"), pytest.param(2, 2, id="page gave 2")],
+)
 def test_the_work_mode_and_years_triage_reads_fill_only_what_the_page_left_empty(
-    engine: Engine, profile: Profile
+    engine: Engine, profile: Profile, page_years: int | None, years: int
 ):
     card = CARD | {"work_mode": "hybrid", "years_required": 5}
-    from_text = _read(engine, _triage(engine, _lenient(profile), card))
-    from_page = _read(engine, _triage(engine, _lenient(profile), card, years_required=2))
+    offer_id = _triage(engine, _lenient(profile), card, years_required=page_years)
 
-    assert (from_text.work_mode, from_text.years_required) == ("hybrid", 5)
-    assert (from_page.work_mode, from_page.years_required) == ("hybrid", 2)
+    offer = _read(engine, offer_id)
+    assert (offer.work_mode, offer.years_required) == ("hybrid", years)
 
 
 @pytest.mark.parametrize(
