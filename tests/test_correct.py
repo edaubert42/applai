@@ -174,6 +174,24 @@ def test_rejecting_an_answer_drafts_only_it_again_with_the_reason(
     assert (sibling.status, sibling.text) == ("accepted", SIX_YEARS)
 
 
+def test_a_rejected_answer_whose_redraft_fails_cannot_be_accepted(data_dir: Path, engine: Engine):
+    # The redraft cites a fact not in the profile: code refuses it, and the answer stays rejected.
+    unknown = _result({"1": [{"text": REDRAFTED, "facts": ["F99"]}]})
+    runner = AgentRunner(FakeBackend([unknown]))
+    watch = Watch(http=httpx2.Client(), runner=runner, ms_client_id=None)
+    app = create_app(data_dir, frontend_dir=data_dir / "none", watch=watch)
+    application_id, [_, project] = _drafted(engine)
+    url = f"/api/applications/{application_id}/draft/{project}"
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        failed = client.post(url, json={"decision": "reject", "reason": REASON})
+        accepted = client.post(url, json={"decision": "accept"})
+        edited = client.post(url, json={"decision": "edit", "text": FORECAST})
+
+    assert (failed.status_code, accepted.status_code, edited.status_code) == (502, 409, 200)
+    assert _answer(engine, project).status == "edited"
+
+
 def test_answers_checked_moves_drafted_once_every_answer_is_accepted_or_edited(
     engine: Engine, client: TestClient
 ):

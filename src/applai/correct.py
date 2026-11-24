@@ -152,8 +152,9 @@ def decide(
 ) -> DraftAnswer:
     """Record the candidate's decision on an answer as a label, and set the answer's status.
 
-    A rejected answer stays rejected until it is drafted again. Raises NotFound, and
-    GateRefused when the application is not drafted.
+    A rejected answer stays rejected until it is drafted again: it can be rejected again or
+    edited, not accepted, which would accept the text the candidate rejected. Raises NotFound,
+    and GateRefused when the application is not drafted or a rejected answer is accepted.
     """
     application = _application(session, user_id, application_id)
     answer = session.get(DraftAnswer, answer_id)
@@ -161,6 +162,8 @@ def decide(
         raise NotFound(answer_id)
     if application.state != ApplicationState.DRAFTED:
         raise GateRefused(f"Application {application_id} is {application.state}, not drafted.")
+    if answer.status == AnswerStatus.REJECTED and request.decision == AnswerDecision.ACCEPT:
+        raise GateRefused(f"Answer {answer_id} was rejected: edit it or reject it again.")
     edited = request.text.strip() if request.text else None
     answer.status, answer.edited_text = _STATUS[request.decision], edited
     session.add(
