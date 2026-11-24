@@ -319,7 +319,8 @@ def test_a_profile_that_cannot_be_read_is_refused_naming_the_file(tmp_path: Path
 
 
 def _demo_files() -> list[str]:
-    files = sorted(str(path) for path in DEMO_DIR.rglob("*") if path.is_file())
+    # Relative, as git lists them: tools/allowed_files.txt holds relative paths.
+    files = sorted(os.path.relpath(path) for path in DEMO_DIR.rglob("*") if path.is_file())
     assert files, "an empty list would make the checks scan the whole repository"
     return files
 

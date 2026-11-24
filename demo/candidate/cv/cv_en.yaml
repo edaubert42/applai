@@ -1,0 +1,73 @@
+# The fictional candidate's CV in English. Every person, company and contact detail is invented.
+name: Jeanne Dupont
+contact:
+  city: Lyon
+  email: jeanne.dupont@example.org
+  phone: "+33 6 00 00 00 00"
+links:
+  linkedin: https://www.linkedin.com/in/jeanne-dupont-example
+  github: https://github.com/jeanne-dupont-example
+headlines:
+  permanent: Data engineer, reliable data pipelines
+  freelance: Freelance data engineer, reliable data pipelines
+summary: >-
+  Data engineer for six years, I build reliable pipelines for logistics and energy. I cut
+  delivery data processing time by 40% at a regional carrier. I am looking for a role in Lyon
+  or remote in France.
+summaries:
+  freelance: >-
+    Freelance data engineer, I deliver reliable pipelines for logistics and energy. Available
+    within one month, in Lyon or remote.
+titles:
+  skills: Skills
+  experience: Experience
+  projects: Projects
+  education: Education
+  langcert: Languages and interests
+skills:
+  - label: Languages
+    text: Python, SQL, Bash
+  - label: Data
+    text: PostgreSQL, dbt, Airflow, Spark, Kafka
+  - label: Tools
+    text: Docker, Terraform, GitHub Actions, Grafana
+experience:
+  - title: Data engineer
+    company: Transports Exemple, Lyon
+    dates: 2021 - 2026
+    bullets:
+      - Pipelines, rebuilt 30 Airflow pipelines and cut processing time by 40%.
+      - Added dbt data quality tests on 120 tables, which halved incidents.
+      - Ran a monthly data review workshop with the business teams.
+  - company: Énergie Exemple, Villeurbanne
+    intro: Energy supplier, 400 people.
+    dates: 2019 - 2021
+    roles:
+      - title: Data analyst
+        dates: 2020 - 2021
+        bullets:
+          - Grafana dashboards tracking the consumption of 15,000 customers.
+      - title: Data intern
+        dates: 2019 - 2020
+        bullets:
+          - First consumption forecasting model in Python, taken over by the team.
+projects:
+  - name: Weather pipeline
+    desc: collecting and aggregating open data
+    tech: Python, DuckDB
+    bullets:
+      - Daily load of 2 million readings, published as open source.
+  - name: Matching tool
+    desc: comparing two customer lists
+    tech: Python, pandas
+education:
+  - school: École Exemple d'ingénieurs, Lyon
+    degree: Engineering degree
+    note: computer science track
+    dates: 2016 - 2019
+langcert:
+  - label: Languages
+    text: French (native)   English (fluent)   Spanish (basic)
+interests:
+  label: Interests
+  text: Hiking   Climbing   Cooking

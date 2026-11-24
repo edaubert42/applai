@@ -1,0 +1,73 @@
+# The fictional candidate's CV in French. Every person, company and contact detail is invented.
+name: Jeanne Dupont
+contact:
+  city: Lyon
+  email: jeanne.dupont@example.org
+  phone: "+33 6 00 00 00 00"
+links:
+  linkedin: https://www.linkedin.com/in/jeanne-dupont-example
+  github: https://github.com/jeanne-dupont-example
+headlines:
+  permanent: Ingénieure data, pipelines de données fiables
+  freelance: Ingénieure data freelance, pipelines de données fiables
+summary: >-
+  Ingénieure data depuis six ans, je construis des pipelines fiables pour la logistique et
+  l'énergie. J'ai réduit de 40 % le temps de traitement de données de livraison chez un
+  transporteur régional. Je cherche un poste à Lyon ou en télétravail.
+summaries:
+  freelance: >-
+    Ingénieure data freelance, je livre des pipelines fiables pour la logistique et l'énergie.
+    Disponible sous un mois, à Lyon ou en télétravail.
+titles:
+  skills: Compétences
+  experience: Expérience
+  projects: Projets
+  education: Formation
+  langcert: Langues et centres d'intérêt
+skills:
+  - label: Langages
+    text: Python, SQL, Bash
+  - label: Données
+    text: PostgreSQL, dbt, Airflow, Spark, Kafka
+  - label: Outils
+    text: Docker, Terraform, GitHub Actions, Grafana
+experience:
+  - title: Ingénieure data
+    company: Transports Exemple, Lyon
+    dates: 2021 - 2026
+    bullets:
+      - "Pipelines : refonte de 30 pipelines Airflow, 40 % de temps de traitement en moins."
+      - Mise en place de tests de qualité de données dbt sur 120 tables; incidents divisés par deux.
+      - Animation d'un atelier mensuel de revue de données avec les équipes métier.
+  - company: Énergie Exemple, Villeurbanne
+    intro: Fournisseur d'énergie, 400 personnes.
+    dates: 2019 - 2021
+    roles:
+      - title: Data analyst
+        dates: 2020 - 2021
+        bullets:
+          - Tableaux de bord Grafana de suivi de la consommation pour 15 000 clients.
+      - title: Stagiaire data
+        dates: 2019 - 2020
+        bullets:
+          - Premier modèle de prévision de consommation en Python, repris par l'équipe.
+projects:
+  - name: Pipeline météo
+    desc: collecte et agrégation de données ouvertes
+    tech: Python, DuckDB
+    bullets:
+      - Chargement quotidien de 2 millions de relevés, publié en open source.
+  - name: Outil de rapprochement
+    desc: comparaison de deux listes de clients
+    tech: Python, pandas
+education:
+  - school: École Exemple d'ingénieurs, Lyon
+    degree: Diplôme d'ingénieure
+    note: spécialité informatique
+    dates: 2016 - 2019
+langcert:
+  - label: Langues
+    text: Français (natif)   Anglais (courant)   Espagnol (notions)
+interests:
+  label: Centres d'intérêt
+  text: Randonnée   Escalade   Cuisine

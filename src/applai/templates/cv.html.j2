@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="{{ lang|default('en') }}">
+<head>
+<meta charset="utf-8">
+<title>{{ name }} - CV</title>
+<style>
+  @page { size: A4; margin: {{ pm|default('10mm 15mm 9mm 15mm') }}; }
+  :root {
+    --fs: {{ fs|default('10pt') }}; --lh: {{ lh|default('1.32') }}; --gap: {{ gap|default('1') }};
+    --accent: #035DAB; --rule: #035DAB; --ink: #161616; --mute: #555; --bi: {{ bi|default('4mm') }};
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: "Inter", "Aptos", "Helvetica Neue", Arial, sans-serif; font-size: var(--fs); line-height: var(--lh); color: var(--ink); -webkit-print-color-adjust: exact; }
+  a { color: var(--mute); text-decoration: underline; text-decoration-color: #9a9a9a; text-underline-offset: 0.45mm; }
+
+  /* Header: [photo] name / title line / location / contact row / GitHub row */
+  header { display: flex; align-items: flex-start; gap: 5.5mm; }
+  header .photo { width: {{ ps|default('28mm') }}; height: {{ ps|default('28mm') }}; object-fit: cover; border-radius: 1.2mm; display: block; flex: none; }
+  header h1 { margin: 0; font-size: {{ hs|default('22pt') }}; line-height: 1.1; font-weight: 600; letter-spacing: -0.01em; color: var(--accent); }
+  header .headline { margin: {{ hm|default('1.2mm') }} 0 {{ hb|default('1.8mm') }}; font-size: {{ hf|default('14pt') }}; line-height: 1.15; font-weight: 400; }
+  header .place { margin: 0 0 0.9mm; display: flex; align-items: center; }
+  header .place b { font-weight: 600; margin-right: 1.2mm; }
+  .contact { display: flex; flex-wrap: wrap; align-items: center; }
+  .contact .item { display: inline-flex; align-items: center; gap: 1.5mm; }
+  .bar { display: inline-block; width: 0.25mm; height: 3.1mm; background: #b9b9b9; margin: 0 2.6mm; }
+  svg.ic { width: 3.2mm; height: 3.2mm; stroke: var(--mute); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .gh { margin-top: 1.5mm; }
+  .gh b { font-weight: 600; margin-right: 1mm; }
+
+  /* Section titles: small caps-style blue label over a thin blue rule */
+  h2 { margin: calc(4.2mm * var(--gap)) 0 calc(1.7mm * var(--gap)); padding-bottom: 0.9mm; border-bottom: 0.75pt solid var(--rule); color: var(--accent); font-size: {{ h2s|default('9.5pt') }}; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.2; }
+  /* No heading for the summary: the line under the name already says what it is. Space keeps it off the contact row. */
+  .summary { margin: calc(5mm * var(--gap)) 0 0; }
+
+  /* Two-row entries: bold line + dates on the right, then company/degree + place on the right */
+  .entry { margin-top: calc(2.3mm * var(--gap)); break-inside: avoid; }
+  h2 + .entry { margin-top: 0; }
+  .r1, .r2 { display: flex; justify-content: space-between; align-items: baseline; gap: 4mm; }
+  .r1 .t { font-weight: 600; }
+  .r1 .d { font-weight: 500; white-space: nowrap; text-align: right; }
+  .r2 .p { white-space: nowrap; text-align: right; }
+  .sep { color: #9a9a9a; padding: 0 1mm; }
+  .tech { white-space: nowrap; text-align: right; color: #2b2b2b; }
+  .desc { font-weight: 400; }
+
+  .role { margin-top: calc(1.4mm * var(--gap)); padding-left: 3mm; }
+  .role .r1 .t { font-weight: 600; }
+  .role .r1 .d { font-weight: 400; }
+
+  /* Bullets (ATS-safe: no absolute positioning, so the PDF text order stays heading -> bullets) */
+  ul { margin: 0.7mm 0 0; padding: 0; list-style: none; }
+  li { padding-left: var(--bi); }
+  li::before { content: "\2022"; display: inline-block; box-sizing: border-box; width: var(--bi); margin-left: calc(-1 * var(--bi)); padding-left: {{ bl|default('0.6mm') }}; font-size: {{ bs|default('1.15em') }}; line-height: 0; }
+
+  .kv { display: grid; grid-template-columns: {{ kw|default('27mm') }} 1fr; column-gap: 2mm; }
+  .kv .k { font-weight: 600; }
+  .it { display: inline-block; white-space: nowrap; }
+  .dot { display: inline-block; padding: 0 1.6mm; color: #8a8a8a; }
+</style>
+</head>
+<body>
+<header>
+  {% if photo %}<img class="photo" src="{{ photo }}" alt="">{% endif %}
+  <div class="id">
+    <h1>{{ name }}</h1>
+    <div class="headline">{{ headline }}</div>
+    <div class="place">{{ location }}{% if github and gh_inline %}<span class="bar"></span><b>GitHub</b> <a href="{{ github.href }}">{{ github.text }}</a>{% endif %}</div>
+    <div class="contact">
+      {% for c in contacts %}{% if not loop.first %}<span class="bar"></span>{% endif %}<span class="item">
+        {% if c.kind == 'email' %}<svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        {% elif c.kind == 'phone' %}<svg class="ic" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+        {% else %}<svg class="ic" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>{% endif %}
+        <a href="{{ c.href }}">{{ c.text }}</a></span>{% endfor %}
+    </div>
+    {% if github and not gh_inline %}<div class="gh"><b>GitHub</b> <a href="{{ github.href }}">{{ github.text }}</a></div>{% endif %}
+  </div>
+</header>
+
+<p class="summary">{{ summary }}</p>
+
+<h2>{{ titles.skills }}</h2>
+{% for s in skills %}<div class="kv"><div class="k">{{ s.label }}</div><div>{{ s.text }}</div></div>{% endfor %}
+
+<h2>{{ titles.experience }}</h2>
+{% for x in experience %}
+<div class="entry">
+  {% if x.roles %}
+  <div class="r1"><span class="t">{{ x.company }}</span><span class="d">{{ x.dates }}</span></div>
+  <div class="r2"><span>{{ x.intro }}</span><span class="p">{{ x.loc }}</span></div>
+  {% for r in x.roles %}
+  <div class="role">
+    <div class="r1"><span class="t">{{ r.title }}</span><span class="d">{{ r.dates }}</span></div>
+    <ul>{% for b in r.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+  </div>
+  {% endfor %}
+  {% elif x.bullets %}
+  <div class="r1"><span class="t">{{ x.title }}</span><span class="d">{{ x.dates }}</span></div>
+  <div class="r2"><span>{{ x.company }}</span><span class="p">{{ x.loc }}</span></div>
+  <ul>{% for b in x.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+  {% else %}
+  <div class="r1"><span><span class="t">{{ x.title }}</span><span class="sep">|</span>{{ x.company }}{% if x.loc %}, {{ x.loc }}{% endif %}</span><span class="d">{{ x.dates }}</span></div>
+  {% endif %}
+</div>
+{% endfor %}
+
+<h2>{{ titles.projects }}</h2>
+{% for p in projects %}
+<div class="entry">
+  <div class="r1"><span><span class="t">{{ p.name }}</span><span class="desc"> - {{ p.desc }}</span></span><span class="tech">{{ p.tech }}</span></div>
+  {% if p.bullets %}<ul>{% for b in p.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% elif p.bullet %}<ul><li>{{ p.bullet }}</li></ul>{% endif %}
+</div>
+{% endfor %}
+
+<h2>{{ titles.education }}</h2>
+{% for e in education %}
+<div class="entry">
+  {% if edu1 %}
+  <div class="r1"><span><span class="t">{{ e.school }}{% if e.loc %}, {{ e.loc }}{% endif %}</span><span class="sep">|</span>{{ e.degree }}{% if e.note %} {{ e.note }}{% endif %}{% if e.detail %} - {{ e.detail }}{% endif %}</span><span class="d">{{ e.dates }}</span></div>
+  {% else %}
+  <div class="r1"><span class="t">{{ e.school }}</span><span class="d">{{ e.dates }}</span></div>
+  <div class="r2"><span>{{ e.degree }}{% if e.note %} {{ e.note }}{% endif %}{% if e.detail %} - {{ e.detail }}{% endif %}</span><span class="p">{{ e.loc }}</span></div>
+  {% endif %}
+</div>
+{% endfor %}
+
+<h2>{{ titles.langcert }}</h2>
+{% for s in langcert %}<div class="kv"><div class="k">{{ s.label }}</div><div>{% for it in s.text.split('   ') %}{% if not loop.first %}<span class="dot">&bull;</span>{% endif %}<span class="it">{{ it }}</span>{% endfor %}</div></div>{% endfor %}
+</body>
+</html>

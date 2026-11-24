@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pii
 import pytest
 from pii import find_pii, forbidden_file, main
 
@@ -62,6 +63,18 @@ def test_allowed_list_and_text_files_pass(tmp_path: Path):
     text.write_text("plain text")
     assert not forbidden_file(image, allowed={str(image)})
     assert not forbidden_file(text, allowed=set())
+
+
+def test_main_passes_an_allowed_binary_file_without_reading_it_as_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    image = tmp_path / "demo.jpg"
+    image.write_bytes(b"\xff\xd8\xff")
+    allowed = tmp_path / "allowed_files.txt"
+    allowed.write_text(f"{image}\n")
+    monkeypatch.setattr(pii, "ALLOWED_FILES_LIST", allowed)
+
+    assert main([str(image)]) == 0
 
 
 def test_main_reports_without_values(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
