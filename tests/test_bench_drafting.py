@@ -109,6 +109,14 @@ def test_a_failed_judge_run_counts_as_verdicts_against_the_labels(
     assert code == 1
 
 
+def test_the_bench_workflow_runs_the_drafting_bench_with_the_real_cli():
+    workflow = yaml.safe_load((ROOT / ".github" / "bench.yml").read_text())
+    steps = [step for job in workflow["jobs"].values() for step in job["steps"]]
+    [bench] = [step for step in steps if "applai.bench drafting" in step.get("run", "")]
+    assert '"$GITHUB_STEP_SUMMARY"' in bench["run"] and bench["shell"] == "bash"
+    assert bench["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
+
+
 def test_cohen_kappa_matches_a_hand_count():
     # Agreement 3/4; by chance 1/2 * 1/4 + 1/2 * 3/4 = 1/2; kappa (3/4 - 1/2) / (1 - 1/2).
     assert cohen_kappa([(True, True), (True, False), (False, False), (False, False)]) == 0.5
