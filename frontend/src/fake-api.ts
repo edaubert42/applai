@@ -1,5 +1,7 @@
 import { vi } from "vitest";
-import type { Answer, Applications, BrowserStatus, Card, Draft, Row, ScanStatus, Service, Services } from "./api";
+import type {
+  Answer, Applications, BrowserStatus, Card, Draft, FormReview, ReviewedField, Row, ScanStatus, Service, Services,
+} from "./api";
 
 export interface Call {
   method: string;
@@ -184,5 +186,29 @@ export function aDraft(answers: Answer[] = [anAnswer()], overrides: Partial<Draf
     answers,
     resolved: answers.every((a) => a.status === "accepted" || a.status === "edited"),
     ...overrides,
+  };
+}
+
+/** A fictional filled field reported from Chrome. */
+export function aReviewedField(overrides: Partial<ReviewedField> = {}): ReviewedField {
+  return {
+    field: 0, label: "E-mail", type: "email", required: true,
+    value: "camille@example.org", file: null, unfilled: null, slot: null, ...overrides,
+  };
+}
+
+/** A fictional form review ready for final validation. */
+export function aFormReview(overrides: Partial<FormReview> = {}): FormReview {
+  return {
+    application_id: 1, offer_id: 1, title: "Chef de quai", company: "Brindille Logistique",
+    url: "https://jobs.example.org/brindille-logistique/chef-de-quai",
+    form_url: "https://forms.example.org/brindille-logistique/apply",
+    state: "reviewed",
+    fields: [
+      aReviewedField(),
+      aReviewedField({ field: 1, label: "Téléphone", type: "tel", value: "06 00 00 00 00" }),
+      aReviewedField({ field: 2, label: "CV", type: "file", value: null, file: "cv-camille.pdf", slot: "cv" }),
+    ],
+    problems: [], review_error: null, has_screenshot: true, ...overrides,
   };
 }
