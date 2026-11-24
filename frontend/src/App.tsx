@@ -1,9 +1,10 @@
 import { useState } from "react";
 import ApplicationsScreen from "./ApplicationsScreen";
 import ReviewScreen from "./ReviewScreen";
+import SettingsScreen from "./SettingsScreen";
 import { SettingsProvider, useSettings } from "./settings";
 
-const pages = ["review", "applications", "control"] as const;
+const pages = ["review", "applications", "control", "settings"] as const;
 type Page = (typeof pages)[number];
 
 const pill = "min-h-11 cursor-pointer rounded-pill px-5 font-medium focus-visible:outline-2 focus-visible:outline-link";
@@ -48,6 +49,8 @@ function Shell() {
           <ReviewScreen />
         ) : page === "applications" ? (
           <ApplicationsScreen />
+        ) : page === "settings" ? (
+          <SettingsScreen />
         ) : (
           <section className="rounded-card border border-border bg-surface p-8 text-muted">
             {t("page.empty")}
