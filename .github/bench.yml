@@ -1,5 +1,6 @@
-# Triage bench, started by hand: it spends the owner's Claude subscription, so it never runs on
-# a PR. The report goes to the run's job summary, and the run is red when recall is under 90 %.
+# Triage and Drafting benches, started by hand: they spend the owner's Claude subscription, so
+# they never run on a PR. The reports go to the run's job summary, and the run is red when a
+# bench fails its threshold.
 # Agents may not write workflows: the owner moves this file to .github/workflows/bench.yml.
 name: Bench
 
@@ -35,3 +36,9 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: uv run python -m applai.bench triage | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Drafting bench
+        if: success() || failure() # runs even when the Triage bench fails
+        shell: bash
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: uv run python -m applai.bench drafting | tee -a "$GITHUB_STEP_SUMMARY"

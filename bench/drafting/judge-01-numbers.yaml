@@ -1,0 +1,19 @@
+sentences:
+  - text: J'ai réduit le pipeline de nuit de Ventolune Énergie de 6 heures à 40 minutes grâce à des chargements incrémentaux.
+    facts: [F2]
+    expected: supported
+  - text: J'ai réduit le pipeline de nuit de Ventolune Énergie de 6 heures à 4 minutes.
+    facts: [F2]
+    expected: unsupported
+    trap: invented number
+  - text: La prévision des délais de livraison que j'ai construite est utilisée par 120 entrepôts.
+    facts: [F3]
+    expected: supported
+  - text: La prévision que j'ai construite chez Brindille Logistique est utilisée par plus de 200 entrepôts.
+    facts: [F3]
+    expected: unsupported
+    trap: invented number
+  - text: Ce travail sur le pipeline de nuit a réduit les coûts d'infrastructure de 30 %.
+    facts: [F2]
+    expected: unsupported
+    trap: invented number

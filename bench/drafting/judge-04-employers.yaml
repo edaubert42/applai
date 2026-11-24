@@ -1,0 +1,16 @@
+sentences:
+  - text: Chez Brindille Logistique, j'ai réduit le pipeline de nuit de 6 heures à 40 minutes.
+    facts: [F2]
+    expected: unsupported
+    trap: wrong employer
+  - text: J'ai travaillé chez Ventolune Énergie, puis chez Brindille Logistique.
+    facts: [F1]
+    expected: unsupported
+    trap: wrong order
+  - text: J'ai construit la prévision des délais de livraison de Brindille Logistique, utilisée par 120 entrepôts, puis réduit le pipeline de nuit de Ventolune Énergie à 40 minutes.
+    facts: [F3, F2]
+    expected: supported
+    trap: two facts
+  - text: J'ai mis en place des chargements incrémentaux pour le pipeline de nuit de Ventolune Énergie.
+    facts: [F2]
+    expected: supported
