@@ -51,7 +51,7 @@ function ApplicationRow({ row }: { row: Row }) {
   const state = old ? row.state : row.state && (lookup(`applications.state.${row.state}`) ?? row.state);
   const pill = "rounded-pill bg-raised px-3 py-1 text-sm";
   const button =
-    "inline-flex min-h-11 items-center rounded-pill border border-outline px-5 font-semibold text-link focus-visible:outline-2 focus-visible:outline-link";
+    "inline-flex min-h-11 cursor-pointer items-center rounded-pill border border-outline px-5 font-semibold text-link hover:bg-raised disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-2 focus-visible:outline-link";
   // The form's URL the finder recorded, or the one the candidate pasted since.
   const [form, setForm] = useState({ url: row.form_url, error: row.form_url_error });
   const [pasted, setPasted] = useState("");

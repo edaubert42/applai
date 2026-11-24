@@ -6,7 +6,7 @@ import { SettingsProvider, useSettings } from "./settings";
 const pages = ["review", "applications", "control"] as const;
 type Page = (typeof pages)[number];
 
-const pill = "min-h-11 rounded-pill px-5 font-medium focus-visible:outline-2 focus-visible:outline-link";
+const pill = "min-h-11 cursor-pointer rounded-pill px-5 font-medium focus-visible:outline-2 focus-visible:outline-link";
 
 export default function App() {
   return (
@@ -34,7 +34,7 @@ function Shell() {
               type="button"
               aria-current={name === page ? "page" : undefined}
               onClick={() => setPage(name)}
-              className={`${pill} ${name === page ? "bg-primary text-on-primary" : "text-muted hover:text-text"}`}
+              className={`${pill} ${name === page ? "bg-primary text-on-primary hover:brightness-90" : "text-muted hover:text-text"}`}
             >
               {t(`nav.${name}`)}
             </button>
