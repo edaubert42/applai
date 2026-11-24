@@ -158,7 +158,11 @@ class Application(Base):
     offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"), unique=True)
     state: Mapped[str]
     form_url: Mapped[str | None]  # where the offer's form lives (applai.capture)
-    form_url_error: Mapped[str | None]  # why it was not found: the candidate pastes it
+    form_url_error: Mapped[str | None]  # why it was not found or read: the candidate pastes it
+    # The form's fields as the extension read them (applai.browser.FormField), none until then.
+    form_fields: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    form_failures: Mapped[int] = mapped_column(server_default="0")  # by the extension
+    form_failed_at: Mapped[datetime | None]  # the last of them
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=_utc_now, onupdate=_utc_now)
 

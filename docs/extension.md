@@ -1,6 +1,6 @@
 # The ApplAI extension
 
-JobTeaser refuses ApplAI's requests, but serves its offer pages to the candidate's own Chrome. The ApplAI extension (`extension/`) reads them there, with the session Chrome already has: the candidate never signs in anywhere for ApplAI. It only reads: no tab, no click, no form. Its permissions are `*.jobteaser.com`, ApplAI's address `http://127.0.0.1`, and an alarm to ask ApplAI every minute.
+JobTeaser refuses ApplAI's requests, but serves its offer pages to the candidate's own Chrome. The ApplAI extension (`extension/`) reads them there, with the session Chrome already has: the candidate never signs in anywhere for ApplAI. It also reads the form of each accepted offer: it opens the form in an inactive tab, lists its fields (`extension/forms.js`) and closes the tab. It only reads: no click, no typing, no submit. Its permissions are `*.jobteaser.com` and the ATS hosts of `applai.capture.ATS_HOSTS`, the boards that host their own form (`BOARD_HOSTS`), ApplAI's address `http://127.0.0.1`, `scripting` to read a form in its tab, and an alarm to ask ApplAI every minute.
 
 ## Set it up in Chrome on Windows, with ApplAI in WSL
 
@@ -15,4 +15,4 @@ JobTeaser refuses ApplAI's requests, but serves its offer pages to the candidate
 4. Run `applai serve` (port 8000: the extension asks there). WSL forwards Windows' `127.0.0.1` to it.
 5. Sign in to JobTeaser in that Chrome as usual. Within a minute, `GET /api/browser/status` answers `"connected": true`.
 
-A page the extension cannot read is reported to ApplAI and asked for again only after the next scan. After a second failure, the offer is triaged from its job alert, and its card says "full text not read".
+A page the extension cannot read is reported to ApplAI and asked for again only after the next scan. After a second failure, the offer is triaged from its job alert, and its card says "full text not read". A form follows the same rule; after its second failure, the Applications dashboard asks for the form's URL, and a pasted one is read within a minute.
