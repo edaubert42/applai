@@ -10,7 +10,7 @@ import os
 from collections.abc import Iterable, Iterator, Mapping
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Self, cast
+from typing import Annotated, Any, Literal, Self, cast
 
 import yaml
 from pydantic import (
@@ -58,6 +58,7 @@ class Identity(_Section):
     email: str
     phone: str
     city: str
+    grammatical_gender: Literal["masculine", "feminine"] | None = None  # of the CV's title line
 
 
 class BaseAnswer(_Section):
@@ -156,6 +157,7 @@ class Profile(_Section):
     cv: str | None = None  # the CV Filling attaches: a file's path inside the data directory
     # Instead of cv: Filling renders the CV of the offer's language and contract from these.
     cv_sources: CvSources | None = None
+    cv_photo_rule: str | None = None  # when the CV has a photo, in the candidate's words
 
     @model_validator(mode="after")
     def _fact_ids_are_unique(self) -> Self:

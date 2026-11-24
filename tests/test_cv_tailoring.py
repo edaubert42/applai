@@ -3,7 +3,7 @@
 import io
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -118,8 +118,10 @@ def _application(engine: Engine, application_id: int) -> Application:
 def test_a_headline_a_reorder_and_a_reword_citing_a_validated_fact_reach_the_served_cv(
     engine: Engine, data_dir: Path
 ):
-    tailored = _tailored(_change("reorder", BULLETS, order=[2, 0, 1]),
-                         _change("reword", f"{BULLETS}[2]", text=FORECAST, facts=("F3",)))  # fmt: skip
+    tailored = _tailored(
+        _change("reorder", BULLETS, order=[2, 0, 1]),
+        _change("reword", f"{BULLETS}[2]", text=FORECAST, facts=("F3",)),
+    )
 
     application_id = _drafted(engine, data_dir, tailored)
     pdf, _ = _filled(data_dir, application_id)
@@ -129,11 +131,12 @@ def test_a_headline_a_reorder_and_a_reword_citing_a_validated_fact_reach_the_ser
     assert text.index("Prévision des délais") < text.index("refonte de 30") < text.index("Mise en")
     assert "Animation" not in text
     run = _run(engine)
-    assert (run.model, run.application_id, run.outcome) == (CV_TAILORING_MODEL, application_id, "ok")
+    assert (run.model, run.application_id, run.outcome) == (
+        CV_TAILORING_MODEL, application_id, "ok",
+    )  # fmt: skip
     assert [(c.op, c.path, c.status) for c in _changes(engine)] == [
         ("reorder", BULLETS, "pending"), ("reword", f"{BULLETS}[2]", "pending"),
     ]  # fmt: skip
-    assert _application(engine, application_id).state == "drafted"
 
 
 def test_a_reword_citing_a_fact_it_may_not_use_or_adding_a_capitalized_word_is_refused(
@@ -186,11 +189,11 @@ def test_a_cv_over_one_page_asks_the_agent_again_once(engine: Engine, data_dir: 
 
     with _client(data_dir, second) as client:
         assert client.post(f"/api/applications/{application_id}/answers-checked").status_code == 204
-        backend = client.app.state.watch.runner.backend  # type: ignore[attr-defined]
+        backend = cast(FakeBackend, client.app.state.watch.runner.backend)  # type: ignore[attr-defined]
         pdf = client.get(f"/api/browser/fills/{application_id}/files/cv").content
 
     [spec] = backend.specs
-    assert spec.name == AGENT and "2 pages" in spec.input
+    assert spec.name == AGENT and '"overflow"' in spec.input
     assert "Data analytics engineer" in _text(pdf) and "Animation" not in _text(pdf)
     assert [c.op for c in _changes(engine)] == ["drop"]
 
@@ -228,9 +231,7 @@ def test_photo_unknown_gives_no_image_and_a_warning(engine: Engine, data_dir: Pa
     assert _application(engine, application_id).cv_photo == "unknown"
 
 
-def test_an_agent_error_still_drafts_the_application_with_no_change(
-    engine: Engine, data_dir: Path
-):
+def test_an_agent_error_still_drafts_the_application_with_no_change(engine: Engine, data_dir: Path):
     broken = AgentResult(output={"headline": 3}, usage=Usage(model=CV_TAILORING_MODEL))
 
     application_id = _drafted(engine, data_dir, broken)

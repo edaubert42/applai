@@ -10,8 +10,9 @@ them, so a value that is not an option fails the run. Every text field that is n
 was drafted as a question (applai.drafting.drafted_fields): none is left to it. A link field
 (LinkedIn, website) Drafting leaves to identity has no value in the profile: it stays empty,
 for the candidate. With cv_sources in the profile, the CV is rendered for the offer
-(applai.cv: its language, its contract, no photo) to the application's cv.pdf, and a CV that
-fails its checks fails Filling. Served, the CV is named CV_<first>_<last>.pdf. A failure is kept
+(applai.cv: its language, its contract, no photo) to the application's cv.pdf, tailored when
+CV tailoring kept something (applai.cv_tailoring), and a source's CV that fails its checks
+fails Filling. Served, the CV is named CV_<first>_<last>.pdf. A failure is kept
 as the application's fill_error, for a retry by hand.
 No action sends anything (ADR 0003): the extension fills, attaches, and reports
 (applai.browser).
@@ -23,33 +24,20 @@ import unicodedata
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner, AgentSpec
-from applai.cv import (
-    CvError,
-    Lang,
-    offer_contract,
-    offer_language,
-    render_cv,
-    source_headlines,
-)
+from applai.cv import CvError, render_cv
+from applai.cv_tailoring import chosen_source, tailored_pdf
 from applai.drafting import COVER_LETTER, AnswerStatus
 from applai.models import Application, DraftAnswer, Offer
 from applai.orchestrator import ApplicationState
 from applai.pdf import text_pdf
-from applai.profile import (
-    Identity,
-    Profile,
-    ProfileError,
-    cv_file,
-    cv_source_file,
-    load_profile,
-)
+from applai.profile import Identity, Profile, ProfileError, cv_file, load_profile
 from applai.text import fold
 from applai.triage import prompt_facts
 
@@ -193,26 +181,24 @@ def _chosen(
 
 
 def _render_cv(
-    data_dir: Path, application_id: int, profile: Profile, offer: tuple[str, str | None, str | None]
-) -> None:
-    """Render the CV of the offer's language and contract, no photo, to the application's
-    cv.pdf. A CV that fails its checks is a failure, never a fallback to another CV."""
-    title, description, contract = offer
-    assert profile.cv_sources is not None
-    sources = profile.cv_sources.paths()
-    lang = offer_language(title, description, cast(list[Lang], list(sources)))
-    source = cv_source_file(data_dir, profile, lang)
-    if source is None:
-        raise FillingError(f"The CV source in {lang} is not a file inside the data directory.")
-    headlines = source_headlines(data_dir, source)
-    contract = offer_contract(title, contract, headlines, profile.targets.contracts)
-    rendered = render_cv(data_dir, lang, contract, source_file=source)
-    if rendered.checks.problems:
-        raise FillingError(f"The CV {source.name} fails its checks: "
-                           + "; ".join(rendered.checks.problems))  # fmt: skip
+    runner: AgentRunner, database: Engine, data_dir: Path, application_id: int, profile: Profile,
+    offer: tuple[str, str | None, str | None],
+) -> None:  # fmt: skip
+    """Render the CV of the offer's language and contract to the application's cv.pdf: the
+    tailored one, else the source's, no photo. A source's CV that fails its checks is a
+    failure, never a fallback to another CV."""
+    chosen = chosen_source(data_dir, profile, *offer)
+    pdf = tailored_pdf(runner, database, data_dir, application_id, profile, chosen)
+    if pdf is None:
+        lang, source, contract = chosen
+        rendered = render_cv(data_dir, lang, contract, source_file=source)
+        if rendered.checks.problems:
+            raise FillingError(f"The CV {source.name} fails its checks: "
+                               + "; ".join(rendered.checks.problems))  # fmt: skip
+        pdf = rendered.pdf
     directory = data_dir / "applications" / str(application_id)
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / CV_PDF).write_bytes(rendered.pdf)
+    (directory / CV_PDF).write_bytes(pdf)
 
 
 def plan_fill(
@@ -239,7 +225,7 @@ def plan_fill(
         if profile.cv_sources:
             (data_dir / "applications" / str(application_id) / CV_PDF).unlink(missing_ok=True)
             if any(a.kind == "attach" and a.value == CV for a in actions):
-                _render_cv(data_dir, application_id, profile, offer_text)
+                _render_cv(runner, database, data_dir, application_id, profile, offer_text)
         if left:
             actions += _chosen(runner, database, offer_id, application_id, fields, left, profile)
         actions.sort(key=lambda action: action.field)

@@ -180,8 +180,36 @@ class Application(Base):
     review_error: Mapped[str | None]  # why the last Review failed, until a review succeeds
     send_authorized_at: Mapped[datetime | None]  # per-application permission to send (ADR 0003)
     send_error: Mapped[str | None]  # why the extension could not submit or confirm
+    # CV tailoring (applai.cv_tailoring): the title line kept, none for the source's; the photo
+    # (with, without, unknown) and why; what Filling warns of the CV it rendered.
+    cv_headline: Mapped[str | None]
+    cv_photo: Mapped[str | None]
+    cv_photo_reason: Mapped[str | None]
+    cv_warning: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=_utc_now, onupdate=_utc_now)
+
+
+class CvChange(Base):
+    """One change CV tailoring kept on a copy of the application's CV (applai.cv_tailoring).
+
+    op is reorder (path names a list: its items' texts, as JSON, in old and new order), reword
+    (path names a bullet, new_text cites facts) or drop (a bullet). pending until the
+    candidate's check.
+    """
+
+    __tablename__ = "cv_changes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int]
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"), index=True)
+    op: Mapped[str]
+    path: Mapped[str]  # in the CV source: experience[0].bullets[2], skills…
+    old_text: Mapped[str]
+    new_text: Mapped[str | None]  # none for a drop
+    facts: Mapped[list[str]] = mapped_column(JSON)  # a reword's fact ids
+    status: Mapped[str] = mapped_column(server_default="pending")
+    created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
 class DraftAnswer(Base):

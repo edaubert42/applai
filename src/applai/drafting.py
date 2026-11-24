@@ -7,8 +7,9 @@ with no agent run. Each answer is a list of sentences, each citing the facts it 
 checks every cited fact is in the profile, validated, and not of diffusion never (ADR 0008),
 else nothing is stored, the run's outcome says why, and the application stays form_captured
 with its draft_error. Only those facts reach the agent. Then the judge checks each sentence
-against its facts (applai.drafting_judge); its warnings are kept, never blocking. An answer
-the candidate rejects is drafted again alone, with their reason (redraft_answer).
+against its facts (applai.drafting_judge); its warnings are kept, never blocking. CV tailoring
+runs last (applai.cv_tailoring). An answer the candidate rejects is drafted again alone, with
+their reason (redraft_answer).
 """
 
 import json
@@ -22,6 +23,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner, AgentSpec
+from applai.cv_tailoring import store, tailor_cv
 from applai.drafting_judge import judge_answers
 from applai.models import AgentRun, Application, DraftAnswer, Offer
 from applai.orchestrator import Actor, ApplicationState, move
@@ -156,13 +158,16 @@ def citation_problem(sentences: list[dict[str, Any]], profile: Profile) -> str |
 
 
 def draft_application(
-    runner: AgentRunner, database: Engine, application_id: int, profile: Profile
-) -> list[DraftAnswer]:
+    runner: AgentRunner, database: Engine, application_id: int, profile: Profile,
+    data_dir: Path | None = None,
+) -> list[DraftAnswer]:  # fmt: skip
     """Draft a form_captured application, store its answers and move it to drafted.
 
     Any failure, a failed run or a fact it may not cite, is raised and kept as the
-    application's draft_error; nothing is stored. No session is held open while the agent
-    runs: move() refuses the application if another session moved it meanwhile.
+    application's draft_error; nothing is stored. Given the data directory, CV tailoring
+    runs after the answers and is stored with them; it never fails Drafting. No session is
+    held open while the agents run: move() refuses the application if another session moved
+    it meanwhile.
     """
     with Session(database) as session:
         application = session.get_one(Application, application_id)
@@ -178,11 +183,14 @@ def draft_application(
         record_failure(database, application_id, str(error) if known else type(error).__name__)
         raise
     judge_answers(runner, database, offer_id, application_id, rows, profile)
+    tailored = tailor_cv(runner, database, data_dir, application_id, profile) if data_dir else None
     with Session(database, expire_on_commit=False) as session, session.begin():
         application = session.get_one(Application, application_id)
         for row in rows:
             row.user_id = application.user_id
         session.add_all(rows)
+        if tailored:
+            store(session, application, tailored)
         application.draft_error = None
         move(session, application, ApplicationState.DRAFTED, Actor.DRAFTING)
     return rows
@@ -303,4 +311,4 @@ def draft_in_background(
         record_failure(database, application_id, str(error))
         return
     with suppress(Exception):  # recorded by draft_application
-        draft_application(runner, database, application_id, profile)
+        draft_application(runner, database, application_id, profile, data_dir)
