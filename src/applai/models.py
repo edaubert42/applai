@@ -190,6 +190,8 @@ class DraftAnswer(Base):
     sentences: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     text: Mapped[str]
     status: Mapped[str] = mapped_column(server_default="pending")  # accepted, edited, rejected
+    # The judge's unsupported sentences, [{sentence, reason}]; None if it did not judge.
+    judge_issues: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 

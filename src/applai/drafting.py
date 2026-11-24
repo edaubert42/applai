@@ -6,7 +6,8 @@ form with no open question, a slot for other documents. A form with neither move
 with no agent run. Each answer is a list of sentences, each citing the facts it states; code
 checks every cited fact is in the profile, validated, and not of diffusion never (ADR 0008),
 else nothing is stored, the run's outcome says why, and the application stays form_captured
-with its draft_error. Only those facts reach the agent.
+with its draft_error. Only those facts reach the agent. Then the judge checks each sentence
+against its facts (applai.drafting_judge); its warnings are kept, never blocking.
 """
 
 import json
@@ -19,6 +20,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner, AgentSpec
+from applai.drafting_judge import judge_answers
 from applai.models import AgentRun, Application, DraftAnswer, Offer
 from applai.orchestrator import Actor, ApplicationState, move
 from applai.profile import Diffusion, FactStatus, Profile, ProfileError, load_profile
@@ -157,6 +159,7 @@ def draft_application(
         known = isinstance(error, AgentError | DraftingError)
         record_failure(database, application_id, str(error) if known else type(error).__name__)
         raise
+    judge_answers(runner, database, offer_id, application_id, rows, profile)
     with Session(database, expire_on_commit=False) as session, session.begin():
         application = session.get_one(Application, application_id)
         for row in rows:
