@@ -172,7 +172,7 @@ def _wait_turn(
 def _describe(
     session: Session, offer: Offer, command: str, job_id: str, now: datetime, into: Describing
 ) -> bool:
-    """Read the offer through the server; return whether it is now described."""
+    """Read the offer through the server; return whether the call succeeded."""
     # The read counts before the call: a call that fails still reached LinkedIn.
     session.add(LinkedInRead(user_id=offer.user_id, offer_id=offer.id, read_at=now))
     session.commit()
