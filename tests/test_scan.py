@@ -19,12 +19,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from applai.agents import AgentResult, AgentRunner, FakeBackend, Usage
+from applai.agents import AgentError, AgentResult, AgentRunner, FailureKind, FakeBackend, Usage
 from applai.app import create_app
 from applai.database import open_database
 from applai.linkedin import COMMAND_VARIABLE, MAX_READS_PER_DAY
 from applai.models import LinkedInRead, Offer, Scan
 from applai.scan import Scanner, Watch
+from applai.triage import AGENT as TRIAGE_AGENT
 from applai.triage import TRIAGE_MODEL
 
 DEMO_DIR = Path(__file__).parents[1] / "demo" / "candidate"
@@ -454,6 +455,50 @@ def test_a_scan_reads_every_new_linkedin_offer_10_seconds_apart_then_triages_the
 
 
 @pytest.mark.parametrize("cards", [2])
+def test_a_scan_triages_each_linkedin_offer_before_reading_the_next(
+    data_dir: Path, app: FastAPI, clock: Clock, monkeypatch: pytest.MonkeyPatch
+):
+    jobs: dict[str, object] = dict.fromkeys(("4000000001", "4000000002"), LINKEDIN_JOB)
+    _serve_linkedin(data_dir, monkeypatch, jobs)
+    first, second = _seed(data_dir, *(_linkedin_offer(job_id) for job_id in jobs))
+    during_wait: list[dict[int, str]] = []
+    clock.on_sleep = lambda: during_wait.append(_states(data_dir))
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _scanner(client).wait()
+
+    assert during_wait == [{first: "triaged", second: "new"}]
+    assert _states(data_dir) == {first: "triaged", second: "triaged"}
+
+
+def test_a_failed_triage_of_an_offer_just_read_is_one_error_and_the_next_scan_triages_it(
+    data_dir: Path, network: Network, monkeypatch: pytest.MonkeyPatch, clock: Clock
+):
+    page = f'<script type="application/ld+json">{json.dumps(POSTING)}</script>'
+    network.pages[f"{SITE}/first"] = (200, page)
+    (offer_id,) = _seed(data_dir, _offer("first"))
+    usage = Usage(model=TRIAGE_MODEL, input_tokens=900, output_tokens=300)
+    failed = AgentError(TRIAGE_AGENT, FailureKind.EXIT, "the CLI reported an error")
+    backend = FakeBackend([failed, AgentResult(output=CARD, usage=usage)])
+    watch = Watch(http=network.client, runner=AgentRunner(backend), ms_client_id=None)
+    app = create_app(data_dir, frontend_dir=data_dir / "no-frontend", watch=watch, clock=clock)
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _scanner(client).wait()
+        first_scan = client.get("/api/scan").json()["last_scan"]["errors"]
+        states_between = _states(data_dir)
+        assert client.post("/api/scan").status_code == 202
+        _scanner(client).wait()
+
+    assert [e for e in first_scan if e.startswith(f"Offer {offer_id} ")] == [
+        f"Offer {offer_id} was not triaged: agent triage failed: exit (the CLI reported an error)."
+    ]
+    assert states_between == {offer_id: "described"}
+    assert _states(data_dir) == {offer_id: "triaged"}
+    assert len(backend.specs) == 2  # one try per scan
+
+
+@pytest.mark.parametrize("cards", [2])
 def test_with_50_reads_made_today_no_call_is_made_and_the_next_days_scan_reads_the_rest(
     data_dir: Path, app: FastAPI, clock: Clock, monkeypatch: pytest.MonkeyPatch
 ):
@@ -591,8 +636,8 @@ def test_stop_scan_stops_a_running_scan_and_reports_active_services(
     assert after["active_service"] is None
     assert after["services_used"] == []
     assert after["last_scan"]["finished_at"] is not None
-    # The first offer finished being described; the second was never read and triage did not run.
-    assert _states(data_dir) == {first_id: "described", second_id: "new"}
+    # The first offer, read before the stop, is triaged at once; the second was never read.
+    assert _states(data_dir) == {first_id: "triaged", second_id: "new"}
 
 
 def test_stop_scan_when_no_scan_runs_returns_409(data_dir: Path, app: FastAPI):

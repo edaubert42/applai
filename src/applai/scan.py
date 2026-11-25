@@ -2,9 +2,10 @@
 
 run_scan() reads the job alerts (applai.mail), then screens each new offer and reads its
 page (applai.screening, applai.details), reads the screened LinkedIn offers through the
-candidate's LinkedIn MCP server within its pacing (applai.linkedin), then triages each
-described offer (applai.triage). JobTeaser's pages are left to the ApplAI extension
-(applai.browser).
+candidate's LinkedIn MCP server within its pacing (applai.linkedin), and triages each offer
+as soon as it is read (applai.triage), so a stopped scan keeps every triage it made; at the
+end it triages the described offers read before or by the extension. JobTeaser's pages
+are left to the ApplAI extension (applai.browser).
 A failure is recorded in plain words and the scan goes on: one offer's never stops the
 others. Without the profile nothing is screened, so nothing is read or triaged unscreened.
 
@@ -96,6 +97,18 @@ def run_scan(
     except ProfileError as error:
         found.errors.append(f"No offer was screened: {error}")
         return found
+    tried: set[int] = set()
+
+    def triage(offer_id: int) -> None:
+        tried.add(offer_id)
+        report("triage")
+        try:
+            triage_offer(watch.runner, engine, offer_id, profile)
+        except AlreadyRunning:  # its page's Triage runs (applai.browser) and keeps the card
+            pass
+        except Exception as error:
+            found.errors.append(f"Offer {offer_id} was not triaged: {_plain(error)}.")
+
     for offer_id in _offers(engine, OfferState.NEW, user_id):
         if stopped():
             return found
@@ -115,22 +128,20 @@ def run_scan(
                 session.rollback()
                 found.errors.append(f"Offer {offer_id} was not screened nor read: {_plain(error)}.")
             session.commit()
+            read = offer.state == OfferState.DESCRIBED
+        if read:  # triaged at once, so a stop keeps the triage of every offer read
+            triage(offer_id)
     if stopped():
         return found
     sleep = _cancellable_sleep(watch.sleep, cancel)
-    _read_linkedin(engine, user_id, clock, sleep, progress, report, stopped, found.errors)
+    _read_linkedin(engine, user_id, clock, sleep, progress, report, stopped, found.errors, triage)
     if stopped():
         return found
-    for offer_id in _offers(engine, OfferState.DESCRIBED, user_id):
+    for offer_id in _offers(engine, OfferState.DESCRIBED, user_id):  # read before, or elsewhere
         if stopped():
             return found
-        report("triage")
-        try:
-            triage_offer(watch.runner, engine, offer_id, profile)
-        except AlreadyRunning:  # its page's Triage runs (applai.browser) and keeps the card
-            continue
-        except Exception as error:
-            found.errors.append(f"Offer {offer_id} was not triaged: {_plain(error)}.")
+        if offer_id not in tried:
+            triage(offer_id)
     return found
 
 
@@ -188,6 +199,7 @@ def _read_linkedin(
     report: ServiceReport,
     stop: Callable[[], bool],
     errors: list[str],
+    described: Callable[[int], None],
 ) -> None:
     """Read the screened LinkedIn offers, as far as the reader's pacing allows."""
 
@@ -199,7 +211,7 @@ def _read_linkedin(
     try:
         with Session(engine) as session:
             describing = describe_linkedin_offers(
-                session, lambda: _utc(clock()), sleep, user_id, on_progress, stop
+                session, lambda: _utc(clock()), sleep, user_id, on_progress, stop, described
             )
     except Exception as error:
         errors.append(f"LinkedIn: the reads stopped: {_plain(error)}.")  # the read ones stay
