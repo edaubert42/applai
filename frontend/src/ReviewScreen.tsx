@@ -7,6 +7,8 @@ import ScanBar from "./ScanBar";
 import { useSettings } from "./settings";
 
 type Lists = Record<View, Card[]>;
+type Sort = "score" | "date";
+const SORTS: readonly Sort[] = ["score", "date"];
 
 const focus = "focus-visible:outline-2 focus-visible:outline-link";
 const REREAD_POLL_MS = 5000;
@@ -19,6 +21,7 @@ const REREAD_POLL_MS = 5000;
 export default function ReviewScreen({ onOpenSettings }: { onOpenSettings: () => void }) {
   const { t } = useSettings();
   const [view, setView] = useState<View>("to_review");
+  const [sort, setSort] = useState<Sort>("score");
   const [lists, setLists] = useState<Lists | null>(null);
   const [failed, setFailed] = useState(false);
   const [problem, setProblem] = useState(false); // a decision the API refused
@@ -47,7 +50,15 @@ export default function ReviewScreen({ onOpenSettings }: { onOpenSettings: () =>
     };
   }, [loads]);
 
-  const shown = useMemo(() => lists?.[view] ?? [], [lists, view]);
+  const shown = useMemo(() => {
+    const cards = lists?.[view] ?? [];
+    if (view === "screened_out") return cards;
+    return [...cards].sort((a, b) =>
+      sort === "date"
+        ? new Date(b.seen_at).getTime() - new Date(a.seen_at).getTime()
+        : (b.score ?? -1) - (a.score ?? -1),
+    );
+  }, [lists, view, sort]);
   const decliningCard = shown.find((card) => card.id === declining);
   const asRows = view === "to_review";
   const openCard = asRows ? shown.find((card) => card.id === open) : undefined;
@@ -226,9 +237,26 @@ export default function ReviewScreen({ onOpenSettings }: { onOpenSettings: () =>
           ))}
         </div>
         {view !== "screened_out" && (
-          <p className="text-muted">
-            {t(shown.length === 1 ? "review.summary.one" : "review.summary.other", { n: shown.length })}
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-muted">
+              {t(shown.length === 1 ? "review.summary.one" : "review.summary.other", { n: shown.length })}
+            </p>
+            <div role="group" aria-label={t("review.sort.label")} className="flex gap-1 rounded-pill bg-surface p-1">
+              {SORTS.map((by) => (
+                <button
+                  key={by}
+                  type="button"
+                  aria-pressed={by === sort}
+                  onClick={() => setSort(by)}
+                  className={`min-h-11 cursor-pointer rounded-pill px-4 font-medium ${focus} ${
+                    by === sort ? "bg-primary text-on-primary hover:brightness-90" : "text-muted hover:text-text"
+                  }`}
+                >
+                  {t(`review.sort.${by}`)}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
       </div>
       {failed && <p role="alert" className="text-minus">{t("review.error")}</p>}
