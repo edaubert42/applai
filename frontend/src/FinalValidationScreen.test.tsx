@@ -156,6 +156,14 @@ describe("FinalValidationScreen", () => {
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(2);
   });
 
+  it.each(["fr", "en"] as const)("shows the CV warning of the application in %s", async (language) => {
+    const review = aFormReview({ cv_warning: "The photo is unknown for this offer: the CV has no photo." });
+    const { words } = await openValidation({}, language, review);
+
+    const prefix = words["validation.cv_warning"].replace("{warning}", "");
+    expect(screen.getByRole("alert").textContent).toBe(`${prefix}The photo is unknown for this offer: the CV has no photo.`);
+  });
+
   it.each(["fr", "en"] as const)("shows send_error alert and authorizes ApplAI to send in %s", async (language) => {
     const review = aFormReview({ state: "validated", send_error: "No open tab matches the form URL." });
     const { calls, words } = await openValidation({

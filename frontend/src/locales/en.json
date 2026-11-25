@@ -169,6 +169,7 @@
   "validation.authorize_send": "Authorize ApplAI to send",
   "validation.send_authorized": "Send authorized",
   "validation.send_error": "Sending failed: {error}",
+  "validation.cv_warning": "Check the CV: {warning}",
   "validation.mark_sent": "Mark as sent",
   "validation.drop": "Drop application",
   "validation.drop_prompt": "Drop this application?",

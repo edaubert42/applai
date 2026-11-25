@@ -19,10 +19,10 @@ from applai.models import Application, Base, Label, Offer
 
 TABLES = {
     "offers", "applications", "state_changes", "agent_runs", "triages", "mails_read",
-    "labels", "linkedin_reads", "scans", "draft_answers",
+    "labels", "linkedin_reads", "scans", "draft_answers", "cv_changes",
 }  # fmt: skip
-# From 0004, 0008 to 0010, and 0017.
-LATER_TABLES = {"mails_read", "labels", "linkedin_reads", "scans", "draft_answers"}
+# From 0004, 0008 to 0010, 0017 and 0023.
+LATER_TABLES = {"mails_read", "labels", "linkedin_reads", "scans", "draft_answers", "cv_changes"}
 OFFER_URL = "https://jobs.example.org/brindille-logistique/data-engineer"
 
 type Opener = Callable[..., Engine]

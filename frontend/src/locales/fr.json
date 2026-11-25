@@ -169,6 +169,7 @@
   "validation.authorize_send": "Autoriser ApplAI à envoyer",
   "validation.send_authorized": "Envoi autorisé",
   "validation.send_error": "L’envoi a échoué : {error}",
+  "validation.cv_warning": "Vérifiez le CV : {warning}",
   "validation.mark_sent": "Marquer comme envoyée",
   "validation.drop": "Abandonner",
   "validation.drop_prompt": "Abandonner cette candidature ?",

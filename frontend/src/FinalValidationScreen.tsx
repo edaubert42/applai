@@ -68,6 +68,9 @@ export default function FinalValidationScreen({
           {review.send_error && (
             <p role="alert" className="text-sm text-minus">{t("validation.send_error", { error: review.send_error })}</p>
           )}
+          {review.cv_warning && (
+            <p role="alert" className="text-sm text-minus">{t("validation.cv_warning", { warning: review.cv_warning })}</p>
+          )}
 
           <section aria-labelledby="validation-problems" className="space-y-3">
             <h3 id="validation-problems" className="text-lg font-semibold">{t("validation.problems.title")}</h3>

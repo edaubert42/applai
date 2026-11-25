@@ -210,6 +210,6 @@ export function aFormReview(overrides: Partial<FormReview> = {}): FormReview {
       aReviewedField({ field: 2, label: "CV", type: "file", value: null, file: "cv-camille.pdf", slot: "cv" }),
     ],
     problems: [], review_error: null, has_screenshot: true,
-    send_authorized: false, send_error: null, ...overrides,
+    send_authorized: false, send_error: null, cv_warning: null, ...overrides,
   };
 }
