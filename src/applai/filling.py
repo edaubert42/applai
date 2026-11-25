@@ -3,7 +3,8 @@
 Once the candidate closes the answers gate, plan_fill() maps the form's fields to actions,
 in the background (applai.app). Code maps what it knows: identity fields from the profile,
 each checked answer (accepted, or as the candidate edited it) to its field, the CV and the
-cover letter to file fields; a letter asked as a file is rendered as a PDF (applai.pdf).
+cover letter to file fields; a letter asked as a file is rendered as a one-page PDF laid out
+as a letter (applai.letter), and a letter that does not fit on one page fails Filling.
 Only choice fields with options (select, radio, checkbox) go to the filling agent: Sonnet,
 no tool, picking among each field's own options or none (ADR 0008); its output schema lists
 them, so a value that is not an option fails the run. Every text field that is not identity
@@ -23,6 +24,7 @@ import re
 import unicodedata
 from collections.abc import Callable
 from contextlib import suppress
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,13 +33,14 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner, AgentSpec
-from applai.cv import CvError, render_cv
+from applai.cv import CvError, offer_language, render_cv
 from applai.cv_tailoring import chosen_source, tailored_pdf
 from applai.drafting import COVER_LETTER, AnswerStatus
+from applai.letter import render_letter
 from applai.models import Application, DraftAnswer, Offer
 from applai.orchestrator import ApplicationState
-from applai.pdf import text_pdf
 from applai.profile import Identity, Profile, ProfileError, cv_file, load_profile
+from applai.scan import Clock, local_now
 from applai.text import fold
 from applai.triage import prompt_facts
 
@@ -201,12 +204,31 @@ def _render_cv(
     (directory / CV_PDF).write_bytes(pdf)
 
 
+def _render_letter(
+    data_dir: Path, application_id: int, profile: Profile, offer: tuple[str, str, str | None],
+    text: str, day: date,
+) -> None:  # fmt: skip
+    """Render the checked letter to the application's cover_letter.pdf, in the offer's language,
+    dated day. A letter over one page is a failure: no PDF is kept."""
+    company, title, description = offer
+    lang = offer_language(title, description, ("fr", "en"))
+    rendered = render_letter(profile.identity, company, title, text, lang, day)
+    if rendered.checks.pages != 1:
+        raise FillingError(f"The cover letter is {rendered.checks.pages} pages, expected 1: "
+                           "shorten it.")  # fmt: skip
+    directory = data_dir / "applications" / str(application_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / LETTER_PDF).write_bytes(rendered.pdf)
+
+
 def plan_fill(
-    runner: AgentRunner, database: Engine, data_dir: Path, application_id: int, profile: Profile
-) -> list[FillAction]:
+    runner: AgentRunner, database: Engine, data_dir: Path, application_id: int, profile: Profile,
+    clock: Clock = local_now,
+) -> list[FillAction]:  # fmt: skip
     """Plan an answers_checked application's fill, write its letter's PDF, store the plan.
 
     Any failure is raised and kept as its fill_error. No session is held while the agent runs.
+    The letter is dated the day clock gives.
     """
     with Session(database) as session:
         application = session.get_one(Application, application_id)
@@ -215,11 +237,13 @@ def plan_fill(
         fields, offer_id = application.form_fields or [], application.offer_id
         offer = session.get_one(Offer, offer_id)
         offer_text = (offer.title, offer.description, offer.contract)
+        letter_offer = (offer.company, offer.title, offer.description)
         checked = session.scalars(select(DraftAnswer).where(
             DraftAnswer.application_id == application_id,
             DraftAnswer.status.in_([AnswerStatus.ACCEPTED, AnswerStatus.EDITED])))  # fmt: skip
         answers = {a.field_index: (a.kind, a.edited_text or a.text) for a in checked}  # as checked
     try:
+        (data_dir / "applications" / str(application_id) / LETTER_PDF).unlink(missing_ok=True)
         has_cv = profile.cv_sources is not None or cv_file(data_dir, profile) is not None
         actions, left = by_code(fields, answers, profile, has_cv)
         if profile.cv_sources:
@@ -231,9 +255,8 @@ def plan_fill(
         actions.sort(key=lambda action: action.field)
         for action in actions:
             if action.kind == "attach" and action.value == COVER_LETTER:
-                directory = data_dir / "applications" / str(application_id)
-                directory.mkdir(parents=True, exist_ok=True)
-                (directory / LETTER_PDF).write_bytes(text_pdf(answers[action.field][1]))
+                _render_letter(data_dir, application_id, profile, letter_offer,
+                               answers[action.field][1], clock().date())  # fmt: skip
     except Exception as error:  # these messages hold no candidate data
         known = isinstance(error, AgentError | FillingError | CvError)
         record_failure(database, application_id, str(error) if known else type(error).__name__)
@@ -257,7 +280,7 @@ def record_failure(database: Engine, application_id: int, error: str) -> None:
 
 
 def plan_in_background(
-    database: Engine, data_dir: Path, runner: AgentRunner, application_id: int
+    database: Engine, data_dir: Path, runner: AgentRunner, application_id: int, clock: Clock
 ) -> None:
     """Plan the application's fill; a failure stays on it as its fill_error, for a retry."""
     try:
@@ -266,7 +289,7 @@ def plan_in_background(
         record_failure(database, application_id, str(error))
         return
     with suppress(Exception):  # recorded by plan_fill
-        plan_fill(runner, database, data_dir, application_id, profile)
+        plan_fill(runner, database, data_dir, application_id, profile, clock)
 
 
 def cv_name(identity: Identity) -> str:

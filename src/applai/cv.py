@@ -331,7 +331,7 @@ def render_cv(
         encoded = base64.b64encode(photo_file.read_bytes()).decode("ascii")
         photo_uri = f"data:image/jpeg;base64,{encoded}"
     html = _html(source, lang, contract, photo_uri)
-    return _print(html)
+    return print_pdf(html)
 
 
 def _load_source(path: Path) -> CvSource:
@@ -424,9 +424,10 @@ def _typography(value: Any, lang: Lang) -> Any:
     return value
 
 
-def _print(html: str) -> RenderedCv:
-    width_mm = _PAGE_MM[0] - _MARGINS_MM[1] - _MARGINS_MM[3]
-    height_mm = _PAGE_MM[1] - _MARGINS_MM[0] - _MARGINS_MM[2]
+def print_pdf(html: str, margins_mm: tuple[int, int, int, int] = _MARGINS_MM) -> RenderedCv:
+    """The A4 PDF of html, whose @page has these margins (top, right, bottom, left), with checks."""
+    width_mm = _PAGE_MM[0] - margins_mm[1] - margins_mm[3]
+    height_mm = _PAGE_MM[1] - margins_mm[0] - margins_mm[2]
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
