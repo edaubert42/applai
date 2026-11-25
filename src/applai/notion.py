@@ -226,10 +226,24 @@ def write_sent_in_background(
         _set_write_status(data_dir, ok=True)
 
 
-def _status_kind(container: dict[str, Any], name: str) -> str:
+def _prop_type(container: dict[str, Any], name: str) -> str | None:
     prop = cast(dict[str, Any], container.get("properties") or {}).get(name)
     ptype = cast(dict[str, Any], prop).get("type") if isinstance(prop, dict) else None
-    return "select" if ptype == "select" else "status"
+    return ptype if isinstance(ptype, str) else None
+
+
+def _status_kind(container: dict[str, Any], name: str) -> str:
+    return "select" if _prop_type(container, name) == "select" else "status"
+
+
+def _write_prop(db: dict[str, Any], name: str, value: str, default: str) -> dict[str, Any]:
+    kind = _prop_type(db, name) or default
+    if kind == "url":
+        return {"url": value}
+    if kind == "select":
+        return {"select": {"name": value}}
+    key = "title" if kind == "title" else "rich_text"
+    return {key: [{"text": {"content": value}}]}
 
 
 def _write_sent(
@@ -255,9 +269,9 @@ def _write_sent(
     body = {
         "parent": {"database_id": cfg.database_id},
         "properties": {
-            n.title: {"title": [{"text": {"content": title}}]},
-            n.company: {"rich_text": [{"text": {"content": company}}]},
-            n.url: {"url": url},
+            n.title: _write_prop(db, n.title, title, "title"),
+            n.company: _write_prop(db, n.company, company, "rich_text"),
+            n.url: _write_prop(db, n.url, url, "url"),
             n.status: {_status_kind(db, n.status): {"name": cfg.sent_status}},
         },
     }
