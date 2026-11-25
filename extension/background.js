@@ -26,12 +26,24 @@ export async function readPages(fetch = globalThis.fetch) {
     let path = "", body;
     try {
       const page = await fetch(url, { credentials: "include" });
-      if (page.ok) body = { html: await page.text() };
+      // A session that expired answers 200 with a sign-in page: that is a failure, not the offer.
+      if (page.ok && !leftTheOffer(page, url)) body = { html: await page.text() };
       else [path, body] = ["/failure", { status: page.status }];
     } catch {
       [path, body] = ["/failure", {}]; // not fetched
     }
     await send(fetch, `/api/browser/pages/${offer_id}${path}`, body);
+  }
+}
+
+// Whether a fetch was redirected to another host or path than the offer's.
+function leftTheOffer(page, url) {
+  if (!page.redirected) return false;
+  try {
+    const [to, from] = [new URL(page.url), new URL(url)];
+    return to.host !== from.host || to.pathname.replace(/\/$/, "") !== from.pathname.replace(/\/$/, "");
+  } catch {
+    return true; // no readable final URL: do not trust the page
   }
 }
 
@@ -115,18 +127,25 @@ async function fillIn(applicationId, url, actions, fetch, browser, wait) {
   if (!onHosts(url, browser.runtime.getManifest().host_permissions)) throw new Error("not_allowed");
   const files = await fetchFiles(applicationId, actions, fetch);
   const tab = await browser.tabs.create({ url, active: false });
-  for (let waited = 0; (await browser.tabs.get(tab.id)).status !== "complete"; waited += 500) {
-    if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
-    await wait(500);
+  let filled = false;
+  try {
+    for (let waited = 0; (await browser.tabs.get(tab.id)).status !== "complete"; waited += 500) {
+      if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
+      await wait(500);
+    }
+    let fields = [];
+    for (let tries = 0; tries < TRIES && !fields.length; tries++) {
+      if (tries) await wait(2000);
+      const [done] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: fillForm, args: [actions, files] });
+      fields = done?.result ?? [];
+    }
+    const screenshot = await captureTab(tab, browser);
+    filled = true;
+    return screenshot ? { fields, screenshot } : { fields };
+  } finally {
+    // A filled form keeps its tab: Send uses it (ADR 0003). A failed fill leaves nothing open.
+    if (!filled) await browser.tabs.remove(tab.id).catch(() => {}); // the candidate closed it already
   }
-  let fields = [];
-  for (let tries = 0; tries < TRIES && !fields.length; tries++) {
-    if (tries) await wait(2000);
-    const [done] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: fillForm, args: [actions, files] });
-    fields = done?.result ?? [];
-  }
-  const screenshot = await captureTab(tab, browser);
-  return screenshot ? { fields, screenshot } : { fields };
 }
 
 const pendingSendReports = new Map(); // never click submit twice if reporting the result fails
