@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from applai.agents import AgentError, AgentResult, AgentRunner, FakeBackend, Usage
 from applai.app import create_app
 from applai.database import open_database
-from applai.drafting import DRAFTING_MODEL, DraftingError, draft_application
+from applai.drafting import DRAFTING_MODEL, DraftingError, draft_application, redraft_answer
 from applai.drafting_judge import JUDGE_MODEL
 from applai.models import AgentRun, Application, DraftAnswer, Offer, StateChange
 from applai.profile import Diffusion, Fact, FactStatus, Profile, load_profile
@@ -294,6 +294,33 @@ def test_a_letter_over_300_words_is_refused_and_the_application_stays_form_captu
     with Session(engine) as session:
         query = select(AgentRun.outcome).where(AgentRun.application_id == too_long)
         assert session.scalars(query).one() == "letter_too_long"
+
+
+def test_a_rejected_letter_is_drafted_again_in_paragraphs_and_refused_over_300_words(
+    engine: Engine, profile: Profile
+):
+    application_id = _application(engine, [LETTER_FIELD])
+    draft_application(AgentRunner(FakeBackend([LETTER, LETTER_JUDGED])), engine, application_id,
+                      profile)  # fmt: skip
+    [letter] = _answers(engine)
+    with Session(engine) as session, session.begin():
+        session.get_one(DraftAnswer, letter.id).status = "rejected"
+    runner = AgentRunner(FakeBackend([
+        _result({"answers": {}, "cover_letter": _words(301)}),
+        _result({"answers": {}, "cover_letter": PARAGRAPHS[::-1]}), LETTER_JUDGED,
+    ]))  # fmt: skip
+
+    with pytest.raises(DraftingError, match="301 words"):
+        redraft_answer(runner, engine, letter.id, "Plus court.", profile)
+    redraft_answer(runner, engine, letter.id, "Commence par la prévision.", profile)
+
+    [answer] = _answers(engine)
+    body = "\n\n".join(BODY.split("\n\n")[::-1])
+    assert answer.text == f"Madame, Monsieur,\n\n{body}\n\nCordialement,\nJeanne Dupont"
+    assert answer.status == "pending"
+    with Session(engine) as session:
+        outcomes = session.scalars(select(AgentRun.outcome).where(AgentRun.agent == "drafting"))
+        assert list(outcomes) == ["ok", "letter_too_long", "ok"]
 
 
 @pytest.mark.parametrize("slot", [EXTRA_DOCUMENTS, LETTER_FIELD], ids=["other-docs", "asked"])

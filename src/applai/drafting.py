@@ -19,7 +19,7 @@ import re
 from contextlib import nullcontext, suppress
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
@@ -283,7 +283,7 @@ def _check_length(database: Engine, run_id: int, letter: list[dict[str, Any]]) -
         _refuse(database, run_id, LETTER_TOO_LONG, problem)
 
 
-def _refuse(database: Engine, run_id: int, outcome: str, problem: str) -> None:
+def _refuse(database: Engine, run_id: int, outcome: str, problem: str) -> NoReturn:
     with Session(database) as session, session.begin():
         session.get_one(AgentRun, run_id).outcome = outcome
     raise DraftingError(f"Drafting refused: {problem}.")
