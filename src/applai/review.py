@@ -11,10 +11,11 @@ correction, also after the candidate put it in later, and so is accepting an off
 aside. Putting an offer in later never is one (ADR 0004).
 """
 
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -104,6 +105,11 @@ class Card(BaseModel):
     reread_error: str | None = None  # one line: why the last read again failed
     # permanent, fixed_term, internship or apprenticeship, as applai.cv.offer_contract_type finds it
     contract_type: str | None = None
+    seen_at: datetime | None = None  # when the offer was received (or added), in UTC
+
+    @field_serializer("seen_at")
+    def _utc(self, value: datetime | None) -> str | None:
+        return None if value is None else value.replace(tzinfo=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def cards(session: Session, user_id: int, view: View, min_score: int) -> list[Card]:
@@ -160,6 +166,7 @@ def _card(offer: Offer, triage: Triage | None, can_reread: bool = False) -> Card
     card.can_reread = can_reread
     card.rereading = offer.reread_requested_at is not None
     card.contract_type = offer_contract_type(offer.title, offer.contract)
+    card.seen_at = offer.received_at or offer.created_at
     from_alert = (offer.description or "").startswith(ALERT_ONLY)
     card.full_text_read = offer.page_failures < MAX_PAGE_FAILURES and not from_alert
     if offer.state == OfferState.SCREENED_OUT:

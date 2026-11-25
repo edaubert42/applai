@@ -8,7 +8,10 @@ import fr from "./locales/fr.json";
 
 const indexCss = readFileSync(existsSync("src/index.css") ? "src/index.css" : "frontend/src/index.css", "utf8");
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (_, name: string) => String(values[name]));
@@ -188,6 +191,47 @@ describe("the list of offers", () => {
     const row = within(rowOf(/Ingénieur logiciel/));
     for (const word of ["CDI", "CDD", "Stage", "Alternance"]) expect(row.queryByText(word)).toBeNull();
     expect(row.getByText("Acme Robotics")).toBeTruthy();
+  });
+
+  it("shows the offer's age next to the contract type on the title line without a dot", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-11-25T11:00:00Z").getTime());
+    await openScreen(
+      reviewRoutes({
+        to_review: [
+          aCard({ seen_at: "2026-11-22T09:00:00Z" }),
+          aCard({ id: 2, title: "Développeuse web", company: "Globex Studio", contract_type: null, seen_at: "2026-11-25T09:00:00Z" }),
+        ],
+      }),
+      false,
+    );
+
+    const first = rowOf(/Ingénieur logiciel/);
+    const titleLine = within(first).getByText("Ingénieur logiciel").parentElement!;
+    expect(within(titleLine).getByText("CDI")).toBeTruthy();
+    expect(within(titleLine).getByText("il y a 3 j")).toBeTruthy();
+    expect(titleLine.textContent).not.toContain("·");
+
+    const second = rowOf(/Développeuse web/);
+    const secondTitleLine = within(second).getByText("Développeuse web").parentElement!;
+    expect(within(secondTitleLine).getByText("il y a 2 h")).toBeTruthy();
+    expect(secondTitleLine.textContent).not.toContain("·");
+  });
+
+  it.each([
+    ["2026-11-25T10:59:40Z", "fr", "il y a moins d’1 min"],
+    ["2026-11-25T10:45:00Z", "fr", "il y a 15 min"],
+    ["2026-11-25T08:00:00Z", "fr", "il y a 3 h"],
+    ["2026-11-22T09:00:00Z", "fr", "il y a 3 j"],
+    ["2026-10-10T09:00:00Z", "fr", "il y a 1 mois"],
+    ["2025-11-20T09:00:00Z", "fr", "il y a 1 an"],
+    ["2024-11-20T09:00:00Z", "fr", "il y a 2 ans"],
+    ["2026-11-22T09:00:00Z", "en", "3 d ago"],
+  ] as const)("formats %s in %s as %s", async (seenAt, language, expected) => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-11-25T11:00:00Z").getTime());
+    if (language === "en") localStorage.setItem("applai.language", "en");
+    await openScreen(reviewRoutes({ to_review: [aCard({ seen_at: seenAt }), bob] }), false);
+
+    expect(within(rowOf(/Ingénieur logiciel/)).getByText(expected)).toBeTruthy();
   });
 
   it("opens the full card from a row, with the place and the work mode in its header", async () => {

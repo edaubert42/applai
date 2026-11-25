@@ -128,9 +128,9 @@ export function Header({ card, compact = false }: { card: Card; compact?: boolea
   );
 }
 
-/** An offer as a compact row: the logo, the title, the company, the contract type and the score. */
+/** An offer as a compact row: the logo, the title with its contract type and age, the company, and the score. */
 export function OfferRow({ card, onOpen }: { card: Card; onOpen: () => void }) {
-  const { t, lookup } = useSettings();
+  const { t, lookup, formatAgo } = useSettings();
   const contract = card.contract_type && lookup(`contract.${card.contract_type}`);
   return (
     <button
@@ -147,12 +147,17 @@ export function OfferRow({ card, onOpen }: { card: Card; onOpen: () => void }) {
     >
       <Logo card={card} className="size-10 shrink-0 rounded-xl" />
       <span className="min-w-0 flex-1 basis-60">
-        <span className="block font-semibold [overflow-wrap:anywhere]">{card.title}</span>
-        <span className="block text-sm text-link [overflow-wrap:anywhere]">{card.company}</span>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-semibold [overflow-wrap:anywhere]">{card.title}</span>
+          {contract && (
+            <span className="rounded-pill border border-border bg-background px-2.5 py-0.5 text-xs font-medium">
+              {contract}
+            </span>
+          )}
+          <span className="text-xs text-muted">{formatAgo(card.seen_at)}</span>
+        </span>
+        <span className="mt-0.5 block text-sm text-link [overflow-wrap:anywhere]">{card.company}</span>
       </span>
-      {contract && (
-        <span className="rounded-pill border border-border bg-background px-3 py-1 text-sm">{contract}</span>
-      )}
       {card.score !== null && (
         <span className="rounded-pill bg-primary px-4 py-1 font-semibold text-on-primary">
           {t("card.score", { n: card.score })}

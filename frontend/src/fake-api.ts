@@ -67,6 +67,7 @@ export function aCard(overrides: Partial<Card> = {}): Card {
     rereading: false,
     reread_error: null,
     contract_type: "permanent",
+    seen_at: "2026-11-22T09:00:00Z",
     ...overrides,
   };
 }

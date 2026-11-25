@@ -20,6 +20,8 @@ interface Settings {
   lookup: (key: string) => string | undefined;
   /** A date and time in the candidate's language, like "22 nov., 18:00". */
   formatTime: (iso: string) => string;
+  /** A relative age in the candidate's language, like "il y a 3 j". */
+  formatAgo: (iso: string) => string;
 }
 
 const SettingsContext = createContext<Settings | null>(null);
@@ -51,9 +53,22 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     Object.hasOwn(messages[language], key) ? messages[language][key as MessageKey] : undefined;
   const formatTime = (iso: string) =>
     new Date(iso).toLocaleString(language, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const formatAgo = (iso: string): string => {
+    const minutes = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60_000));
+    if (minutes < 1) return t("time.ago.now");
+    if (minutes < 60) return t("time.ago.minutes", { n: minutes });
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return t("time.ago.hours", { n: hours });
+    const days = Math.floor(hours / 24);
+    if (days < 30) return t("time.ago.days", { n: days });
+    const months = Math.floor(days / 30);
+    if (days < 365) return t("time.ago.months", { n: months });
+    const years = Math.floor(days / 365);
+    return years === 1 ? t("time.ago.year") : t("time.ago.years", { n: years });
+  };
   return (
     <SettingsContext.Provider
-      value={{ language, setLanguage, theme, setTheme, t, lookup, formatTime }}
+      value={{ language, setLanguage, theme, setTheme, t, lookup, formatTime, formatAgo }}
     >
       {children}
     </SettingsContext.Provider>

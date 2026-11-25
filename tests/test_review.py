@@ -148,8 +148,19 @@ def test_a_card_has_the_triage_result_and_the_logo(engine: Engine, client: TestC
         "rereading": False,
         "reread_error": None,
         "contract_type": None,
+        "seen_at": "2026-11-01T08:30:00Z",
         **CARD,
     }
+
+
+def test_a_card_uses_received_at_before_created_at(engine: Engine, client: TestClient):
+    offer_id = _offer(engine, "data-engineer", "triaged", score=82)
+    with Session(engine) as session, session.begin():
+        session.get_one(Offer, offer_id).received_at = datetime(2026, 10, 29, 14, 15)
+
+    [card] = client.get("/api/review", params={"view": "to_review"}).json()
+
+    assert card["seen_at"] == "2026-10-29T14:15:00Z"
 
 
 @pytest.mark.parametrize(
