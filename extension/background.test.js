@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { APPLAI, fillForms, readForms, readPages, sendForms } from "./background.js";
+import { APPLAI, fillForms, readForms, readPages, reportTabs, sendForms } from "./background.js";
 import { fillForm } from "./fill.js";
 import { readForm, readHtml, readText } from "./forms.js";
 import manifest from "./manifest.json" with { type: "json" };
@@ -557,4 +557,45 @@ test("sendForms shows the frame while it submits, and removes it whether or not 
 
   assert.deepEqual(steps(ok.log, ["overlay", "run"]), ["overlay show", "run submitForm", "run isConfirmed", "overlay hide"]);
   assert.deepEqual(steps(refused.log, ["overlay", "run"]), ["overlay show", "run submitForm", "overlay hide"]);
+});
+
+// The URLs of the tabs of the ApplAI group, posted each minute so ApplAI shows which forms are still open.
+async function reportTabsWith(tabs, { groups = IN_GROUP, queryGroups, postStatus = 204 } = {}) {
+  const calls = [];
+  const chrome = {
+    tabGroups: { query: queryGroups ?? (async ({ title }) => groups.filter((g) => g.title === title)) },
+    tabs: { query: async () => tabs },
+  };
+  await reportTabs(async (url, init) => {
+    calls.push([url, init]);
+    if (postStatus === null) throw new Error("down");
+    return new Response(null, { status: postStatus });
+  }, chrome);
+  return calls;
+}
+
+test("reportTabs posts the URLs of the tabs in the ApplAI group, and never another tab's", async () => {
+  const calls = await reportTabsWith([
+    { id: 1, url: LEVER, groupId: 100 },
+    { id: 2, url: "https://mail.example.org/inbox", groupId: -1 },
+    { id: 3, url: OFFER, groupId: 200 }, // another group
+    { id: 4, url: `${LEVER}?b`, groupId: 100 },
+  ]);
+
+  assert.deepEqual(calls, [[`${APPLAI}/api/browser/tabs`, { ...SENT, body: JSON.stringify({ urls: [LEVER, `${LEVER}?b`] }) }]]);
+});
+
+test("reportTabs posts an empty list when the group has no tab, and nothing when it cannot tell", async () => {
+  const empty = await reportTabsWith([{ id: 2, url: OFFER, groupId: -1 }], { groups: [] });
+  const throws = await reportTabsWith([{ id: 1, url: LEVER, groupId: 100 }], {
+    queryGroups: async () => { throw new Error("no groups"); },
+  });
+
+  assert.deepEqual(empty, [[`${APPLAI}/api/browser/tabs`, { ...SENT, body: JSON.stringify({ urls: [] }) }]]);
+  assert.deepEqual(throws, []); // unknown is not "closed"
+});
+
+test("reportTabs survives a post that fails or is refused", async () => {
+  await reportTabsWith([{ id: 1, url: LEVER, groupId: 100 }], { postStatus: null });
+  await reportTabsWith([{ id: 1, url: LEVER, groupId: 100 }], { postStatus: 422 });
 });

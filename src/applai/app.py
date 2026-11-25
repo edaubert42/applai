@@ -165,9 +165,9 @@ def add_offer(body: NewOffer, session: _Session, response: Response) -> OfferAdd
 
 
 @api.get("/applications")
-def applications(session: _Session) -> Board:
+def applications(session: _Session, request: Request) -> Board:
     """The candidate's applications: in progress, waiting for them, sent and dropped."""
-    return board(session, LOCAL_USER_ID)
+    return board(session, LOCAL_USER_ID, browser.open_tabs(request))
 
 
 def _min_score(request: Request) -> int:
@@ -695,7 +695,7 @@ _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 # The ApplAI extension's routes (applai.browser), whatever the method.
-_EXTENSION_PATHS = re.compile(r"/api/browser/(pages|forms|fills|sends)(/.*)?")
+_EXTENSION_PATHS = re.compile(r"/api/browser/(pages|forms|fills|sends|tabs)(/.*)?")
 
 
 class SameOriginWrites:
@@ -757,6 +757,7 @@ def create_app(
         app.state.engine = engine = open_database(data_dir)
         app.state.scanner = None
         app.state.watch, app.state.clock, app.state.extension_asked_at = watch, clock, None
+        app.state.tabs_posted = None  # when, and the URLs, of the extension's last good post
         if watch is not None:
             app.state.scanner = Scanner(
                 engine, partial(run_scan, engine, data_dir, watch, LOCAL_USER_ID, clock), clock

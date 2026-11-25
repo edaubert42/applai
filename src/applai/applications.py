@@ -7,6 +7,7 @@ progress, with its Notion status as written; no status is guessed to mean sent o
 """
 
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, field_serializer
 from sqlalchemy import func, select
@@ -20,6 +21,8 @@ _S = ApplicationState
 # The states whose next move is the candidate's wait for them (orchestrator's transitions).
 _WAITING = (_S.DRAFTED, _S.REVIEWED, _S.FORM_CHECKED, _S.VALIDATED)
 _IN_PROGRESS = (_S.CREATED, _S.FORM_CAPTURED, _S.ANSWERS_CHECKED, _S.FILLED)
+# The states with a filled form in a tab, waiting for the candidate's last click.
+_FILLED_FORM = (_S.FILLED, _S.REVIEWED, _S.FORM_CHECKED, _S.VALIDATED)
 
 
 class Row(BaseModel):
@@ -40,6 +43,8 @@ class Row(BaseModel):
     form_url: str | None = None  # where its form lives, or why not (applai.capture)
     form_url_error: str | None = None
     fill_error: str | None = None  # why Filling failed: the plan, or the extension (applai.browser)
+    # Whether the filled form's tab is open; none: not asked, or the extension has not said lately.
+    tab_open: bool | None = None
 
     @field_serializer("changed_at")
     def _utc(self, value: datetime) -> str:
@@ -53,8 +58,32 @@ class Board(BaseModel):
     dropped: list[Row]
 
 
-def board(session: Session, user_id: int) -> Board:
-    """The candidate's applications in four groups, the latest change first in each."""
+def same_form_url(a: str, b: str) -> bool:
+    """Whether two URLs are the same form: same origin, path and query, as the extension's
+    sendForms (extension/background.js) matches a tab."""
+    try:
+        one, other = urlsplit(a), urlsplit(b)
+    except ValueError:
+        return a == b
+    return (one.scheme, one.netloc, one.path.rstrip("/"), one.query) == (
+        other.scheme,
+        other.netloc,
+        other.path.rstrip("/"),
+        other.query,
+    )
+
+
+def _tab_open(application: Application, open_tabs: list[str] | None) -> bool | None:
+    if open_tabs is None or application.form_url is None or application.state not in _FILLED_FORM:
+        return None
+    return any(same_form_url(url, application.form_url) for url in open_tabs)
+
+
+def board(session: Session, user_id: int, open_tabs: list[str] | None = None) -> Board:
+    """The candidate's applications in four groups, the latest change first in each.
+
+    open_tabs: the URLs of the tabs in the extension's group, none when it has not said lately.
+    """
     last_change = (
         select(StateChange.application_id, func.max(StateChange.changed_at).label("at"))
         .group_by(StateChange.application_id)
@@ -81,6 +110,7 @@ def board(session: Session, user_id: int) -> Board:
                 form_url=application.form_url,
                 form_url_error=application.form_url_error,
                 fill_error=application.fill_error,
+                tab_open=_tab_open(application, open_tabs),
             ),
         )
         for application, offer, changed_at in applications

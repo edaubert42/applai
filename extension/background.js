@@ -231,6 +231,20 @@ export async function sendForms(
 
 const GROUP = { title: "ApplAI", color: "green" };
 
+// Post the URLs of the tabs in the ApplAI tab group, and only those, so ApplAI shows whether a filled
+// form's tab is still open. A group list that cannot be read posts nothing: ApplAI then says
+// "unknown" after a while, never "closed". A post that fails changes nothing there.
+export async function reportTabs(fetch = globalThis.fetch, browser = globalThis.chrome) {
+  let urls;
+  try {
+    const groups = new Set((await browser.tabGroups.query({ title: GROUP.title })).map((g) => g.id));
+    urls = ((await browser.tabs.query({})) ?? []).filter((t) => t.url && groups.has(t.groupId)).map((t) => t.url);
+  } catch {
+    return;
+  }
+  await send(fetch, "/api/browser/tabs", { urls });
+}
+
 // Put a tab the extension uses in its window's ApplAI tab group, made when missing, so the candidate
 // sees which tabs it uses. A tab already in the group is left there. Never fatal: a tab that is not
 // grouped is still read, filled or submitted.
@@ -365,6 +379,7 @@ if (globalThis.chrome?.alarms) {
       await readForms();
       await fillForms();
       await sendForms();
+      await reportTabs();
     } finally {
       reading = false;
     }

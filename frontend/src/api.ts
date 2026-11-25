@@ -64,6 +64,8 @@ export interface Row {
   form_url: string | null;
   form_url_error: string | null;
   fill_error: string | null;
+  /** Whether the filled form's tab is open; null: unknown, or no tab to wait for. */
+  tab_open: boolean | null;
 }
 
 export interface BrowserStatus {
