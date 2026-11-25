@@ -44,6 +44,8 @@ export default function FinalValidationScreen({
 
   const stateLabel = review && (lookup(`applications.state.${review.state}`) ?? review.state);
   const canDrop = review !== null && review.state !== "sent" && review.state !== "dropped";
+  // A form filled once, whose tab the candidate may have closed (applai.browser).
+  const canFillAgain = review !== null && ["filled", "reviewed", "form_checked", "validated"].includes(review.state);
 
   return (
     <div className="mx-auto max-w-215 space-y-6">
@@ -70,6 +72,9 @@ export default function FinalValidationScreen({
           )}
           {review.send_error && (
             <p role="alert" className="text-sm text-minus">{t("validation.send_error", { error: serverMessage(review.send_error, lookup) })}</p>
+          )}
+          {review.fill_error && (
+            <p role="alert" className="text-sm text-minus">{t("validation.fill_error", { error: serverMessage(review.fill_error, lookup) })}</p>
           )}
           {review.cv_warning && (
             <p role="alert" className="text-sm text-minus">{t("validation.cv_warning", { warning: serverMessage(review.cv_warning, lookup) })}</p>
@@ -168,13 +173,21 @@ export default function FinalValidationScreen({
               <>
                 <a href={review.form_url ?? review.url} target="_blank" rel="noreferrer" className={button}>{t("validation.open_form")}</a>
                 <button
-                  type="button" disabled={busy || review.send_authorized} className={button}
+                  type="button" disabled={busy || review.send_authorized || review.fill_again} className={button}
                   onClick={() => run(() => api.authorizeSend(id), () => setReview((old) => old && { ...old, send_authorized: true, send_error: null }))}
                 >
                   {t(review.send_authorized ? "validation.send_authorized" : "validation.authorize_send")}
                 </button>
                 <button type="button" disabled={busy} onClick={() => run(() => api.markSent(id), onDone)} className={button}>{t("validation.mark_sent")}</button>
               </>
+            )}
+            {canFillAgain && (
+              <button
+                type="button" disabled={busy || review.fill_again} className={button}
+                onClick={() => run(() => api.fillAgain(id), () => setReview((old) => old && { ...old, fill_again: true, fill_error: null, send_authorized: false }))}
+              >
+                {t(review.fill_again ? "validation.fill_again_asked" : "validation.fill_again")}
+              </button>
             )}
             {canDrop && !confirmDrop && (
               <button type="button" disabled={busy} onClick={() => setConfirmDrop(true)} className={button}>{t("validation.drop")}</button>

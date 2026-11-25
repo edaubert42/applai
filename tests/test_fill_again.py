@@ -22,7 +22,7 @@ EXTENSION_ID = "kfbcmpgnoaljdhiekfbcmpgnoaljdhie"
 EXTENSION = {"Origin": f"chrome-extension://{EXTENSION_ID}"}
 FORM = "https://jobs.lever.co/pivoine/1/apply"
 NOON = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
-FIELDS = [{"label": "Prénom", "type": "text", "required": True, "options": []}]
+FIELDS: list[dict[str, Any]] = [{"label": "Prénom", "type": "text", "required": True}]
 PLAN = [{"field": 0, "label": "Prénom", "kind": "fill", "value": "Jeanne"}]
 FIRST = [{"field": 0, "value": "Jeanne", "file": None, "unfilled": None}]
 OLD_PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 16
@@ -53,12 +53,24 @@ def client(data_dir: Path, engine: Engine) -> Iterator[TestClient]:
 def _app(engine: Engine, data_dir: Path, state: str, user_id: int = 1, **more: Any) -> int:
     """A fictional Pivoine Analytics application, filled once with its screenshot: its id."""
     with Session(engine) as session, session.begin():
-        offer = Offer(user_id=user_id, url=f"https://jobs.example.org/pivoine/{uuid4()}",
-                      title="Data engineer", company="Pivoine Analytics", state="accepted")
+        offer = Offer(
+            user_id=user_id,
+            url=f"https://jobs.example.org/pivoine/{uuid4()}",
+            title="Data engineer",
+            company="Pivoine Analytics",
+            state="accepted",
+        )
         session.add(offer)
         session.flush()
-        app = Application(user_id=user_id, offer_id=offer.id, state=state, form_url=FORM,
-                          form_fields=FIELDS, filled_fields=FIRST, **({"fill_plan": PLAN} | more))
+        app = Application(
+            user_id=user_id,
+            offer_id=offer.id,
+            state=state,
+            form_url=FORM,
+            form_fields=FIELDS,
+            filled_fields=FIRST,
+            **({"fill_plan": PLAN} | more),
+        )
         session.add(app)
         session.flush()
         app_id = app.id
@@ -75,7 +87,8 @@ def _get(engine: Engine, app_id: int) -> Application:
 
 def _changes(engine: Engine, app_id: int) -> list[StateChange]:
     with Session(engine) as session:
-        return list(session.scalars(select(StateChange).where(StateChange.application_id == app_id)))
+        changes = select(StateChange).where(StateChange.application_id == app_id)
+        return list(session.scalars(changes))
 
 
 def test_fill_again_lists_a_filled_application_with_its_plan_and_refuses_other_states(
@@ -91,8 +104,11 @@ def test_fill_again_lists_a_filled_application_with_its_plan_and_refuses_other_s
     answers = {s: client.post(f"/api/applications/{i}/fill-again") for s, i in asked.items()}
     conflicts = [client.post(f"/api/applications/{i}/fill-again") for i in [*refused, no_plan]]
     missing = client.post(f"/api/applications/{foreign}/fill-again")
-    listed = [fill for fill in client.get("/api/browser/fills", headers=EXTENSION).json()
-              if fill["application_id"] != refused[0]]  # answers_checked: its first fill
+    listed = [
+        fill
+        for fill in client.get("/api/browser/fills", headers=EXTENSION).json()
+        if fill["application_id"] != refused[0]
+    ]  # answers_checked: its first fill
 
     assert {s: r.status_code for s, r in answers.items()} == dict.fromkeys(asked, 204)
     assert [r.status_code for r in conflicts] == [409] * 5
@@ -149,7 +165,7 @@ def test_a_failed_fill_again_is_shown_keeps_the_state_and_a_second_ask_lists_it_
     assert failed.status_code == 204
     review = client.get(f"/api/applications/{app_id}/review").json()
     assert (review["state"], review["fill_error"], review["fill_again"]) == (
-        "reviewed", "fill_not_loaded", False,
+        "reviewed", "fill_again_not_loaded", False,
     )  # fmt: skip
     app = _get(engine, app_id)
     assert app.filled_fields == FIRST

@@ -165,6 +165,7 @@ export interface FormReview {
   url: string; form_url: string | null; state: string; fields: ReviewedField[];
   problems: ReviewProblem[] | null; review_error: string | null; has_screenshot: boolean;
   send_authorized: boolean; send_error: string | null; cv_warning: string | null;
+  fill_error: string | null; fill_again: boolean;
 }
 
 export interface ScanStatus {
@@ -266,6 +267,7 @@ export const api = {
     requestEmpty("POST", `/api/applications/${id}/form-checked`, note ? { corrected_fields, note } : { corrected_fields }),
   validateApplication: (id: number) => requestEmpty("POST", `/api/applications/${id}/validate`),
   authorizeSend: (id: number) => requestEmpty("POST", `/api/applications/${id}/authorize-send`),
+  fillAgain: (id: number) => requestEmpty("POST", `/api/applications/${id}/fill-again`),
   markSent: (id: number) => requestEmpty("POST", `/api/applications/${id}/sent`),
   dropApplication: (id: number, reasons: DropReason[], note?: string) =>
     requestEmpty("POST", `/api/applications/${id}/drop`, note ? { reasons, note } : { reasons }),

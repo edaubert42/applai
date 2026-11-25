@@ -514,7 +514,8 @@ def fill_failed(application_id: int, body: FillFailed, request: Request) -> None
     for a fill again, at the candidate's next ask."""
     with Session(request.app.state.engine) as session:
         application = _waiting_fill(session, application_id)
-        application.fill_error = f"fill_{body.reason}"
+        again = "again_" if application.fill_again_at is not None else ""
+        application.fill_error = f"fill_{again}{body.reason}"
         application.fill_failed_at = utc(request.app.state.clock())
         application.fill_again_at = None
         session.commit()

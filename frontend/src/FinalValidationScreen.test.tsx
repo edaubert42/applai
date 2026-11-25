@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { FormReview } from "./api";
@@ -190,6 +190,35 @@ describe("FinalValidationScreen", () => {
     expect(screen.getByRole("alert").textContent).toBe(
       words["validation.review_error"].replace("{error}", "agent review failed: timeout"),
     );
+  });
+
+  it.each(["fr", "en"] as const)("fills a form again in a new tab after a failed fill again, in %s", async (language) => {
+    const review = aFormReview({ state: "validated", send_authorized: true, fill_error: "fill_again_not_loaded" });
+    const { calls, words } = await openValidation({
+      "POST /api/applications/1/fill-again": new Response(null, { status: 204 }),
+    }, language, review);
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      words["validation.fill_error"].replace("{error}", words["message.fill_again_not_loaded"]),
+    );
+    fireEvent.click(screen.getByRole("button", { name: words["validation.fill_again"] }));
+
+    const asked = await screen.findByRole("button", { name: words["validation.fill_again_asked"] }) as HTMLButtonElement;
+    expect(asked.disabled).toBe(true);
+    expect(screen.queryByRole("alert")).toBeNull();
+    const authorize = screen.getByRole("button", { name: words["validation.authorize_send"] }) as HTMLButtonElement;
+    expect(authorize.disabled).toBe(true);
+    expect(calls.filter((c) => c.method === "POST")).toEqual([
+      { method: "POST", path: "/api/applications/1/fill-again", body: undefined },
+    ]);
+  });
+
+  it("offers to fill again in every state the screen shows", async () => {
+    for (const state of ["reviewed", "form_checked", "validated"]) {
+      const { words } = await openValidation({}, "fr", aFormReview({ state }));
+      expect(screen.getByRole("button", { name: words["validation.fill_again"] })).toBeTruthy();
+      cleanup(); vi.unstubAllGlobals();
+    }
   });
 
   it.each(["fr", "en"] as const)("shows send_error alert and authorizes ApplAI to send in %s", async (language) => {
