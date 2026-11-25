@@ -70,6 +70,7 @@ class FakeNotion(ThreadingHTTPServer):
         self.answer: tuple[int, dict[str, Any]] | None = None  # replaces the rows if set
         self.write_answer: tuple[int, dict[str, Any]] | None = None
         self.status_type: str = "status"
+        self.property_types: dict[str, str] = {}
         self.methods: list[str] = []
         self.requests: list[tuple[str, dict[str, str], dict[str, Any]]] = []
 
@@ -115,10 +116,9 @@ def _reply(notion: FakeNotion, method: str, path: str, body: dict[str, Any]) -> 
             rows = [r for r in rows if r["properties"].get(p, {}).get("url") == u]
         return notion.answer or (200, _page(rows, int(body.get("start_cursor", 0))))
     if method == "GET" and path.startswith("/v1/databases/"):
-        return notion.answer or (
-            200,
-            {"object": "database", "properties": {"Statut": {"type": notion.status_type}}},
-        )
+        props = {name: {"type": kind} for name, kind in notion.property_types.items()}
+        props.setdefault("Statut", {"type": notion.status_type})
+        return notion.answer or (200, {"object": "database", "properties": props})
     if forced := notion.write_answer or notion.answer:
         return forced
     if method == "POST" and path == "/v1/pages":
@@ -341,6 +341,27 @@ def test_record_sent_creates_a_page_when_the_offer_url_is_absent_from_notion(
     other = "https://jobs.example.org/verger-numerique/data-scientist"
     record_sent(data_dir, "Data scientist", "Verger Numérique", other, base_url=notion.url)
     assert notion.requests[-1][2]["properties"]["Statut"] == {kind: {"name": "Envoyée"}}
+
+
+def test_record_sent_matches_database_schema_types_when_creating_a_page(
+    data_dir: Path, notion: FakeNotion
+):
+    notion.property_types = {
+        "Entreprise": "title",
+        "Poste": "rich_text",
+        "Lien": "rich_text",
+        "Statut": "status",
+    }
+    record_sent(data_dir, "ML engineer", "Verger Numérique", ML_ENGINEER, base_url=notion.url)
+    assert notion.requests[2][2] == {
+        "parent": {"database_id": DATABASE_ID},
+        "properties": {
+            "Poste": {"rich_text": [{"text": {"content": "ML engineer"}}]},
+            "Entreprise": {"title": [{"text": {"content": "Verger Numérique"}}]},
+            "Lien": {"rich_text": [{"text": {"content": ML_ENGINEER}}]},
+            "Statut": {"status": {"name": "Candidature envoyée"}},
+        },
+    }
 
 
 @pytest.mark.parametrize("kind", ["status", "select"])
