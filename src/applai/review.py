@@ -8,7 +8,8 @@ A label is a correction when it goes against the agents' proposal. Triage propos
 scoring at least the review_min_score setting, and sets aside a lower one, as the first
 screening sets aside the offers it screens out. So declining a proposed offer is a
 correction, also after the candidate put it in later, and so is accepting an offer set
-aside. Putting an offer in later never is one (ADR 0004).
+aside. Putting an offer in later never is one (ADR 0004). A decline whose only reason is
+expired says nothing about the Triage, so it is not one.
 """
 
 from datetime import UTC, datetime
@@ -47,6 +48,7 @@ class Reason(StrEnum):
     SKILLS = "skills"
     SALARY = "salary"
     LOCATION = "location"
+    EXPIRED = "expired"
     OTHER = "other"
 
 
@@ -192,9 +194,10 @@ def decide(
     set_aside = offer.state == OfferState.SCREENED_OUT or (
         triage is not None and triage.score < min_score
     )
-    correction = (request.decision == Decision.NOT_INTERESTED and proposed) or (
-        request.decision == Decision.INTERESTED and set_aside
-    )
+    only_expired = set(request.reasons) == {Reason.EXPIRED}
+    correction = (
+        request.decision == Decision.NOT_INTERESTED and proposed and not only_expired
+    ) or (request.decision == Decision.INTERESTED and set_aside)
 
     move(session, offer, _TARGET[request.decision], Actor.CANDIDATE)
     label = Label(

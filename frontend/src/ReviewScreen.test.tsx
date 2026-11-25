@@ -510,7 +510,7 @@ describe("not interested", () => {
     fireEvent.click(screen.getByRole("button", { name: new RegExp(fr["reason.salary"]) }));
     fireEvent.keyDown(document, { key: "3" }); // a second press takes the reason back
     expect(screen.getByRole("button", { name: /Expérience/ }).getAttribute("aria-pressed")).toBe("false");
-    fireEvent.keyDown(document, { key: "7" });
+    fireEvent.keyDown(document, { key: "8" });
     expect(save().disabled).toBe(false);
     fireEvent.change(screen.getByLabelText(fr["decline.note"]), { target: { value: "Trop loin" } });
     fireEvent.keyDown(screen.getByLabelText(fr["decline.note"]), { key: "Enter" });
@@ -522,6 +522,32 @@ describe("not interested", () => {
     ]);
     await waitFor(() => expect(screen.queryByText(fr["decline.title"])).toBeNull());
     expect(screen.getByRole("heading", { name: "Développeuse web" })).toBeTruthy();
+  });
+
+  it("offers Offer expired as the seventh reason, before Other, chosen by click or key 7, saved by Enter", async () => {
+    const calls = await openScreen();
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+
+    const pills = screen.getAllByRole("button", { name: /^\d/ }).map((pill) => pill.textContent);
+    expect(pills.slice(-2)).toEqual([`7${fr["reason.expired"]}`, `8${fr["reason.other"]}`]);
+    expect(fr["reason.expired"]).toBe("Offre expirée");
+    expect(en["reason.expired"]).toBe("Offer expired");
+    expect(fr["decline.keys"]).toContain("1 à 8");
+    expect(fr["review.keys"]).toContain("1 à 8");
+
+    const expired = screen.getByRole("button", { name: new RegExp(fr["reason.expired"]) });
+    fireEvent.click(expired);
+    expect(expired.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(expired);
+    fireEvent.keyDown(document, { key: "7" });
+    expect(expired.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.keyDown(document, { key: "Enter" });
+
+    await waitFor(() => expect(decisions(calls)).toHaveLength(1));
+    expect(decisions(calls)[0]).toEqual([
+      "/api/offers/1/decision",
+      { decision: "not_interested", reasons: ["expired"] },
+    ]);
   });
 
   it("is cancelled by Escape, and by the Cancel button, without a decision", async () => {

@@ -3,7 +3,7 @@
 export type View = "to_review" | "later" | "screened_out";
 export const VIEWS: readonly View[] = ["to_review", "later", "screened_out"];
 
-export type Reason = "company" | "mission" | "experience" | "skills" | "salary" | "location" | "other";
+export type Reason = "company" | "mission" | "experience" | "skills" | "salary" | "location" | "expired" | "other";
 export const REASONS: readonly Reason[] = [
   "company",
   "mission",
@@ -11,12 +11,17 @@ export const REASONS: readonly Reason[] = [
   "skills",
   "salary",
   "location",
+  "expired",
   "other",
 ];
 
 /** Why the candidate drops an application: an offer's decline reasons, or the offer closed. */
 export type DropReason = Reason | "offer_closed";
-export const DROP_REASONS: readonly DropReason[] = [...REASONS, "offer_closed"];
+// An application's offer is already accepted: its closed offer is offer_closed, not expired.
+export const DROP_REASONS: readonly DropReason[] = [
+  ...REASONS.filter((reason) => reason !== "expired"),
+  "offer_closed",
+];
 
 export type Decision =
   | { decision: "interested" | "later" }
