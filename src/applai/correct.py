@@ -9,6 +9,7 @@ Functions write in the caller's session and do not commit.
 
 from difflib import SequenceMatcher
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
@@ -20,6 +21,8 @@ from applai.orchestrator import Actor, ApplicationState, move
 from applai.profile import Profile
 
 ANSWERS_LEVEL = "answers"
+NOT_JUDGED = "Not checked by Judge."
+_NO_REASON = "not supported by its cited facts."
 _RESOLVED = (AnswerStatus.ACCEPTED, AnswerStatus.EDITED)
 
 
@@ -74,7 +77,7 @@ class Answer(BaseModel):
     text: str  # as drafted
     edited_text: str | None
     status: AnswerStatus
-    warnings: list[str] = Field(default_factory=list[str])  # the judge's, when it comes
+    warnings: list[str]  # the judge's: shown to the candidate, they never block the gate
 
 
 class Draft(BaseModel):
@@ -108,8 +111,20 @@ def _answers(session: Session, application_id: int) -> list[DraftAnswer]:
     return list(session.scalars(query.order_by(DraftAnswer.field_index, DraftAnswer.id)))
 
 
+def judge_warnings(judge_issues: list[dict[str, Any]] | None) -> list[str]:
+    """One warning per sentence the judge flagged, numbered from 1; one when it did not check.
+
+    An answer the judge did not check (its run failed or has not run) must not read as clean.
+    """
+    if judge_issues is None:
+        return [NOT_JUDGED]
+    return [f"Sentence {issue['sentence'] + 1}: {issue['reason'] or _NO_REASON}"
+            for issue in judge_issues]  # fmt: skip
+
+
 def answer_view(answer: DraftAnswer, profile: Profile) -> Answer:
-    """An answer as the candidate reads it: each sentence with the text of its facts."""
+    """An answer as the candidate reads it: each sentence with the text of its facts, and the
+    judge's warnings."""
     facts = {fact.id: fact.text for fact in profile.facts}
     sentences = [
         Sentence(text=sentence_text(s["text"]),
@@ -118,7 +133,8 @@ def answer_view(answer: DraftAnswer, profile: Profile) -> Answer:
     ]  # fmt: skip
     return Answer(id=answer.id, kind=answer.kind, field_index=answer.field_index,
                   label=answer.label, sentences=sentences, text=answer.text,
-                  edited_text=answer.edited_text, status=AnswerStatus(answer.status))  # fmt: skip
+                  edited_text=answer.edited_text, status=AnswerStatus(answer.status),
+                  warnings=judge_warnings(answer.judge_issues))  # fmt: skip
 
 
 def draft(session: Session, user_id: int, application_id: int, profile: Profile) -> Draft:
