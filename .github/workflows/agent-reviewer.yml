@@ -71,7 +71,9 @@ jobs:
             2. Tests prove something: each test would fail if the behaviour it names broke. Flag tests that check
                a mock, restate the implementation, or replace the database with a fake.
             3. Rules of CLAUDE.md and the ADRs; words from GLOSSARY.md.
-            4. Bugs and needless complexity.
+            4. Bugs and needless complexity. For each call that can fail (HTTP request, model call, validation,
+               a step of a state machine): is its failure recorded where the owner can see it, does the state stay
+               as it was, and is a retry safe (nothing sent or submitted twice)? A failure must never read as success.
 
             Post an inline comment of at most 3 lines for each finding that blocks a merge, on the line concerned.
             Then post one summary comment with `gh pr comment` that starts with `Verdict: ready to merge` or

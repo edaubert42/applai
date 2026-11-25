@@ -18,6 +18,7 @@ Read before working:
 
 - One test per acceptance criterion of the issue, written first and seen failing.
 - Tests go through the public interface and touch real things: a real SQLite database in a temporary directory, real migrations, the real HTTP app. A test that would still pass with the feature broken proves nothing; mocks are for the network and for model calls only.
+- For each call in a change that can fail (HTTP request, model call, validation, a step of a state machine), write a test that makes it fail through the public interface and asserts three things: the failure is recorded where the owner can see it, the state does not move as if it had succeeded, and a retry is safe (nothing is sent or submitted twice).
 - Test data is the fictional candidate's.
 
 ## Checks
