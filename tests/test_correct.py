@@ -136,9 +136,9 @@ def _judged(engine: Engine, answer_id: int, issues: list[dict[str, Any]] | None)
 @pytest.mark.parametrize(
     ("issues", "warnings"),
     [
-        ([{"sentence": 1, "reason": TEN_YEARS}], [f"Sentence 2: {TEN_YEARS}"]),
+        ([{"sentence": 1, "reason": TEN_YEARS}], [f"judge_sentence:2 — {TEN_YEARS}"]),
         ([], []),
-        (None, ["Not checked by Judge."]),
+        (None, ["not_judged"]),
     ],
     ids=["flagged", "checked-clean", "not-checked"],
 )
@@ -163,7 +163,7 @@ def test_a_flag_without_a_reason_still_names_its_sentence(engine: Engine, client
 
     answer = client.get(f"/api/applications/{application_id}/draft").json()["answers"][0]
 
-    assert answer["warnings"] == ["Sentence 1: not supported by its cited facts."]
+    assert answer["warnings"] == ["judge_unsupported:1"]
 
 
 def test_the_candidate_may_accept_answers_the_judge_flagged_and_close_the_gate(

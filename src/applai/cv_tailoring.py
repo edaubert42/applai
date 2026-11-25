@@ -44,12 +44,11 @@ from applai.triage import prompt_facts
 AGENT = "cv_tailoring"
 CV_TAILORING_MODEL = "claude-opus-5-5"  # pinned, like Drafting
 REFUSED = "refused"  # the outcome of a run code refused a part of, followed by the reasons
-UNTAILORED = "The tailored CV failed its checks or no longer matches its source: not tailored."
-OVER_ONE_PAGE = (
-    "The CV is over one page with your choices: accept a drop, or reject a longer reword."
-)
-NO_PHOTO = "The photo is unknown for this offer: the CV has no photo."
-NO_PHOTO_FILE = f"No photo file {CV_DIR}/{PHOTO_FILE}: the CV has no photo."
+# Codes the page words (frontend/src/locales, "message.<code>"), with a detail after ":".
+UNTAILORED = "cv_untailored"
+OVER_ONE_PAGE = "cv_over_one_page"
+NO_PHOTO = "cv_no_photo"
+NO_PHOTO_FILE = f"cv_no_photo_file:{CV_DIR}/{PHOTO_FILE}"
 type Chosen = tuple[Lang, Path, str]  # the source's language, its file, the offer's contract
 
 

@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 
 from applai import details, reread, validation
 from applai.agents import AgentRunner
-from applai.capture import MAX_FIELDS, MAX_LABEL, PASTE, FormField, read_fields
+from applai.capture import MAX_FIELDS, MAX_LABEL, FormField, read_fields
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
 from applai.drafting import draft_in_background
 from applai.filling import FillAction, Slot, file_path
@@ -61,20 +61,8 @@ CONNECTED_FOR = timedelta(minutes=5)  # after the extension's last ask
 MAX_FORM_FAILURES = 2
 MAX_TEXT = 20_000  # characters of a form page's text, as extension/forms.js keeps them
 # Why a form was not read, as the extension reports it, in the error the dashboard shows.
-_FORM_FAILURES = {
-    "not_allowed": "is on a site the ApplAI extension does not read",
-    "not_loaded": "did not load",
-    "not_read": "could not be read",
-    "no_field": "shows no field ApplAI recognizes",
-}
 MAX_SCREENSHOT = 20_000_000  # characters of base64: a full page's PNG
 # Why a form was not filled, as the extension reports it, in the error the dashboard shows.
-_FILL_FAILURES = {
-    "not_allowed": "is on a site the ApplAI extension does not reach",
-    "not_loaded": "did not load",
-    "not_filled": "could not be filled",
-}
-
 router = APIRouter(prefix="/api/browser")
 
 
@@ -363,7 +351,7 @@ def _form_failed(application: Application, reason: str, now: datetime) -> None:
     application.form_failed_at = now.astimezone(UTC).replace(tzinfo=None)  # as the scans' times
     if application.form_failures >= MAX_FORM_FAILURES:
         application.form_url = None
-        application.form_url_error = f"The form {_FORM_FAILURES[reason]}: {PASTE}."
+        application.form_url_error = f"form_{reason}"
 
 
 class FillToDo(BaseModel):
@@ -498,22 +486,12 @@ def fill_failed(application_id: int, body: FillFailed, request: Request) -> None
     """Record a form the extension could not fill; asked for again after the next scan."""
     with Session(request.app.state.engine) as session:
         application = _waiting_fill(session, application_id)
-        application.fill_error = (
-            f"Filling failed: the form {_FILL_FAILURES[body.reason]}. Check that the ApplAI"
-            " extension is enabled in Chrome; the form is filled again after the next scan."
-        )
+        application.fill_error = f"fill_{body.reason}"
         application.fill_failed_at = utc(request.app.state.clock())
         session.commit()
 
 
 type SendReason = Literal["no_tab", "captcha", "no_button", "not_confirmed", "not_sent"]
-_SEND_FAILURES: dict[SendReason, str] = {
-    "no_tab": "No open tab matches the form URL in Chrome.",
-    "captcha": "A captcha blocks submission: complete it in Chrome.",
-    "no_button": "No submit button was found on the form.",
-    "not_confirmed": "No confirmation page was detected: check Chrome before retrying.",
-    "not_sent": "The form could not be submitted in Chrome.",
-}
 
 
 class SendToDo(BaseModel):
@@ -569,7 +547,7 @@ def send_failed(application_id: int, body: SendFailed, request: Request) -> None
     with Session(request.app.state.engine) as session, session.begin():
         app = _waiting_send(session, application_id)
         app.send_authorized_at = None
-        app.send_error = _SEND_FAILURES[body.reason]
+        app.send_error = f"send_{body.reason}"
 
 
 @router.get("/status")

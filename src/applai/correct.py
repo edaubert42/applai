@@ -25,8 +25,7 @@ from applai.profile import Profile
 
 ANSWERS_LEVEL = "answers"
 CV_LEVEL = "cv"
-NOT_JUDGED = "Not checked by Judge."
-_NO_REASON = "not supported by its cited facts."
+NOT_JUDGED = "not_judged"
 _RESOLVED = (AnswerStatus.ACCEPTED, AnswerStatus.EDITED)
 
 
@@ -139,7 +138,8 @@ def judge_warnings(judge_issues: list[dict[str, Any]] | None) -> list[str]:
     """
     if judge_issues is None:
         return [NOT_JUDGED]
-    return [f"Sentence {issue['sentence'] + 1}: {issue['reason'] or _NO_REASON}"
+    return [f"judge_sentence:{issue['sentence'] + 1} — {issue['reason']}" if issue["reason"]
+            else f"judge_unsupported:{issue['sentence'] + 1}"
             for issue in judge_issues]  # fmt: skip
 
 

@@ -110,7 +110,7 @@ def merged_fields(
 def missing_required(fields: list[ReviewedField]) -> list[ReviewProblem]:
     """Deterministic code check: any empty required field is always blocking."""
     return [
-        ReviewProblem(severity="blocking", field=f.label, message="Champ obligatoire vide.")
+        ReviewProblem(severity="blocking", field=f.label, message="required_empty")
         for f in fields
         if f.required and (
             f.unfilled is not None or (f.type == "file" and not f.file)
@@ -184,7 +184,7 @@ def record_failure(database: Engine, application_id: int, error: str) -> None:
     with Session(database) as session, session.begin():
         app = session.get_one(Application, application_id)
         if app.state == ApplicationState.FILLED:
-            app.review_error = f"Review failed: {error}"
+            app.review_error = error
 
 
 def review_in_background(

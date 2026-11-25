@@ -3,6 +3,7 @@ import { ApiError, GROUPS, api, type Applications, type Row } from "./api";
 import CorrectScreen from "./CorrectScreen";
 import FinalValidationScreen from "./FinalValidationScreen";
 import { Logo } from "./ReviewCard";
+import { serverMessage } from "./server-message";
 import { useSettings } from "./settings";
 import { button } from "./styles";
 
@@ -159,13 +160,13 @@ function ApplicationRow({
       {row.state === "answers_checked" && (row.fill_error || !extensionConnected) && (
         <p role="alert" className="basis-full text-sm text-minus">
           {row.fill_error
-            ? t("applications.fill.error", { error: row.fill_error })
+            ? t("applications.fill.error", { error: serverMessage(row.fill_error, lookup) })
             : t("applications.fill.extension_disconnected")}
         </p>
       )}
       {canPaste && (
         <form onSubmit={(event) => paste(event, id)} className="flex basis-full flex-wrap items-center gap-3">
-          {form.error && <p className="basis-full text-sm text-minus">{form.error}</p>}
+          {form.error && <p className="basis-full text-sm text-minus">{serverMessage(form.error, lookup)}</p>}
           <input
             type="url"
             required

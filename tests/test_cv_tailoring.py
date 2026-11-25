@@ -223,7 +223,7 @@ def test_photo_unknown_gives_no_image_and_a_warning(engine: Engine, data_dir: Pa
     pdf, review = _filled(data_dir, application_id)
 
     assert _images(pdf) == 0
-    assert "photo" in review["cv_warning"]
+    assert review["cv_warning"] == "cv_no_photo"
     assert _application(engine, application_id).cv_photo == "unknown"
 
 

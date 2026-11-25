@@ -252,7 +252,7 @@ def record_failure(database: Engine, application_id: int, error: str) -> None:
     with Session(database) as session, session.begin():
         application = session.get_one(Application, application_id)
         if application.state == ApplicationState.ANSWERS_CHECKED:
-            application.fill_error = f"Filling failed: {error}"
+            application.fill_error = error
             application.fill_plan = None  # an old plan is not offered after a failed re-plan
 
 

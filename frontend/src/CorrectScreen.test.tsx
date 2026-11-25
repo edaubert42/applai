@@ -102,18 +102,18 @@ describe("the Correct screen", () => {
 
   it("shows every warning of an answer in its own card, and none on an answer without any", async () => {
     const flagged = anAnswer({
-      warnings: ["Sentence 1: F1 says a team of 40, not a warehouse of 40.", "Sentence 2: F2 gives no year."],
+      warnings: ["judge_sentence:1 — F1 says a team of 40, not a warehouse of 40.", "judge_unsupported:2"],
     });
-    const unchecked = { ...second, warnings: ["Not checked by Judge."] };
+    const unchecked = { ...second, warnings: ["not_judged"] };
     const clean = anAnswer({ id: 3, field_index: 2, label: "Disponibilité ?", warnings: [] });
     await openCorrect({}, "fr", aDraft([flagged, unchecked, clean]));
 
     const notes = (name: string) => answerNamed(name).queryAllByRole("note").map((note) => note.textContent);
     expect(notes("Pourquoi ce poste ?")).toEqual([
-      "À vérifier : Sentence 1: F1 says a team of 40, not a warehouse of 40.",
-      "À vérifier : Sentence 2: F2 gives no year.",
+      "À vérifier : phrase 1 — F1 says a team of 40, not a warehouse of 40.",
+      `À vérifier : ${fr["message.judge_unsupported"].replace("{detail}", "2")}`,
     ]);
-    expect(notes("Lettre de motivation")).toEqual(["À vérifier : Not checked by Judge."]);
+    expect(notes("Lettre de motivation")).toEqual([`À vérifier : ${fr["message.not_judged"]}`]);
     expect(notes("Disponibilité ?")).toEqual([]);
   });
 

@@ -140,7 +140,7 @@ def test_send_failure_clears_authorization_never_retries_blindly_and_stays_valid
         assert client.get("/api/browser/sends", headers=EXTENSION).json() == []
         review = client.get(f"/api/applications/{app_id}/review").json()
         assert (review["state"], review["send_authorized"]) == ("validated", False)
-        assert review["send_error"]
+        assert review["send_error"] == f"send_{reason}"
 
     assert client.post(f"/api/applications/{app_id}/authorize-send").status_code == 204
     assert client.post(fail_url, json={"reason": "unknown"}, headers=EXTENSION).status_code == 422

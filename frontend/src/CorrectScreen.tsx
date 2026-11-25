@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type Answer, type CitedFact, type Draft, type Row } from "./api";
 import CvBlock from "./CvBlock";
 import Paragraphs from "./Paragraphs";
+import { serverMessage } from "./server-message";
 import { useSettings } from "./settings";
 import { button } from "./styles";
 
@@ -112,7 +113,7 @@ function AnswerCard({
   answer: Answer;
   onChange: (answer: Answer) => void;
 }) {
-  const { t } = useSettings();
+  const { t, lookup } = useSettings();
   const [mode, setMode] = useState<Mode>("view");
   const [text, setText] = useState("");
   const [reason, setReason] = useState("");
@@ -177,7 +178,7 @@ function AnswerCard({
       </div>
       {answer.warnings.map((warning) => (
         <p key={warning} role="note" className="rounded-block border border-minus px-3 py-2 text-sm text-minus">
-          {t("correct.warning", { warning })}
+          {t("correct.warning", { warning: serverMessage(warning, lookup) })}
         </p>
       ))}
       <Paragraphs text={shown} />

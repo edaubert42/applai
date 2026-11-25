@@ -161,7 +161,7 @@ def test_a_failed_form_waits_for_the_next_scan_and_a_second_failure_keeps_an_err
     assert after_scan == [{"application_id": application_id, "url": LEVER}]
     assert client.get("/api/browser/forms", headers=EXTENSION).json() == []
     assert (row["state"], row["form_url"]) == ("created", None)  # the candidate pastes it
-    assert row["form_url_error"] == "The form did not load: paste the form's URL."
+    assert row["form_url_error"] == "form_not_loaded"
     pasted = client.put(f"/api/applications/{application_id}/form-url", json={"url": LEVER})
     assert pasted.status_code == 200
     assert client.get("/api/browser/forms", headers=EXTENSION).json() == after_scan
@@ -255,9 +255,7 @@ def test_a_fallback_that_fails_or_finds_nothing_is_a_failure_and_the_second_drop
     assert (agent["state"], agent["last_error"]) == ("red", "exit")
     second = _get(engine, application_id)
     assert (second.state, second.form_fields, second.form_url) == ("created", None, None)
-    assert second.form_url_error == (
-        "The form shows no field ApplAI recognizes: paste the form's URL."
-    )
+    assert second.form_url_error == "form_no_field"
     runs = trace(engine, second.offer_id).runs
     assert [(run.agent, run.outcome) for run in runs] == [
         ("form_capture", "exit"), ("form_capture", "ok"),

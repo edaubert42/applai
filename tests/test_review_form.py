@@ -121,6 +121,7 @@ def test_empty_required_field_is_blocking_in_code_and_merges_agent_problems(
     assert [(p.severity, p.field) for p in problems] == [
         ("blocking", "CV"), ("warning", "Pourquoi Pivoine Analytics ?"),
     ]  # fmt: skip
+    assert problems[0].message == "required_empty"
     fact_ids = {f["id"] for f in json.loads(backend.specs[0].input)["profile"]["facts"]}
     for fact in profile.facts:
         if fact.status != "validated" or fact.diffusion == "never":
@@ -179,6 +180,7 @@ def test_agent_error_records_review_error_stays_filled_and_retry_route_recovers(
         first = client.get(f"/api/applications/{app_id}/review").json()
         assert first["state"] == "filled" and first["problems"] is None
         assert first["review_error"] and "timeout" in first["review_error"]
+        assert not first["review_error"].startswith("Review failed")  # the page says it
         assert client.post(f"/api/applications/{app_id}/review").status_code == 202
         after = client.get(f"/api/applications/{app_id}/review").json()
         assert (after["state"], after["review_error"], after["problems"]) == ("reviewed", None, [])
