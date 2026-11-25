@@ -368,3 +368,20 @@ def test_an_unknown_offer_or_another_candidates_offer_is_not_found(
     assert _decide(client, 404, "later").status_code == 404
     assert _decide(client, other, "later").status_code == 404
     assert _state(engine, other) == "triaged"
+
+
+def test_screened_out_cards_of_rule_screened_offers_show_their_triage_when_they_have_one(
+    engine: Engine, client: TestClient
+):
+    con = {"text": "CDD de moins de 6 mois", "verdict": "-"}
+    with_card = _offer(engine, "data-trainee", "screened_out", rule="fixed_term", score=62, day=5)
+    _offer(engine, "sales-engineer", "screened_out", rule="title_word:sales", day=2)
+    with Session(engine) as session, session.begin():
+        triage = session.scalars(select(Triage).where(Triage.offer_id == with_card)).one()
+        triage.cons = [*CARD["cons"], con]
+
+    cards = client.get("/api/review", params={"view": "screened_out"}).json()
+
+    assert [card["title"] for card in cards] == ["Data trainee", "Sales engineer"]
+    assert (cards[0]["score"], cards[0]["rule"], cards[0]["cons"][-1]) == (62, "fixed_term", con)
+    assert (cards[1]["score"], cards[1]["rule"]) == (None, "title_word:sales")

@@ -117,8 +117,68 @@ def test_the_draft_shows_each_answer_with_its_sentences_facts_and_status(
         why, WHY, SIX_YEARS, "pending",
     )  # fmt: skip
     assert first["sentences"] == [{"text": SIX_YEARS, "facts": [{"id": "F1", "text": F1}]}]
-    assert (first["warnings"], first["edited_text"]) == ([], None)
+    assert first["edited_text"] is None
     assert client.get("/api/applications/999/draft").status_code == 404
+
+
+TEN_YEARS = "F1 says six years, not ten."
+
+
+def _judged(engine: Engine, answer_id: int, issues: list[dict[str, Any]] | None) -> None:
+    """Give the answer two sentences, and what the judge flagged in them."""
+    with Session(engine) as session, session.begin():
+        answer = session.get_one(DraftAnswer, answer_id)
+        answer.sentences = [{"text": SIX_YEARS, "facts": ["F1"]},
+                            {"text": FORECAST, "facts": ["F3"]}]  # fmt: skip
+        answer.judge_issues = issues
+
+
+@pytest.mark.parametrize(
+    ("issues", "warnings"),
+    [
+        ([{"sentence": 1, "reason": TEN_YEARS}], [f"Sentence 2: {TEN_YEARS}"]),
+        ([], []),
+        (None, ["Not checked by Judge."]),
+    ],
+    ids=["flagged", "checked-clean", "not-checked"],
+)
+def test_each_answer_shows_what_the_judge_flagged_or_that_it_was_not_checked(
+    engine: Engine,
+    client: TestClient,
+    issues: list[dict[str, Any]] | None,
+    warnings: list[str],
+):
+    application_id, [why, _] = _drafted(engine)
+    _judged(engine, why, issues)
+
+    draft = client.get(f"/api/applications/{application_id}/draft")
+
+    assert draft.status_code == 200
+    assert draft.json()["answers"][0]["warnings"] == warnings
+
+
+def test_a_flag_without_a_reason_still_names_its_sentence(engine: Engine, client: TestClient):
+    application_id, [why, _] = _drafted(engine)
+    _judged(engine, why, [{"sentence": 0, "reason": None}])
+
+    answer = client.get(f"/api/applications/{application_id}/draft").json()["answers"][0]
+
+    assert answer["warnings"] == ["Sentence 1: not supported by its cited facts."]
+
+
+def test_the_candidate_may_accept_answers_the_judge_flagged_and_close_the_gate(
+    engine: Engine, client: TestClient
+):
+    application_id, answers = _drafted(engine)
+    url = f"/api/applications/{application_id}"
+    for answer_id in answers:
+        _judged(engine, answer_id, [{"sentence": 1, "reason": TEN_YEARS}])
+
+    accepted = [client.post(f"{url}/draft/{a}", json={"decision": "accept"}) for a in answers]
+    checked = client.post(f"{url}/answers-checked")
+
+    assert [r.status_code for r in accepted] == [200, 200]
+    assert checked.status_code == 204
 
 
 def test_accepting_records_a_label_and_editing_a_correction_with_a_word_diff(

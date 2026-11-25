@@ -41,6 +41,38 @@ test("it asks ApplAI, fetches each page with the browser's session, and posts it
   ]);
 });
 
+const SIGN_IN = "https://www.jobteaser.com/fr/users/sign_in";
+
+// A fetch answering 200 with this final URL: a Response's url and redirected are read-only, so a plain object.
+async function readRedirected(finalUrl, redirected = true) {
+  const calls = [];
+  await readPages(async (url, options) => {
+    calls.push([url, options]);
+    if (url === `${APPLAI}/api/browser/pages`) return Response.json([{ offer_id: 7, url: OFFER }]);
+    if (url !== OFFER) return new Response(null, { status: 204 });
+    return { ok: true, status: 200, redirected, url: finalUrl, text: async () => "<html>Connexion</html>" };
+  });
+  return calls;
+}
+
+test("a page redirected outside the offer's host or path is a failure, never its HTML", async () => {
+  const report = { method: "POST", headers: { "Content-Type": "application/json" } };
+
+  assert.deepEqual((await readRedirected(SIGN_IN)).slice(2), [
+    [`${APPLAI}/api/browser/pages/7/failure`, { ...report, body: JSON.stringify({ status: 200 }) }],
+  ]);
+  const elsewhere = await readRedirected("https://ecole-des-tilleuls.jobteaser.com/fr/job-offers/9-other");
+  assert.equal(elsewhere[2][0], `${APPLAI}/api/browser/pages/7/failure`);
+});
+
+test("a page answering 200 without a redirect, or redirected within the offer's path, posts its HTML", async () => {
+  const html = JSON.stringify({ html: "<html>Connexion</html>" });
+  for (const calls of [await readRedirected(OFFER, false), await readRedirected(`${OFFER}/`)]) {
+    assert.equal(calls[2][0], `${APPLAI}/api/browser/pages/7`);
+    assert.equal(calls[2][1].body, html);
+  }
+});
+
 test("it fetches Google offer pages with the browser's session too", async () => {
   const google = "https://www.google.fr/search?q=Data+engineer&udm=8&htidocid=1";
   const headers = { "Content-Type": "application/json" };
@@ -150,7 +182,7 @@ const PLAN = [
 ];
 const FILLED = [{ field: 0, value: "Camille Moreau" }, { field: 1, file: "cv.pdf" }];
 
-function fillChromeWith(calls, { status = "complete", filled = FILLED, captureError = false } = {}) {
+function fillChromeWith(calls, { status = "complete", filled = FILLED, captureError = false, throws = false } = {}) {
   return {
     runtime: { getManifest: () => manifest },
     tabs: {
@@ -166,7 +198,11 @@ function fillChromeWith(calls, { status = "complete", filled = FILLED, captureEr
       remove: async (id) => calls.push(["close", id]),
     },
     scripting: {
-      executeScript: async ({ target, func, args }) => calls.push(["run", target, func, args]) && [{ result: filled }],
+      executeScript: async ({ target, func, args }) => {
+        calls.push(["run", target, func, args]);
+        if (throws) throw new Error("tab crashed");
+        return [{ result: filled }];
+      },
     },
   };
 }
@@ -219,6 +255,16 @@ test("fillForms posts without screenshot on capture failure, and reports load or
   assert.deepEqual(loading.at(-1), [`${APPLAI}/api/browser/fills/14/failure`, { ...SENT, body: JSON.stringify({ reason: "not_loaded" }) }]);
 });
 
+test("a failed fill closes its tab: a timeout reports not_loaded, a throwing script not_filled", async () => {
+  const loading = await fillFormsWith([{ application_id: 14, url: LEVER, actions: PLAN }], { status: "loading" });
+  assert.deepEqual(loading.filter(([k]) => k === "close"), [["close", 9]]);
+  assert.deepEqual(loading.at(-1), [`${APPLAI}/api/browser/fills/14/failure`, { ...SENT, body: JSON.stringify({ reason: "not_loaded" }) }]);
+
+  const throwing = await fillFormsWith([{ application_id: 15, url: LEVER, actions: PLAN }], { throws: true });
+  assert.deepEqual(throwing.filter(([k]) => k === "close"), [["close", 9]]);
+  assert.deepEqual(throwing.at(-1), [`${APPLAI}/api/browser/fills/15/failure`, { ...SENT, body: JSON.stringify({ reason: "not_filled" }) }]);
+});
+
 function fakeDom({ captcha = false, buttons = [], text = "Formulaire", href = LEVER, onClick } = {}) {
   const loc = { href };
   const doc = {
@@ -262,10 +308,18 @@ test("submitForm and isConfirmed ignore pre-existing text, stop on captcha/no bu
 
 async function sendFormsWith(
   sends,
-  { tabs = [{ id: 7, url: LEVER, status: "complete" }], submit = { ok: true, beforeText: "Form" }, tabAfter, confirmedAfter = true, postStatus = 204, pending = new Map() } = {},
+  { tabs = [{ id: 7, url: LEVER, status: "complete" }], submit = { ok: true, beforeText: "Form" }, tabAfter, confirmedAfter = true, postStatus = 204, pending = new Map(), stored = {} } = {},
 ) {
   const calls = [];
   const chrome = {
+    storage: {
+      // chrome.storage.local: what it holds (`stored`) survives a service-worker restart
+      local: {
+        get: async (key) => (key in stored ? { [key]: structuredClone(stored[key]) } : {}),
+        set: async (items) => calls.push(["store", Object.keys(items)]) && Object.assign(stored, structuredClone(items)),
+        remove: async (key) => { delete stored[key]; },
+      },
+    },
     tabs: {
       create: async () => { throw new Error("must never open a tab"); },
       query: async (q) => calls.push(["query", q]) && tabs,
@@ -309,4 +363,28 @@ test("sendForms uses open tabs only, reports failures, and retries reporting wit
   const retry = await sendFormsWith([{ application_id: 26, url: LEVER }], { postStatus: 204, pending });
   assert.equal(retry.some(([k, , fn]) => k === "run" && fn === submitForm), false);
   assert.deepEqual(retry.at(-1), [`${APPLAI}/api/browser/sends/26`, { ...SENT, body: "{}" }]);
+});
+
+test("a click's unreported result is stored before it is posted and survives a service-worker restart", async () => {
+  const stored = {};
+  const first = await sendFormsWith([{ application_id: 27, url: LEVER }], { postStatus: null, stored });
+  const post = first.findIndex(([url]) => url === `${APPLAI}/api/browser/sends/27`);
+  const store = first.findIndex(([k]) => k === "store");
+  assert.ok(store !== -1 && store < post, "stored before it is posted");
+
+  // The worker restarted: nothing in memory, only what chrome.storage kept.
+  const restarted = await sendFormsWith([{ application_id: 27, url: LEVER }], { postStatus: 503, pending: new Map(), stored });
+  assert.equal(restarted.some(([k, , fn]) => k === "run" && fn === submitForm), false);
+  assert.deepEqual(restarted.at(-1), [`${APPLAI}/api/browser/sends/27`, { ...SENT, body: "{}" }]);
+  assert.equal(Object.keys(stored).length, 1, "kept while ApplAI has not taken it");
+});
+
+test("a stored report is removed once ApplAI answers 2xx, 404 or 409", async () => {
+  for (const status of [204, 404, 409]) {
+    const stored = {};
+    await sendFormsWith([{ application_id: 28, url: LEVER }], { postStatus: null, stored });
+    assert.equal(Object.keys(stored).length, 1);
+    await sendFormsWith([{ application_id: 28, url: LEVER }], { postStatus: status, pending: new Map(), stored });
+    assert.deepEqual(stored, {}, `removed after ${status}`);
+  }
 });
