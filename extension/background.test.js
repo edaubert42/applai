@@ -308,10 +308,18 @@ test("submitForm and isConfirmed ignore pre-existing text, stop on captcha/no bu
 
 async function sendFormsWith(
   sends,
-  { tabs = [{ id: 7, url: LEVER, status: "complete" }], submit = { ok: true, beforeText: "Form" }, tabAfter, confirmedAfter = true, postStatus = 204, pending = new Map() } = {},
+  { tabs = [{ id: 7, url: LEVER, status: "complete" }], submit = { ok: true, beforeText: "Form" }, tabAfter, confirmedAfter = true, postStatus = 204, pending = new Map(), stored = {} } = {},
 ) {
   const calls = [];
   const chrome = {
+    storage: {
+      // chrome.storage.local: what it holds (`stored`) survives a service-worker restart
+      local: {
+        get: async (key) => (key in stored ? { [key]: structuredClone(stored[key]) } : {}),
+        set: async (items) => calls.push(["store", Object.keys(items)]) && Object.assign(stored, structuredClone(items)),
+        remove: async (key) => { delete stored[key]; },
+      },
+    },
     tabs: {
       create: async () => { throw new Error("must never open a tab"); },
       query: async (q) => calls.push(["query", q]) && tabs,
@@ -355,4 +363,28 @@ test("sendForms uses open tabs only, reports failures, and retries reporting wit
   const retry = await sendFormsWith([{ application_id: 26, url: LEVER }], { postStatus: 204, pending });
   assert.equal(retry.some(([k, , fn]) => k === "run" && fn === submitForm), false);
   assert.deepEqual(retry.at(-1), [`${APPLAI}/api/browser/sends/26`, { ...SENT, body: "{}" }]);
+});
+
+test("a click's unreported result is stored before it is posted and survives a service-worker restart", async () => {
+  const stored = {};
+  const first = await sendFormsWith([{ application_id: 27, url: LEVER }], { postStatus: null, stored });
+  const post = first.findIndex(([url]) => url === `${APPLAI}/api/browser/sends/27`);
+  const store = first.findIndex(([k]) => k === "store");
+  assert.ok(store !== -1 && store < post, "stored before it is posted");
+
+  // The worker restarted: nothing in memory, only what chrome.storage kept.
+  const restarted = await sendFormsWith([{ application_id: 27, url: LEVER }], { postStatus: 503, pending: new Map(), stored });
+  assert.equal(restarted.some(([k, , fn]) => k === "run" && fn === submitForm), false);
+  assert.deepEqual(restarted.at(-1), [`${APPLAI}/api/browser/sends/27`, { ...SENT, body: "{}" }]);
+  assert.equal(Object.keys(stored).length, 1, "kept while ApplAI has not taken it");
+});
+
+test("a stored report is removed once ApplAI answers 2xx, 404 or 409", async () => {
+  for (const status of [204, 404, 409]) {
+    const stored = {};
+    await sendFormsWith([{ application_id: 28, url: LEVER }], { postStatus: null, stored });
+    assert.equal(Object.keys(stored).length, 1);
+    await sendFormsWith([{ application_id: 28, url: LEVER }], { postStatus: status, pending: new Map(), stored });
+    assert.deepEqual(stored, {}, `removed after ${status}`);
+  }
 });
