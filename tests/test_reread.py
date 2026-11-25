@@ -52,6 +52,7 @@ class Env:
         self.pages: dict[str, int] = {}  # the status each URL answers, 404 for the others
         self.scores: list[int] = []  # what the model answers, one score per call
         self.specs: list[AgentSpec] = []  # what it was asked
+        self.read: dict[str, Any] = {}  # what the model reads in the text, over "none left"
 
         def serve(request: httpx2.Request) -> httpx2.Response:
             status = self.pages.get(str(request.url), 404)
@@ -65,11 +66,15 @@ class Env:
     def run(self, spec: AgentSpec) -> AgentResult:  # the agents' backend: the model's call
         self.specs.append(spec)
         usage = Usage(model=TRIAGE_MODEL, input_tokens=900, output_tokens=300)
-        card = _card(self.scores.pop(0)) | {
-            "fixed_term_months": None,
-            "work_mode": None,
-            "years_required": None,
-        }  # none left: it fails
+        card = (
+            _card(self.scores.pop(0))
+            | {
+                "fixed_term_months": None,
+                "work_mode": None,
+                "years_required": None,
+            }
+            | self.read
+        )  # none left: it fails
         return AgentResult(output=card, usage=usage)
 
     def offer(self, score: int = 55, **fields: Any) -> int:
@@ -260,3 +265,42 @@ def test_the_route_refuses_a_pending_read_and_an_extension_that_is_not_connected
     assert unasked.status_code == 409
     assert (first.status_code, second.status_code) == (202, 409)
     assert client.post(f"/api/offers/{other}/reread").status_code == 409
+
+
+def test_a_re_read_fills_the_fields_the_page_left_empty(env: Env, client: TestClient):
+    env.pages[ASHBY], env.scores = 200, [91]
+    env.read = {"work_mode": "remote", "years_required": 3}
+    offer_id = env.offer()
+
+    _read_again(client, offer_id)
+
+    offer = env.stored(offer_id)[0]
+    assert (offer.state, offer.work_mode, offer.years_required) == ("triaged", "remote", 3)
+
+
+def test_a_re_read_keeps_a_field_the_page_already_set(env: Env, client: TestClient):
+    env.pages[ASHBY], env.scores = 200, [91]
+    env.read = {"work_mode": "remote", "years_required": 3}
+    offer_id = env.offer(work_mode="hybrid")
+
+    _read_again(client, offer_id)
+
+    offer = env.stored(offer_id)[0]
+    assert (offer.work_mode, offer.years_required) == ("hybrid", 3)
+
+
+def test_a_re_read_whose_text_makes_a_rule_exclude_the_offer_screens_it_out(
+    env: Env, client: TestClient
+):
+    env.pages[ASHBY], env.scores = 200, [91]
+    env.read = {"years_required": 12}  # the profile's maximum is 3
+    offer_id = env.offer()
+
+    _read_again(client, offer_id)
+
+    offer, triage = env.stored(offer_id)
+    assert (offer.state, offer.screened_rule) == ("screened_out", "years")
+    assert (triage.score, offer.description, offer.reread_requested_at) == (91, NEW_TEXT, None)
+    assert _card_of(client, offer_id) == {}
+    card = _card_of(client, offer_id, "screened_out")
+    assert (card["rule"], card["score"], card["rereading"]) == ("years", 91, False)
