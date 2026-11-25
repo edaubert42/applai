@@ -6,6 +6,7 @@ import { APPLAI, fillForms, readForms, readPages, sendForms } from "./background
 import { fillForm } from "./fill.js";
 import { readForm, readText } from "./forms.js";
 import manifest from "./manifest.json" with { type: "json" };
+import { hideOverlay, showOverlay } from "./overlay.js";
 import { isConfirmed, submitForm } from "./send.js";
 
 const OFFER = "https://ecole-des-tilleuls.jobteaser.com/fr/job-offers/4521-data-engineer";
@@ -93,18 +94,59 @@ const LEVER = "https://jobs.lever.co/pivoine-analytics/4f2a-data-engineer/apply"
 const FIELDS = [{ label: "CV", type: "file", required: true, options: [] }];
 const SENT = { method: "POST", headers: { "Content-Type": "application/json" } };
 
+// Tab groups and the overlay, faked. Every group and overlay call goes to the log in order with the
+// other calls; the helpers below return the other calls alone, and the log as `.log`.
+const MARKS = ["group", "group-update", "overlay"];
+
+function faked(log, { groups = [], inGroup = new Map() } = {}) {
+  let next = 100;
+  return {
+    tabs: {
+      group: async ({ tabIds, groupId, createProperties }) => {
+        const id = groupId ?? next++;
+        if (groupId === undefined) groups.push({ id, windowId: createProperties?.windowId });
+        for (const tabId of tabIds) inGroup.set(tabId, id);
+        log.push(["group", id, tabIds, createProperties]);
+        return id;
+      },
+    },
+    tabGroups: {
+      query: async ({ windowId, title }) =>
+        groups.filter((g) => g.title === title && (windowId === undefined || g.windowId === windowId)),
+      update: async (id, props) =>
+        log.push(["group-update", id, props]) && Object.assign(groups.find((g) => g.id === id), props),
+    },
+    groupOf: (id) => inGroup.get(id) ?? -1,
+    // Whether the script is an overlay's: logged as such, nothing else runs.
+    overlay: (tabId, func) => {
+      if (func !== showOverlay && func !== hideOverlay) return false;
+      log.push(["overlay", tabId, func === showOverlay ? "show" : "hide"]);
+      return true;
+    },
+  };
+}
+
+function plain(log) {
+  return Object.assign(log.filter(([kind]) => !MARKS.includes(kind)), { log });
+}
+
 // Chrome's tabs and scripting, mocked: a tab with this status, a form with these fields and text.
-function chromeWith(calls, { status = "complete", fields = FIELDS, text = "" } = {}) {
+function chromeWith(calls, { status = "complete", fields = FIELDS, text = "", groups = [] } = {}) {
+  const fake = faked(calls, { groups });
+  let opened = 2;
   return {
     runtime: { getManifest: () => manifest },
     tabs: {
-      create: async (options) => calls.push(["open", options]) && { id: 3 },
-      get: async (id) => ({ id, status }),
+      ...fake.tabs,
+      create: async (options) => calls.push(["open", options]) && { id: ++opened, windowId: 1, groupId: -1 },
+      get: async (id) => ({ id, status, windowId: 1, groupId: fake.groupOf(id) }),
       remove: async (id) => calls.push(["close", id]),
     },
+    tabGroups: fake.tabGroups,
     scripting: {
       executeScript: async ({ target, func }) =>
-        calls.push(["run", target, func]) && [{ result: func === readText ? text : fields }],
+        fake.overlay(target.tabId, func) ||
+        (calls.push(["run", target, func]) && [{ result: func === readText ? text : fields }]),
     },
   };
 }
@@ -120,7 +162,7 @@ async function readFormsWith(forms, options, answer = 204) {
     chromeWith(calls, options),
     async () => {}, // no real wait
   );
-  return calls;
+  return plain(calls);
 }
 
 test("it opens each form in an inactive tab, reads it there, closes the tab and posts its fields", async () => {
@@ -182,12 +224,16 @@ const PLAN = [
 ];
 const FILLED = [{ field: 0, value: "Camille Moreau" }, { field: 1, file: "cv.pdf" }];
 
-function fillChromeWith(calls, { status = "complete", filled = FILLED, captureError = false, throws = false } = {}) {
+function fillChromeWith(calls, { status = "complete", filled = FILLED, captureError = false, throws = false, groups = [], noGroups = false } = {}) {
+  const fake = faked(calls, { groups });
+  let opened = 8;
   return {
     runtime: { getManifest: () => manifest },
+    tabGroups: noGroups ? undefined : fake.tabGroups, // as a Chrome without the permission
     tabs: {
-      create: async (options) => calls.push(["open", options]) && { id: 9, windowId: 1 },
-      get: async (id) => ({ id, status, windowId: 1 }),
+      ...fake.tabs,
+      create: async (options) => calls.push(["open", options]) && { id: ++opened, windowId: 1, groupId: -1 },
+      get: async (id) => ({ id, status, windowId: 1, groupId: fake.groupOf(id) }),
       query: async () => [{ id: 1, active: true, windowId: 1 }],
       update: async (id, props) => calls.push(["update", id, props]) && { id },
       captureVisibleTab: async (windowId, opts) => {
@@ -199,6 +245,7 @@ function fillChromeWith(calls, { status = "complete", filled = FILLED, captureEr
     },
     scripting: {
       executeScript: async ({ target, func, args }) => {
+        if (fake.overlay(target.tabId, func)) return [{ result: null }];
         calls.push(["run", target, func, args]);
         if (throws) throw new Error("tab crashed");
         return [{ result: filled }];
@@ -224,7 +271,7 @@ async function fillFormsWith(fills, options = {}) {
     fillChromeWith(calls, options),
     async () => {},
   );
-  return calls;
+  return plain(calls);
 }
 
 test("fillForms fetches files, fills, captures screenshot, leaves tab open, and posts state", async () => {
@@ -308,10 +355,12 @@ test("submitForm and isConfirmed ignore pre-existing text, stop on captcha/no bu
 
 async function sendFormsWith(
   sends,
-  { tabs = [{ id: 7, url: LEVER, status: "complete" }], submit = { ok: true, beforeText: "Form" }, tabAfter, confirmedAfter = true, postStatus = 204, pending = new Map(), stored = {} } = {},
+  { tabs = [{ id: 7, url: LEVER, status: "complete", windowId: 1, groupId: -1 }], groups = [], submit = { ok: true, beforeText: "Form" }, tabAfter, confirmedAfter = true, postStatus = 204, pending = new Map(), stored = {} } = {},
 ) {
   const calls = [];
+  const fake = faked(calls, { groups });
   const chrome = {
+    tabGroups: fake.tabGroups,
     storage: {
       // chrome.storage.local: what it holds (`stored`) survives a service-worker restart
       local: {
@@ -321,13 +370,15 @@ async function sendFormsWith(
       },
     },
     tabs: {
+      ...fake.tabs,
       create: async () => { throw new Error("must never open a tab"); },
       query: async (q) => calls.push(["query", q]) && tabs,
       get: async (id) => ({ id, status: "complete", url: tabAfter ?? LEVER }),
     },
     scripting: {
       executeScript: async ({ target, func }) =>
-        calls.push(["run", target, func]) && [{ result: func === isConfirmed ? confirmedAfter : submit }],
+        fake.overlay(target.tabId, func) ||
+        (calls.push(["run", target, func]) && [{ result: func === isConfirmed ? confirmedAfter : submit }]),
     },
   };
   await sendForms(
@@ -341,7 +392,7 @@ async function sendFormsWith(
     async () => {},
     pending,
   );
-  return calls;
+  return plain(calls);
 }
 
 test("sendForms uses open tabs only, reports failures, and retries reporting without double-submitting", async () => {
@@ -387,4 +438,96 @@ test("a stored report is removed once ApplAI answers 2xx, 404 or 409", async () 
     await sendFormsWith([{ application_id: 28, url: LEVER }], { postStatus: status, pending: new Map(), stored });
     assert.deepEqual(stored, {}, `removed after ${status}`);
   }
+});
+
+// The ApplAI tab group, and the frame around a tab the extension uses.
+const APPLAI_GROUP = { title: "ApplAI", color: "green" };
+const grouping = (log) => log.filter(([kind]) => kind === "group" || kind === "group-update");
+const firstOf = (log, kind) => log.findIndex(([k]) => k === kind);
+const IN_GROUP = [{ id: 100, windowId: 1, title: "ApplAI", color: "green" }];
+const TAB = { id: 7, url: LEVER, status: "complete", windowId: 1 };
+
+// The calls of these kinds in order, each as a short label: "overlay show", "run fillForm", "close".
+function steps(log, kinds) {
+  const label = ([kind, , third]) => (kind === "run" ? `run ${third.name}` : kind === "overlay" ? `overlay ${third}` : kind);
+  return log.filter(([kind]) => kinds.includes(kind)).map(label);
+}
+
+test("a form read adds its tab to a group titled ApplAI, a second tab in the window joins the same group", async () => {
+  const { log } = await readFormsWith([{ application_id: 5, url: LEVER }, { application_id: 6, url: LEVER }]);
+
+  assert.deepEqual(grouping(log), [
+    ["group", 100, [3], { windowId: 1 }],
+    ["group-update", 100, APPLAI_GROUP],
+    ["group", 100, [4], undefined],
+  ]);
+  assert.ok(firstOf(log, "group") < firstOf(log, "run"), "grouped before it is read");
+});
+
+test("a form fill adds its tab to a group titled ApplAI, a second tab in the window joins the same group", async () => {
+  const { log } = await fillFormsWith([
+    { application_id: 12, url: LEVER, actions: PLAN },
+    { application_id: 13, url: LEVER, actions: PLAN },
+  ]);
+
+  assert.deepEqual(grouping(log), [
+    ["group", 100, [9], { windowId: 1 }],
+    ["group-update", 100, APPLAI_GROUP],
+    ["group", 100, [10], undefined],
+  ]);
+  assert.ok(firstOf(log, "group") < firstOf(log, "run"), "grouped before it is filled");
+});
+
+test("a tab group that cannot be made never stops a fill", async () => {
+  const { log } = await fillFormsWith([{ application_id: 12, url: LEVER, actions: PLAN }], { noGroups: true });
+
+  assert.deepEqual(log.at(-1), [
+    `${APPLAI}/api/browser/fills/12`,
+    { ...SENT, body: JSON.stringify({ fields: FILLED, screenshot: "iVBORw0KGgo=" }) },
+  ]);
+});
+
+test("sendForms puts back into the group a tab that is not in it, before it submits", async () => {
+  const { log } = await sendFormsWith([{ application_id: 30, url: LEVER }], { tabs: [{ ...TAB, groupId: -1 }], groups: IN_GROUP });
+
+  assert.deepEqual(grouping(log), [["group", 100, [7], undefined]]);
+  assert.ok(firstOf(log, "group") < log.findIndex(([k, , fn]) => k === "run" && fn === submitForm));
+  assert.deepEqual(log.at(-1), [`${APPLAI}/api/browser/sends/30`, { ...SENT, body: "{}" }]);
+});
+
+test("sendForms leaves a tab already in the group alone, and makes the group when none is there", async () => {
+  const inside = await sendFormsWith([{ application_id: 31, url: LEVER }], { tabs: [{ ...TAB, groupId: 100 }], groups: IN_GROUP });
+  const none = await sendFormsWith([{ application_id: 32, url: LEVER }], { tabs: [{ ...TAB, groupId: -1 }] });
+
+  assert.deepEqual(grouping(inside.log), []);
+  assert.deepEqual(grouping(none.log), [["group", 100, [7], { windowId: 1 }], ["group-update", 100, APPLAI_GROUP]]);
+});
+
+test("a fill shows the frame before fillForm runs and removes it before the screenshot", async () => {
+  const { log } = await fillFormsWith([{ application_id: 12, url: LEVER, actions: PLAN }]);
+
+  assert.deepEqual(steps(log, ["overlay", "run", "update", "capture"]), [
+    "overlay show", "run fillForm", "overlay hide", "update", "capture", "update",
+  ]);
+  assert.deepEqual(log.filter(([k]) => k === "overlay").map(([, tabId]) => tabId), [9, 9]);
+});
+
+test("a fill that throws removes the frame, then closes the tab", async () => {
+  const { log } = await fillFormsWith([{ application_id: 15, url: LEVER, actions: PLAN }], { throws: true });
+
+  assert.deepEqual(steps(log, ["overlay", "run", "close"]), ["overlay show", "run fillForm", "overlay hide", "close"]);
+});
+
+test("a form read shows the frame while it reads, and removes it before it closes the tab", async () => {
+  const { log } = await readFormsWith([{ application_id: 5, url: LEVER }]);
+
+  assert.deepEqual(steps(log, ["overlay", "run", "close"]), ["overlay show", "run readForm", "overlay hide", "close"]);
+});
+
+test("sendForms shows the frame while it submits, and removes it whether or not the click went through", async () => {
+  const ok = await sendFormsWith([{ application_id: 33, url: LEVER }]);
+  const refused = await sendFormsWith([{ application_id: 34, url: LEVER }], { submit: { ok: false, reason: "captcha" } });
+
+  assert.deepEqual(steps(ok.log, ["overlay", "run"]), ["overlay show", "run submitForm", "run isConfirmed", "overlay hide"]);
+  assert.deepEqual(steps(refused.log, ["overlay", "run"]), ["overlay show", "run submitForm", "overlay hide"]);
 });
