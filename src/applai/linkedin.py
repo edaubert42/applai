@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from applai.details import Describing
 from applai.models import LOCAL_USER_ID, LinkedInRead, Offer, OfferOrigin, OfferState
-from applai.orchestrator import Actor, move
+from applai.orchestrator import Actor, TransitionError, move
 
 COMMAND_VARIABLE = "APPLAI_LINKEDIN_MCP"
 TOOL = "get_job_details"  # the only tool ApplAI calls on the server
@@ -177,12 +177,15 @@ def _describe(
     session.add(LinkedInRead(user_id=offer.user_id, offer_id=offer.id, read_at=now))
     session.commit()
     try:
-        offer.description = _posting(call_tool(command, TOOL, {"job_id": job_id}))
+        description = _posting(call_tool(command, TOOL, {"job_id": job_id}))
     except LinkedInError as error:
         _fail(into, offer, str(error), now)
         return False
-    offer.detail_error = None
-    move(session, offer, OfferState.DESCRIBED, Actor.WATCH)
+    try:
+        move(session, offer, OfferState.DESCRIBED, Actor.WATCH)
+    except TransitionError:  # moved by the rest of ApplAI during the call: it keeps its state
+        return True
+    offer.description, offer.detail_error = description, None
     into.described += 1
     return True
 

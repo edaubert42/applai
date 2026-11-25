@@ -11,6 +11,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from applai.database import open_database
+from applai import linkedin
 from applai.linkedin import (
     COMMAND_VARIABLE,
     MAX_READS_PER_DAY,
@@ -236,6 +237,28 @@ def test_an_offer_that_left_new_while_the_run_waited_is_not_read(
 
     assert (_get(engine, first).state, _get(engine, second).state) == ("described", "screened_out")
     assert len(server.calls()) == 1
+
+
+def test_an_offer_moved_during_its_own_call_keeps_its_state_and_the_run_goes_on(
+    engine: Engine, server: FictionalServer, monkeypatch: pytest.MonkeyPatch
+):
+    server.serve({"4000000001": _job(POSTING), "4000000002": _job(POSTING)})
+    first, second = _offer(engine, "4000000001"), _offer(engine, "4000000002")
+
+    def call_while_screened_out(command: str, tool: str, arguments: dict[str, Any]) -> str:
+        if arguments["job_id"] == "4000000001":  # the rest of ApplAI writes during the call
+            with Session(engine) as session:
+                move(session, session.get_one(Offer, first), OfferState.SCREENED_OUT, Actor.WATCH)
+                session.commit()
+        return call_tool(command, tool, arguments)
+
+    monkeypatch.setattr(linkedin, "call_tool", call_while_screened_out)
+
+    assert _run(engine) == []
+
+    assert (_get(engine, first).state, _get(engine, second).state) == ("screened_out", "described")
+    assert _get(engine, first).description is None
+    assert len(server.calls()) == 2
 
 
 def test_only_failed_calls_in_a_row_stop_the_reads(engine: Engine, server: FictionalServer):
