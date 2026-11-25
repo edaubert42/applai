@@ -161,6 +161,16 @@ def describe_offer(
     move(session, offer, OfferState.DESCRIBED, Actor.WATCH)
 
 
+def page_answered(status: int) -> str:
+    """The error of a page that answered an HTTP error status."""
+    return f"the page answered HTTP {status}"
+
+
+def offer_removed(error: str | None) -> bool:
+    """Whether a page's error says the site took the offer down (HTTP 404 or 410)."""
+    return error in (page_answered(404), page_answered(410))
+
+
 def read_description(http: httpx2.Client, url: str) -> str:
     """The text of the page at url, or PageError; the caller's offer is not touched."""
     return _read(http, url)[1].description
@@ -192,7 +202,7 @@ def _read(http: httpx2.Client, url: str) -> tuple[str, Details]:
         response = http.get(url)
         response.raise_for_status()
     except httpx2.HTTPStatusError as error:
-        raise PageError(f"the page answered HTTP {error.response.status_code}") from None
+        raise PageError(page_answered(error.response.status_code)) from None
     except httpx2.TimeoutException:
         raise PageError("the page did not answer in time") from None
     except httpx2.HTTPError as error:  # a message may hold the URL, which may hold a token
