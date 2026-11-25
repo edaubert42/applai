@@ -42,9 +42,11 @@ class OfferState(StrEnum):
 
 
 class OfferOrigin(StrEnum):
-    """Who found an offer: ApplAI, or the old workflow, read from Notion (ADR 0006)."""
+    """Who found an offer: ApplAI, the candidate by its URL, or the old workflow, read from
+    Notion (ADR 0006). Only the old workflow's offers are read only."""
 
     APPLAI = "applai"
+    MANUAL = "manual"
     OLD_WORKFLOW = "old_workflow"
 
 

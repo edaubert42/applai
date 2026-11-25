@@ -146,7 +146,7 @@ def _new_offers(session: Session, user_id: int) -> Sequence[Offer]:
         .where(
             Offer.user_id == user_id,
             Offer.state == OfferState.NEW,
-            Offer.origin == OfferOrigin.APPLAI,  # the old workflow's are read only
+            Offer.origin != OfferOrigin.OLD_WORKFLOW,  # the old workflow's are read only
         )
         .order_by(Offer.detail_error.is_not(None), Offer.id)
     ).all()

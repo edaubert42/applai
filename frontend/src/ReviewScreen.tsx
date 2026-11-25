@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VIEWS, api, type Card, type Decision, type View } from "./api";
+import AddOffer from "./AddOffer";
 import DeclinePanel from "./DeclinePanel";
 import { Header, Logo, OfferRow, ReviewCard, useSourceName } from "./ReviewCard";
 import ScanBar from "./ScanBar";
@@ -203,6 +204,7 @@ export default function ReviewScreen({ onOpenSettings }: { onOpenSettings: () =>
   return (
     <div className="mx-auto max-w-215 space-y-7">
       <ScanBar onScanned={reload} onOpenSettings={onOpenSettings} />
+      <AddOffer onAdded={reload} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="tablist" aria-label={t("review.tabs")} className="flex flex-wrap gap-1 rounded-pill bg-surface p-1">
           {VIEWS.map((name) => (
