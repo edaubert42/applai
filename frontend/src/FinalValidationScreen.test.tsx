@@ -233,6 +233,26 @@ describe("FinalValidationScreen", () => {
     expect(again.disabled).toBe(false);
   }, 10000);
 
+  it("shows the new tab's fields and screenshot after a fill again", async () => {
+    const asked = aFormReview({ state: "validated" });
+    const filled = aFormReview({ state: "validated", fields: [aReviewedField({ label: "First name", value: "Camille Refilled" })] });
+    let reloads = 0;
+    const { words } = await openValidation({
+      "POST /api/applications/1/fill-again": new Response(null, { status: 204 }),
+      "GET /api/applications/1/review": () => (reloads++ === 0 ? asked : filled),
+    }, "en", asked);
+    const image = () => screen.getByAltText(words["validation.screenshot.alt"]).getAttribute("src");
+    const before = image();
+
+    fireEvent.click(screen.getByRole("button", { name: words["validation.fill_again"] }));
+    await screen.findByRole("button", { name: words["validation.fill_again_asked"] });
+
+    await screen.findByText("Camille Refilled", {}, { timeout: 5000 });
+    expect(screen.getByRole("button", { name: words["validation.fill_again"] })).toBeTruthy();
+    expect(image()).not.toBe(before);
+    expect(image()?.startsWith("/api/applications/1/screenshot?")).toBe(true);
+  }, 10000);
+
   it("offers to fill again in every state the screen shows", async () => {
     for (const state of ["reviewed", "form_checked", "validated"]) {
       const { words } = await openValidation({}, "fr", aFormReview({ state }));

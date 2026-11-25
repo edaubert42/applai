@@ -6,9 +6,9 @@ import { serverMessage } from "./server-message";
 import { useSettings } from "./settings";
 import { button } from "./styles";
 
-/** Final validation: review problems, filled fields, attached PDFs, screenshot, and gates. */
 const FILL_AGAIN_POLL_MS = 3000;
 
+/** Final validation: review problems, filled fields, attached PDFs, screenshot, and gates. */
 export default function FinalValidationScreen({
   row, onBack, onDone,
 }: { row: Row; onBack: () => void; onDone: () => void }) {
@@ -20,6 +20,8 @@ export default function FinalValidationScreen({
   const [busy, setBusy] = useState(false);
   const [actionFailed, setActionFailed] = useState(false);
   const [confirmDrop, setConfirmDrop] = useState(false);
+  // Bumped when a fill again ends, so the browser fetches the new tab's screenshot.
+  const [shot, setShot] = useState(0);
 
   useEffect(() => {
     if (id === null) return;
@@ -35,7 +37,10 @@ export default function FinalValidationScreen({
   useEffect(() => {
     if (id === null || !waiting) return;
     const timer = setInterval(() => {
-      api.formReview(id).then((loaded) => setReview(loaded), () => {});
+      api.formReview(id).then((loaded) => {
+        setReview(loaded);
+        if (!loaded.fill_again) setShot((n) => n + 1);
+      }, () => {});
     }, FILL_AGAIN_POLL_MS);
     return () => clearInterval(timer);
   }, [id, waiting]);
@@ -157,7 +162,7 @@ export default function FinalValidationScreen({
           {review.has_screenshot && (
             <section aria-labelledby="validation-screenshot" className="space-y-3">
               <h3 id="validation-screenshot" className="text-lg font-semibold">{t("validation.screenshot.title")}</h3>
-              <img src={`/api/applications/${id}/screenshot`} alt={t("validation.screenshot.alt")} className="w-full rounded-block border border-border" />
+              <img src={`/api/applications/${id}/screenshot${shot ? `?v=${shot}` : ""}`} alt={t("validation.screenshot.alt")} className="w-full rounded-block border border-border" />
             </section>
           )}
 
