@@ -136,6 +136,11 @@ function ApplicationRow({
       </div>
       {old && <span className={`${pill} text-muted`}>{t("applications.origin.old_workflow")}</span>}
       {state && <span className={pill}>{state}</span>}
+      {row.tab_open !== null && (
+        <span className={`${pill} ${row.tab_open ? "text-plus" : "text-muted"}`}>
+          {t(row.tab_open ? "applications.tab.open" : "applications.tab.closed")}
+        </span>
+      )}
       <time dateTime={row.changed_at} className="text-sm text-muted">
         {formatTime(row.changed_at)}
       </time>

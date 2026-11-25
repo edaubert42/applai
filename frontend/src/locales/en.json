@@ -107,6 +107,8 @@
   "applications.none": "No application here.",
   "applications.offer": "See the offer",
   "applications.form": "See the form",
+  "applications.tab.open": "Tab open",
+  "applications.tab.closed": "Tab closed",
   "applications.form_url.label": "The form's URL",
   "applications.form_url.save": "Save",
   "applications.form_url.failed": "The URL was not saved: it starts with http:// or https://.",
