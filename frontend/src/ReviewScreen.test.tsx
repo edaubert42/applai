@@ -469,3 +469,43 @@ describe("the views", () => {
     await waitFor(() => expect(screen.queryByText("Directeur technique")).toBeNull());
   });
 });
+
+describe("adding an offer by its URL", () => {
+  const url = "https://jobs.example.org/pivoine-analytics/data-engineer?utm_source=newsletter";
+
+  async function add(answer: unknown, language: "fr" | "en" = "fr") {
+    if (language === "en") localStorage.setItem("applai.language", "en");
+    const calls = await openScreen({ ...reviewRoutes({ to_review: [aCard()] }), "POST /api/offers": answer }, false);
+    const words = language === "fr" ? fr : en;
+    fireEvent.change(screen.getByRole("textbox", { name: words["review.add.label"] }), { target: { value: ` ${url} ` } });
+    fireEvent.click(screen.getByRole("button", { name: words["review.add.submit"] }));
+    return { calls, words };
+  }
+
+  it.each(["fr", "en"] as const)("calls the route and shows the offer as added, in %s", async (language) => {
+    const { calls, words } = await add({ id: 9, url, state: "new", added: true }, language);
+
+    expect(await screen.findByText(words["review.add.added"])).toBeTruthy();
+    expect(calls.filter((call) => call.method === "POST" && call.path === "/api/offers")).toEqual([
+      { method: "POST", path: "/api/offers", body: { url } },
+    ]);
+    expect((screen.getByRole("textbox", { name: words["review.add.label"] }) as HTMLInputElement).value).toBe("");
+  });
+
+  it("says when the offer was already known", async () => {
+    await add({ id: 3, url, state: "triaged", added: false });
+
+    expect(await screen.findByText(fr["review.add.known"])).toBeTruthy();
+    expect(screen.queryByText(fr["review.add.added"])).toBeNull();
+  });
+
+  it.each([
+    [new Response("{}", { status: 422 }), "review.add.refused"],
+    [new Response("boom", { status: 500 }), "review.add.error"],
+  ] as const)("says why an offer was not added", async (answer, key) => {
+    await add(answer);
+
+    expect((await screen.findByRole("alert")).textContent).toBe(fr[key]);
+    expect(screen.queryByText(fr["review.add.added"])).toBeNull();
+  });
+});

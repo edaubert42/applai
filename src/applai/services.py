@@ -113,7 +113,9 @@ def _sites(
     s: Session, uid: int, data_dir: Path, local_now: datetime, now: datetime, asked: datetime | None
 ) -> list[dict[str, Any]]:
     offers = list(
-        s.scalars(select(Offer).where(Offer.user_id == uid, Offer.origin == OfferOrigin.APPLAI))
+        s.scalars(
+            select(Offer).where(Offer.user_id == uid, Offer.origin != OfferOrigin.OLD_WORKFLOW)
+        )
     )
     sc = StateChange
     q_r = select(sc.offer_id, func.max(sc.changed_at)).where(
