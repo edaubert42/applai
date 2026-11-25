@@ -47,6 +47,7 @@
   "scan.stopping": "Stopping…",
   "scan.active_services": "Services in use",
   "card.score": "Score {n}",
+  "card.collapse": "Collapse offer",
   "card.seen": "Seen in {source}",
   "time.ago.now": "< 1 min ago",
   "time.ago.minutes": "{n} min ago",
