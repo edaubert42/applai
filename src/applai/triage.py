@@ -288,19 +288,18 @@ def _fixed_term_cons(profile: Profile, contract: str | None, months: int | None)
 def retriage_offer(
     runner: AgentRunner, database: Engine, offer_id: int, description: str, profile: Profile
 ) -> Triage:
-    """Run the Triage agent again on a triaged offer with a text read later.
+    """Run the Triage agent again on a triaged or later offer with a text read later.
 
     The text and the card replace the old ones in one transaction: the offer keeps its
-    state, unless a screening rule now sets it aside on the new text (then screened_out, as
-    after a first triage), and its triages row, which gets the new run's id. A run that
-    fails raises its AgentError and nothing changes. So does an offer the candidate decided
-    on meanwhile.
+    state, unless a screening rule now sets a triaged offer aside on the new text (then
+    screened_out, as after a first triage; an offer the candidate put in later stays there),
+    and its triages row, which gets the new run's id. A run that fails raises its AgentError
+    and nothing changes. So does an offer the candidate decided on meanwhile.
     The read-again request of the offer ends with it (applai.reread).
     """
     with Session(database) as session:
         offer = session.get_one(Offer, offer_id)
-        if offer.state != OfferState.TRIAGED:
-            raise TriageError(f"offer {offer_id} is {offer.state}, not {OfferState.TRIAGED}")
+        _check_retriageable(offer)
         title, company = offer.title, offer.company
         summary = {name: getattr(offer, name) for name in SUMMARY_FIELDS}
     result = runner.run_agent(
@@ -312,8 +311,7 @@ def retriage_offer(
         raise TriageError(f"offer {offer_id}: the agent run was not recorded")
     with Session(database, expire_on_commit=False) as session, session.begin():
         offer = session.get_one(Offer, offer_id)
-        if offer.state != OfferState.TRIAGED:
-            raise TriageError(f"offer {offer_id} is {offer.state}, not {OfferState.TRIAGED}")
+        _check_retriageable(offer)
         triage = session.scalars(select(Triage).where(Triage.offer_id == offer_id)).one()
         card = result.output
         triage.agent_run_id = result.run_id
@@ -328,8 +326,16 @@ def retriage_offer(
         for name in READ_FIELDS:  # the page wins: Triage fills only what it left empty
             if getattr(offer, name) is None:
                 setattr(offer, name, card[name])
-        screen_triaged(session, offer, profile, months)  # a rule on the new text sets it aside
+        if offer.state == OfferState.TRIAGED:  # a rule on the new text sets it aside
+            screen_triaged(session, offer, profile, months)
     return triage
+
+
+def _check_retriageable(offer: Offer) -> None:
+    if offer.state not in (OfferState.TRIAGED, OfferState.LATER):
+        raise TriageError(
+            f"offer {offer.id} is {offer.state}, not {OfferState.TRIAGED} or {OfferState.LATER}"
+        )
 
 
 def _record_refusal(database: Engine, offer_id: int) -> None:
