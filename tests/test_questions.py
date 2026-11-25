@@ -109,7 +109,8 @@ def test_the_answerer_runs_after_the_coder_and_restarts_it_once():
     assert "steps.after.outputs.next == 'answer'" in answerer["if"]
     tools = answerer["with"]["claude_args"]
     assert "Bash(git" not in tools and "Edit" not in tools  # it only reads and comments
-    assert "claude-opus-5-5" in tools and "claude-sonnet-5-5" in tools and "--effort high" in tools
+    assert "claude-opus-5-5" in tools and "claude-sonnet-5-5" in tools
+    assert "--effort" in tools and "'high'" in tools and "'medium'" in tools
     restart = "\n".join(s.get("run", "") for s in steps[steps.index(answerer) :])
     assert "tools/questions.py next" in restart
     assert "gh workflow run agent-coder.yml" in restart

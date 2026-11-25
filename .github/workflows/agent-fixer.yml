@@ -56,8 +56,8 @@ jobs:
             actions: read
           claude_args: |
             --model ${{ (contains(github.event.issue.labels.*.name, 'hard') || contains(github.event.pull_request.labels.*.name, 'hard')) && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
-            --effort high
-            --max-turns 80
+            --effort ${{ (contains(github.event.issue.labels.*.name, 'hard') || contains(github.event.pull_request.labels.*.name, 'hard')) && 'high' || 'medium' }}
+            --max-turns 60
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh issue view:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh run view:*),Bash(gh run list:*),Bash(npm ci:*),Bash(npm run:*),Bash(npm test:*)"
 
   on-ci-failure:
@@ -91,6 +91,11 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Capture the tail of the failed CI log
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: gh run view "$RUN_ID" --log-failed | tail -n 120 > "$RUNNER_TEMP/ci-failed.log" || true
       - uses: anthropics/claude-code-action@e5812cd75691ca7bbfc57c0ecf4441db3a1ab7dd # v1.0.281
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -101,17 +106,17 @@ jobs:
             actions: read
           claude_args: |
             --model claude-sonnet-5-5
-            --effort high
-            --max-turns 60
+            --effort medium
+            --max-turns 40
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh run view:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(npm ci:*),Bash(npm run:*),Bash(npm test:*)"
           prompt: |
             You are the fixer agent of ${{ github.repository }}. CI run ${{ github.event.workflow_run.id }} failed
             on branch `${{ github.event.workflow_run.head_branch }}`, which you have checked out.
 
-            1. Read the failure with `gh run view ${{ github.event.workflow_run.id }} --log-failed`, then CLAUDE.md.
-            2. Fix the cause, not the symptom: never delete or weaken a test or a check to make it pass.
+            1. Read the tail of the failure log in `${{ runner.temp }}/ci-failed.log` (run `gh run view ${{ github.event.workflow_run.id }} --log-failed` only if truncated), then CLAUDE.md.
+            2. Make the smallest fix for the cause, not the symptom: never delete or weaken a test or a check to make it pass.
                The privacy job never prints the term it found; look for personal data near the reported line.
-            3. Run every gate listed in CLAUDE.md, commit with a message starting with `Fix CI:`, and push.
+            3. Iterate with targeted tests (`uv run pytest -q --tb=short <path>`), then run every gate listed in CLAUDE.md once at the end (`uv run pytest -q --tb=short`, frontend gates only if `frontend/` changed), commit with a message starting with `Fix CI:`, and push.
             4. If you cannot fix it, comment on the PR explaining why and stop.
 
   on-review-verdict:
@@ -178,21 +183,20 @@ jobs:
           allow_fork_prs: "false"
           allowed_bots: claude[bot]
           restrict_untrusted_prs: "false"
-          # Escalation: Sonnet after the first failed review, Opus after the second. Both at high:
-          # the fix targets review findings, it does not build the issue again.
+          # Escalation: Sonnet at medium after the first failed review, Opus at high after the second.
           claude_args: |
             --model ${{ steps.verdicts.outputs.count == 2 && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
-            --effort high
-            --max-turns 80
+            --effort ${{ steps.verdicts.outputs.count == 2 && 'high' || 'medium' }}
+            --max-turns 50
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(gh pr comment:*),Bash(npm ci:*),Bash(npm run:*),Bash(npm test:*)"
           prompt: |
             You are the fixer agent of ${{ github.repository }}. The reviewer asked for changes on
             PR #${{ github.event.issue.number }}, branch `${{ steps.verdicts.outputs.branch }}`, which you have checked out.
 
             1. Read the review with `gh pr view ${{ github.event.issue.number }} --comments`, the issue the PR closes, and CLAUDE.md.
-            2. Fix every finding of the latest review. If you disagree with one, say why in a PR comment instead of changing the code.
+            2. Make the smallest fix for every finding of the latest review. If you disagree with one, say why in a PR comment instead of changing the code.
                Never delete or weaken a test or a check.
-            3. Run every gate listed in CLAUDE.md, commit with a message starting with `Fix review:`, and push.
+            3. Iterate with targeted tests (`uv run pytest -q --tb=short <path>`), then run every gate listed in CLAUDE.md once at the end (`uv run pytest -q --tb=short`, frontend gates only if `frontend/` changed), commit with a message starting with `Fix review:`, and push.
                The push starts a new review.
             4. If a finding is about the PR title or description, rewrite them with
                `python3 tools/edit_pr.py ${{ github.event.issue.number }} --title <title> --body-file <file>`,
