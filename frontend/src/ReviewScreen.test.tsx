@@ -150,7 +150,7 @@ describe("a card", () => {
 });
 
 describe("the list of offers", () => {
-  it("shows every offer as a row with its logo, title, company, score and tags, and no card open", async () => {
+  it("shows every offer as a row with its logo, title, company, score and contract, and no card open", async () => {
     const more = manyOffers(18).map((card) => ({ ...card, id: card.id + 10, title: `Autre ${card.id}` }));
     await openScreen(reviewRoutes({ to_review: [aCard(), bob, ...more] }), false);
 
@@ -158,12 +158,46 @@ describe("the list of offers", () => {
     expect(screen.queryByRole("article")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Ingénieur logiciel" })).toBeNull();
     const row = within(rowOf(/Ingénieur logiciel/));
-    for (const text of ["Acme Robotics", fill(fr["card.score"], { n: 87 }), "Paris 11e", "Hybride"]) {
+    for (const text of ["Ingénieur logiciel", "Acme Robotics", fill(fr["card.score"], { n: 87 }), "CDI"]) {
       expect(row.getByText(text)).toBeTruthy();
     }
-    expect(row.queryByText("CDI")).toBeNull();
+    for (const text of ["Paris 11e", "Hybride"]) expect(row.queryByText(text)).toBeNull();
     expect(row.getByRole("img", { hidden: true }).getAttribute("src")).toBe("/api/logos/acme-robotics.png");
     expect(within(rowOf(/Développeuse web/)).getByText("GS")).toBeTruthy();
+  });
+
+  it.each([
+    ["permanent", "fr", "CDI"],
+    ["fixed_term", "fr", "CDD"],
+    ["internship", "fr", "Stage"],
+    ["apprenticeship", "fr", "Alternance"],
+    ["permanent", "en", "Permanent"],
+    ["fixed_term", "en", "Fixed-term"],
+    ["internship", "en", "Internship"],
+    ["apprenticeship", "en", "Apprenticeship"],
+  ] as const)("words the %s contract of a row in %s as %s", async (contractType, language, word) => {
+    if (language === "en") localStorage.setItem("applai.language", "en");
+    await openScreen(reviewRoutes({ to_review: [aCard({ contract_type: contractType }), bob] }), false);
+
+    expect(within(rowOf(/Ingénieur logiciel/)).getByText(word)).toBeTruthy();
+  });
+
+  it("shows no contract on the row of an offer with no contract type", async () => {
+    await openScreen(reviewRoutes({ to_review: [aCard({ contract_type: null }), bob] }), false);
+
+    const row = within(rowOf(/Ingénieur logiciel/));
+    for (const word of ["CDI", "CDD", "Stage", "Alternance"]) expect(row.queryByText(word)).toBeNull();
+    expect(row.getByText("Acme Robotics")).toBeTruthy();
+  });
+
+  it("opens the full card from a row, with the place and the work mode in its header", async () => {
+    await openScreen(reviewRoutes({ to_review: [aCard(), bob] }), false);
+
+    fireEvent.click(rowOf(/Ingénieur logiciel/));
+
+    const card = within(screen.getByRole("article", { name: /Ingénieur logiciel/ }));
+    expect(card.getByText("Paris 11e")).toBeTruthy();
+    expect(card.getByText("Hybride")).toBeTruthy();
   });
 
   it("opens the card of a row by a click, and by Enter, in place of the row", async () => {
