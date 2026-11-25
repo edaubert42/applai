@@ -4,6 +4,7 @@ import { STATE_DOT, serviceName, worstState } from "./service-state";
 import { useSettings } from "./settings";
 
 const POLL_MS = 3000;
+const SERVICES_MS = 60_000;
 
 /** Where the last scan stands, the worst state of the services, and the button that starts a scan by hand. */
 export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () => void; onOpenSettings: () => void }) {
@@ -14,7 +15,9 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
   const wasRunning = useRef(false);
   const [asked, setAsked] = useState(0); // each change asks the API for the status again
   const refresh = useCallback(() => setAsked((count) => count + 1), []);
-  const [scans, setScans] = useState(0); // each scan that ends asks for the services' state again
+  // Each scan that ends, each return of the window's focus and each minute asks for the services' state again.
+  const [scans, setScans] = useState(0);
+  const askServices = useCallback(() => setScans((count) => count + 1), []);
 
   useEffect(() => {
     let current = true;
@@ -25,7 +28,7 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
         setUnavailable(false);
         if (wasRunning.current && !next.running) {
           onScanned();
-          setScans((count) => count + 1);
+          askServices();
         }
         wasRunning.current = next.running;
       },
@@ -34,7 +37,7 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
     return () => {
       current = false;
     };
-  }, [asked, onScanned]);
+  }, [asked, onScanned, askServices]);
   useEffect(() => {
     let current = true;
     api.services().then(
@@ -45,6 +48,16 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
       current = false;
     };
   }, [scans]);
+  useEffect(() => {
+    window.addEventListener("focus", askServices);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") askServices();
+    }, SERVICES_MS);
+    return () => {
+      window.removeEventListener("focus", askServices);
+      clearInterval(timer);
+    };
+  }, [askServices]);
   // A scan in progress is asked about again, until it ends.
   useEffect(() => {
     if (!status?.running) return;

@@ -8,6 +8,8 @@ the language and the contract of an offer (offer_language, offer_contract), this
 """
 
 import base64
+import copy
+import json
 import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
@@ -206,19 +208,108 @@ def source_headlines(data_dir: Path | str, source: Path | str) -> list[str]:
     return list(_load_source(Path(data_dir) / source).headlines)
 
 
+def source_dump(data_dir: Path | str, source: Path | str) -> dict[str, Any]:
+    """The CV source (a path inside data_dir) as plain data, where change paths point."""
+    return _load_source(Path(data_dir) / source).model_dump(mode="json")
+
+
+@dataclass(frozen=True)
+class Change:
+    """A change to a copy of a source: reorder a list, reword or drop one of its bullets.
+
+    old is the bullet's text, or a reorder's items as a JSON list; new is the new text, or the
+    items in their new order; none for a drop. Applied only where the source still has old.
+    """
+
+    op: Literal["reorder", "reword", "drop"]
+    path: str  # skills, experience[0].bullets, experience[1].roles[0].bullets[2]…
+    old: str
+    new: str | None
+
+
+_PATH = re.compile(r"[a-z]+(\[\d+\])*(\.[a-z]+(\[\d+\])*)*")
+
+
+def _parts(path: str) -> list[str | int]:
+    if not _PATH.fullmatch(path):
+        raise CvError(f"{path}: not a path")
+    return [int(i) if i else key for key, i in re.findall(r"([a-z]+)|\[(\d+)\]", path)]
+
+
+def _at(data: Any, parts: Sequence[str | int]) -> Any:
+    for part in parts:
+        if isinstance(part, int) and isinstance(data, list) and part < len(cast(list[Any], data)):
+            data = cast(list[Any], data)[part]
+        elif isinstance(part, str) and isinstance(data, dict) and part in data:
+            data = cast(dict[str, Any], data)[part]
+        else:
+            return None
+    return data
+
+
+def listed(data: dict[str, Any], path: str) -> list[str] | None:
+    """The texts of the list a reorder may name: a list of bullets, or skills (its lines)."""
+    parts = _parts(path)
+    found = _at(data, parts)
+    if path == "skills" and isinstance(found, list):
+        return [f"{skill['label']}: {skill['text']}" for skill in cast(list[dict[str, str]], found)]
+    if parts[-1] == "bullets" and isinstance(found, list):
+        return list(cast(list[str], found))
+    return None
+
+
+def bullet(data: dict[str, Any], path: str) -> str | None:
+    """The bullet a reword or a drop may name, or None."""
+    parts = _parts(path)
+    found = _at(data, parts)
+    return found if parts[-2:-1] == ["bullets"] and isinstance(found, str) else None
+
+
+def apply_changes(data: dict[str, Any], changes: Sequence[Change]) -> dict[str, Any]:
+    """A copy of the source's data with the changes; CvError where it no longer has their old."""
+    edits: dict[str, dict[int, str | None]] = {}
+    orders: dict[str, list[str]] = {}
+    for change in changes:
+        if change.op == "reorder":
+            if listed(data, change.path) != json.loads(change.old):
+                raise CvError(f"{change.path}: the CV source changed since it was tailored")
+            orders[change.path] = json.loads(change.new or "[]")
+        else:
+            if bullet(data, change.path) != change.old:
+                raise CvError(f"{change.path}: the CV source changed since it was tailored")
+            list_path, _, index = change.path.rpartition("[")
+            edits.setdefault(list_path, {})[int(index[:-1])] = change.new
+    data = copy.deepcopy(data)
+    for path in edits.keys() | orders.keys():
+        parts = _parts(path)
+        items: list[Any] = _at(data, parts)
+        texts, new_order = listed(data, path) or [], orders.get(path)
+        order = range(len(items)) if new_order is None else [texts.index(t) for t in new_order]
+        changed = edits.get(path, {})
+        kept = [changed.get(i, items[i]) for i in order]
+        _at(data, parts[:-1])[parts[-1]] = [item for item in kept if item is not None]
+    return data
+
+
 def render_cv(
     data_dir: Path | str, lang: Lang, contract: str, photo: bool = False,
-    source_file: Path | str | None = None,
+    source_file: Path | str | None = None, headline: str | None = None,
+    changes: Sequence[Change] = (),
 ) -> RenderedCv:  # fmt: skip
     """The PDF of the CV in lang for contract, with a photo or not, and its checks.
 
-    The source is cv/cv_{lang}.yaml, or source_file (a path inside data_dir) when given.
+    The source is cv/cv_{lang}.yaml, or source_file (a path inside data_dir) when given. A
+    tailored CV is a copy of it with the changes and the headline in place of the contract's.
     """
     directory = Path(data_dir) / CV_DIR
     path = Path(data_dir) / source_file if source_file else directory / f"cv_{lang}.yaml"
     source = _load_source(path)
     if contract not in source.headlines:
         raise CvError(f"{path}: headlines.{contract}: no headline")
+    if changes:
+        source = CvSource.model_validate(apply_changes(source.model_dump(mode="json"), changes))
+    if headline:
+        source = source.model_copy(update={"headlines": {**source.headlines, contract: headline}})
     photo_uri = None
     if photo:
         photo_file = directory / PHOTO_FILE

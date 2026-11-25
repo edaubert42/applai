@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { GROUPS, api, type Applications, type Row } from "./api";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { ApiError, GROUPS, api, type Applications, type Row } from "./api";
 import CorrectScreen from "./CorrectScreen";
 import FinalValidationScreen from "./FinalValidationScreen";
 import { Logo } from "./ReviewCard";
@@ -30,6 +30,8 @@ function Board({ onCorrect, onValidate }: { onCorrect: (row: Row) => void; onVal
   const [groups, setGroups] = useState<Applications | null>(null);
   const [failed, setFailed] = useState(false);
   const [extensionConnected, setExtensionConnected] = useState(true);
+  const [loads, setLoads] = useState(0); // a row found stale asks for the board again
+  const reload = useCallback(() => setLoads((count) => count + 1), []);
 
   useEffect(() => {
     let current = true;
@@ -44,7 +46,7 @@ function Board({ onCorrect, onValidate }: { onCorrect: (row: Row) => void; onVal
     return () => {
       current = false;
     };
-  }, []);
+  }, [loads]);
 
   return (
     <div className="mx-auto max-w-215 space-y-7">
@@ -66,6 +68,7 @@ function Board({ onCorrect, onValidate }: { onCorrect: (row: Row) => void; onVal
                     extensionConnected={extensionConnected}
                     onCorrect={onCorrect}
                     onValidate={onValidate}
+                    onStale={reload}
                   />
                 ))}
               </ul>
@@ -81,11 +84,13 @@ function ApplicationRow({
   extensionConnected,
   onCorrect,
   onValidate,
+  onStale,
 }: {
   row: Row;
   extensionConnected: boolean;
   onCorrect: (row: Row) => void;
   onValidate: (row: Row) => void;
+  onStale: () => void;
 }) {
   const { t, lookup, formatTime } = useSettings();
   const old = row.origin === "old_workflow";
@@ -95,16 +100,29 @@ function ApplicationRow({
   // The form's URL the finder recorded, or the one the candidate pasted since.
   const [form, setForm] = useState({ url: row.form_url, error: row.form_url_error });
   const [pasted, setPasted] = useState("");
-  const [failed, setFailed] = useState(false);
+  // What the last paste failed on: the end of its message's key.
+  const [failed, setFailed] = useState<"failed" | "past" | "unreachable" | "error" | null>(null);
   const id = row.id;
   const canPaste = id !== null && row.state === "created" && !form.url;
 
   function paste(event: FormEvent, id: number) {
     event.preventDefault();
-    setFailed(false);
+    setFailed(null);
     api.pasteFormUrl(id, pasted.trim()).then(
       (saved) => setForm({ url: saved.form_url, error: null }),
-      () => setFailed(true),
+      (error: unknown) => {
+        const status = error instanceof ApiError ? error.status : null;
+        if (status === 409) onStale(); // the row moved on: show where it stands
+        setFailed(
+          status === null
+            ? "unreachable" // fetch rejected: no answer
+            : status === 409
+              ? "past"
+              : status === 422
+                ? "failed" // the scheme
+                : "error",
+        );
+      },
     );
   }
 
@@ -160,8 +178,12 @@ function ApplicationRow({
           <button type="submit" className={button}>
             {t("applications.form_url.save")}
           </button>
-          {failed && <p role="alert" className="basis-full text-sm text-minus">{t("applications.form_url.failed")}</p>}
         </form>
+      )}
+      {failed && (
+        <p role="alert" className="basis-full text-sm text-minus">
+          {t(`applications.form_url.${failed}`)}
+        </p>
       )}
     </li>
   );

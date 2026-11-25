@@ -112,6 +112,66 @@ describe("the Applications dashboard", () => {
     ]);
   });
 
+  describe("a pasted form URL that fails", () => {
+    const lever = "https://jobs.lever.co/brindille-logistique/chef-de-quai";
+
+    async function paste(answer: unknown, language: "fr" | "en" = "fr", afterwards = aRow({ id: 7, offer_id: 7, state: "created" })) {
+      // `answer` is the PUT's reply: a Response, or a function that rejects.
+      const created = aRow({ id: 7, offer_id: 7, state: "created" });
+      let loaded = 0; // the board's first load shows the row created, the next ones as it is now
+      const calls = fakeApi({
+        ...reviewRoutes(),
+        ...applicationsRoutes(),
+        "GET /api/applications": () =>
+          applicationsRoutes({ in_progress: [loaded++ === 0 ? created : afterwards] })["GET /api/applications"],
+        "PUT /api/applications/7/form-url": answer,
+      });
+      if (language === "en") localStorage.setItem("applai.language", "en");
+      render(<App />);
+      const words = language === "en" ? en : fr;
+      fireEvent.click(screen.getByRole("button", { name: words["nav.applications"] }));
+      const row = within(await screen.findByRole("listitem"));
+      fireEvent.change(row.getByLabelText(words["applications.form_url.label"]), { target: { value: lever } });
+      fireEvent.click(row.getByRole("button", { name: words["applications.form_url.save"] }));
+      return { calls, words, row };
+    }
+
+    it.each([
+      ["fr", fr],
+      ["en", en],
+    ] as const)("says the application is past form capture on a 409 and loads the row again, in %s", async (language, words) => {
+      const { calls, row } = await paste(new Response("{}", { status: 409 }), language, aRow({ id: 7, offer_id: 7, state: "drafted" }));
+
+      expect((await row.findByRole("alert")).textContent).toBe(words["applications.form_url.past"]);
+      expect(await row.findByText(words["applications.state.drafted"])).toBeTruthy();
+      expect(calls.filter((call) => call.method === "GET" && call.path === "/api/applications")).toHaveLength(2);
+    });
+
+    it.each([
+      ["fr", fr],
+      ["en", en],
+    ] as const)("keeps the scheme message on a 422, in %s", async (language, words) => {
+      const { row } = await paste(new Response("{}", { status: 422 }), language);
+
+      expect((await row.findByRole("alert")).textContent).toBe(words["applications.form_url.failed"]);
+    });
+
+    it.each([
+      ["fr", fr],
+      ["en", en],
+    ] as const)("says ApplAI is not reachable when the request is rejected, in %s", async (language, words) => {
+      const { row } = await paste(() => Promise.reject(new TypeError("Failed to fetch")), language);
+
+      expect((await row.findByRole("alert")).textContent).toBe(words["applications.form_url.unreachable"]);
+    });
+
+    it("says the server failed on another status", async () => {
+      const { row } = await paste(new Response("boom", { status: 500 }));
+
+      expect((await row.findByRole("alert")).textContent).toBe(fr["applications.form_url.error"]);
+    });
+  });
+
   it("stays one column on a phone: stacked groups, wrapping rows, no grid", async () => {
     await openScreen();
 

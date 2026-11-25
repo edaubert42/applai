@@ -291,8 +291,10 @@ def retriage_offer(
     """Run the Triage agent again on a triaged offer with a text read later.
 
     The text and the card replace the old ones in one transaction: the offer keeps its
-    state and its triages row, which gets the new run's id. A run that fails raises its
-    AgentError and nothing changes. So does an offer the candidate decided on meanwhile.
+    state, unless a screening rule now sets it aside on the new text (then screened_out, as
+    after a first triage), and its triages row, which gets the new run's id. A run that
+    fails raises its AgentError and nothing changes. So does an offer the candidate decided
+    on meanwhile.
     The read-again request of the offer ends with it (applai.reread).
     """
     with Session(database) as session:
@@ -323,6 +325,10 @@ def retriage_offer(
         )
         offer.description, offer.page_failures = description, 0  # its text is read now
         offer.reread_requested_at = offer.reread_error = offer.reread_failed_at = None
+        for name in READ_FIELDS:  # the page wins: Triage fills only what it left empty
+            if getattr(offer, name) is None:
+                setattr(offer, name, card[name])
+        screen_triaged(session, offer, profile, months)  # a rule on the new text sets it aside
     return triage
 
 

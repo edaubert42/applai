@@ -50,6 +50,10 @@ _Avoid_: Scan, parse, extraction
 The stage that writes the answers to open questions and the cover letter.
 _Avoid_: Generation, writing
 
+**CV tailoring** (« Adaptation du CV »):
+The part of drafting where an agent adapts a copy of the CV to the offer (title line, photo, bullets reordered, reworded or dropped), each change checked by code.
+_Avoid_: CV generation, CV customization, resume tailoring
+
 **Filling** (« Remplissage »):
 The stage that enters the application into the form, without sending it.
 _Avoid_: Autofill, submission

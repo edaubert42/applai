@@ -26,12 +26,24 @@ export async function readPages(fetch = globalThis.fetch) {
     let path = "", body;
     try {
       const page = await fetch(url, { credentials: "include" });
-      if (page.ok) body = { html: await page.text() };
+      // A session that expired answers 200 with a sign-in page: that is a failure, not the offer.
+      if (page.ok && !leftTheOffer(page, url)) body = { html: await page.text() };
       else [path, body] = ["/failure", { status: page.status }];
     } catch {
       [path, body] = ["/failure", {}]; // not fetched
     }
     await send(fetch, `/api/browser/pages/${offer_id}${path}`, body);
+  }
+}
+
+// Whether a fetch was redirected to another host or path than the offer's.
+function leftTheOffer(page, url) {
+  if (!page.redirected) return false;
+  try {
+    const [to, from] = [new URL(page.url), new URL(url)];
+    return to.host !== from.host || to.pathname.replace(/\/$/, "") !== from.pathname.replace(/\/$/, "");
+  } catch {
+    return true; // no readable final URL: do not trust the page
   }
 }
 
@@ -115,23 +127,35 @@ async function fillIn(applicationId, url, actions, fetch, browser, wait) {
   if (!onHosts(url, browser.runtime.getManifest().host_permissions)) throw new Error("not_allowed");
   const files = await fetchFiles(applicationId, actions, fetch);
   const tab = await browser.tabs.create({ url, active: false });
-  for (let waited = 0; (await browser.tabs.get(tab.id)).status !== "complete"; waited += 500) {
-    if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
-    await wait(500);
+  let filled = false;
+  try {
+    for (let waited = 0; (await browser.tabs.get(tab.id)).status !== "complete"; waited += 500) {
+      if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
+      await wait(500);
+    }
+    let fields = [];
+    for (let tries = 0; tries < TRIES && !fields.length; tries++) {
+      if (tries) await wait(2000);
+      const [done] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: fillForm, args: [actions, files] });
+      fields = done?.result ?? [];
+    }
+    const screenshot = await captureTab(tab, browser);
+    filled = true;
+    return screenshot ? { fields, screenshot } : { fields };
+  } finally {
+    // A filled form keeps its tab: Send uses it (ADR 0003). A failed fill leaves nothing open.
+    if (!filled) await browser.tabs.remove(tab.id).catch(() => {}); // the candidate closed it already
   }
-  let fields = [];
-  for (let tries = 0; tries < TRIES && !fields.length; tries++) {
-    if (tries) await wait(2000);
-    const [done] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: fillForm, args: [actions, files] });
-    fields = done?.result ?? [];
-  }
-  const screenshot = await captureTab(tab, browser);
-  return screenshot ? { fields, screenshot } : { fields };
 }
 
-const pendingSendReports = new Map(); // never click submit twice if reporting the result fails
+// A click's result until ApplAI has taken it: submit is never clicked twice for one application.
+// Kept in chrome.storage.local, as Chrome stops an idle service worker and may itself close; this
+// in-memory copy covers a storage write that failed.
+const pendingSendReports = new Map();
+const sendReportKey = (applicationId) => `send-report:${applicationId}`;
 
 // Submit forms explicitly authorized by the candidate, using only already-open tabs (ADR 0003).
+// A stored result is posted again and nothing is clicked; a storage read that fails clicks nothing.
 export async function sendForms(
   fetch = globalThis.fetch,
   browser = globalThis.chrome,
@@ -145,7 +169,8 @@ export async function sendForms(
     sends = await asked.json();
   } catch { return; }
   for (const { application_id, url } of sends) {
-    let report = pending.get(application_id);
+    const key = sendReportKey(application_id);
+    let report = pending.get(application_id) ?? (await browser.storage.local.get(key))[key];
     if (!report) {
       let path = "", body = {};
       try {
@@ -164,9 +189,13 @@ export async function sendForms(
       }
       report = { path, body };
       pending.set(application_id, report);
+      await browser.storage.local.set({ [key]: report }).catch(() => {}); // kept in memory meanwhile
     }
     const posted = await send(fetch, `/api/browser/sends/${application_id}${report.path}`, report.body);
-    if (posted && (posted.ok || posted.status === 404 || posted.status === 409)) pending.delete(application_id);
+    if (posted && (posted.ok || posted.status === 404 || posted.status === 409)) {
+      pending.delete(application_id);
+      await browser.storage.local.remove(key).catch(() => {}); // posted again next pass, then removed
+    }
   }
 }
 

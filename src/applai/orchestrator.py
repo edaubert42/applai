@@ -51,6 +51,7 @@ OFFER_TRANSITIONS: Mapping[tuple[str, str], Actor] = MappingProxyType(
         (_O.NEW, _O.DESCRIBED): Actor.WATCH,
         (_O.DESCRIBED, _O.TRIAGED): Actor.TRIAGE,
         (_O.DESCRIBED, _O.SCREENED_OUT): Actor.WATCH,  # a rule found after Triage: code decides
+        (_O.TRIAGED, _O.SCREENED_OUT): Actor.WATCH,  # a rule found on a re-read text: code decides
         (_O.TRIAGED, _O.ACCEPTED): Actor.CANDIDATE,
         (_O.TRIAGED, _O.DECLINED): Actor.CANDIDATE,
         (_O.TRIAGED, _O.LATER): Actor.CANDIDATE,

@@ -23,7 +23,8 @@ def test_the_extension_may_read_a_form_on_every_ats_the_finder_knows():
 
     allowed = {f"https://*.{host}/*" for host in ATS_HOSTS + BOARD_HOSTS}
     assert allowed <= set(manifest["host_permissions"])
-    assert manifest["permissions"] == ["alarms", "scripting"]  # no tabs, no cookies, no debugger
+    # No tabs, cookies or debugger. storage: a click's unreported result survives a restart.
+    assert manifest["permissions"] == ["alarms", "scripting", "storage"]
 
 
 def test_the_extension_may_read_a_form_a_board_hosts_itself():
