@@ -3,24 +3,28 @@
 Each decision on an answer is a label at the answers level (ADR 0004): accepting is not a
 correction; editing and rejecting are. An edit keeps the candidate's text and its word diff
 against the drafted text; a rejected answer is drafted again alone (applai.drafting). Once
-every answer is accepted or edited, the candidate moves the application to answers_checked.
-Functions write in the caller's session and do not commit.
+every answer is accepted or edited, and every change of CV tailoring (applai.cv_tailoring) is
+decided the same way, as a label at the "cv" level, the candidate moves the application to
+answers_checked. Functions write in the caller's session and do not commit.
 """
 
+import json
 from difflib import SequenceMatcher
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from applai.cv_tailoring import headline_problem
 from applai.drafting import AnswerStatus, sentence_text
-from applai.models import Application, DraftAnswer, Label, Offer
+from applai.models import Application, CvChange, DraftAnswer, Label, Offer
 from applai.orchestrator import Actor, ApplicationState, move
 from applai.profile import Profile
 
 ANSWERS_LEVEL = "answers"
+CV_LEVEL = "cv"
 NOT_JUDGED = "Not checked by Judge."
 _NO_REASON = "not supported by its cited facts."
 _RESOLVED = (AnswerStatus.ACCEPTED, AnswerStatus.EDITED)
@@ -80,6 +84,19 @@ class Answer(BaseModel):
     warnings: list[str]  # the judge's: shown to the candidate, they never block the gate
 
 
+class CvChangeView(BaseModel):
+    id: int
+    op: str  # reorder, reword or drop
+    path: str
+    old_text: str
+    new_text: str | None  # as drafted; none for a drop
+    edited_text: str | None
+    old_items: list[str] | None  # a reorder's list, before and after
+    new_items: list[str] | None
+    facts: list[CitedFact]  # a reword's
+    status: AnswerStatus
+
+
 class Draft(BaseModel):
     application_id: int
     offer_id: int
@@ -88,7 +105,11 @@ class Draft(BaseModel):
     state: ApplicationState
     draft_error: str | None
     answers: list[Answer]
-    resolved: bool  # every answer accepted or edited, also when there is none
+    cv_headline: str | None  # none: the CV source's
+    cv_photo: str | None  # with, without, unknown; none: no tailoring
+    cv_photo_reason: str | None
+    cv_changes: list[CvChangeView]
+    resolved: bool  # every answer accepted or edited and every CV change decided
 
 
 class NotFound(Exception):
@@ -137,15 +158,42 @@ def answer_view(answer: DraftAnswer, profile: Profile) -> Answer:
                   warnings=judge_warnings(answer.judge_issues))  # fmt: skip
 
 
+def _cv_changes(session: Session, application_id: int) -> list[CvChange]:
+    query = select(CvChange).where(CvChange.application_id == application_id)
+    return list(session.scalars(query.order_by(CvChange.id)))
+
+
+def cv_change_view(change: CvChange, profile: Profile) -> CvChangeView:
+    """A CV change as the candidate reads it: a reorder's lists, the text of a reword's facts."""
+    facts = {fact.id: fact.text for fact in profile.facts}
+    reorder = change.op == "reorder"
+    return CvChangeView(
+        id=change.id, op=change.op, path=change.path, old_text=change.old_text,
+        new_text=change.new_text, edited_text=change.edited_text,
+        old_items=json.loads(change.old_text) if reorder else None,
+        new_items=json.loads(change.new_text or "[]") if reorder else None,
+        facts=[CitedFact(id=i, text=facts.get(i)) for i in change.facts],
+        status=AnswerStatus(change.status),
+    )  # fmt: skip
+
+
 def draft(session: Session, user_id: int, application_id: int, profile: Profile) -> Draft:
-    """The application's drafted answers, in the order of its form. Raises NotFound."""
+    """The application's drafted answers, in the order of its form, and its CV tailoring.
+
+    Raises NotFound.
+    """
     application = _application(session, user_id, application_id)
     offer = session.get_one(Offer, application.offer_id)
     answers = [answer_view(answer, profile) for answer in _answers(session, application_id)]
+    changes = [cv_change_view(c, profile) for c in _cv_changes(session, application_id)]
+    resolved = all(answer.status in _RESOLVED for answer in answers)
     return Draft(application_id=application.id, offer_id=offer.id, title=offer.title,
                  company=offer.company, state=ApplicationState(application.state),
                  draft_error=application.draft_error, answers=answers,
-                 resolved=all(answer.status in _RESOLVED for answer in answers))  # fmt: skip
+                 cv_headline=application.cv_headline, cv_photo=application.cv_photo,
+                 cv_photo_reason=application.cv_photo_reason, cv_changes=changes,
+                 resolved=resolved and all(c.status != AnswerStatus.PENDING for c in changes),
+                 )  # fmt: skip
 
 
 def word_diff(before: str, after: str) -> list[dict[str, str]]:
@@ -203,4 +251,90 @@ def check_answers(session: Session, user_id: int, application_id: int) -> None:
     left = [a.label for a in _answers(session, application_id) if a.status not in _RESOLVED]
     if left:
         raise GateRefused(f"Accept or edit every answer first: {len(left)} left.")
+    pending = [c for c in _cv_changes(session, application_id) if c.status == AnswerStatus.PENDING]
+    if pending:
+        raise GateRefused(f"Decide every CV change first: {len(pending)} left.")
     move(session, application, ApplicationState.ANSWERS_CHECKED, Actor.CANDIDATE)
+
+
+class HeadlineRequest(BaseModel):
+    """The candidate's own title line for the CV."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(max_length=200)
+
+
+class PhotoRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    photo: Literal["with", "without"]
+
+
+def _tailored_draft(session: Session, user_id: int, application_id: int) -> Application:
+    """The application, drafted and with a CV tailoring, for a decision on its CV."""
+    application = _application(session, user_id, application_id)
+    if application.state != ApplicationState.DRAFTED:
+        raise GateRefused(f"Application {application_id} is {application.state}, not drafted.")
+    if application.cv_photo is None:
+        raise GateRefused(f"Application {application_id} has no CV tailoring.")
+    return application
+
+
+def _cv_label(application: Application, decision: str, correction: bool, **more: Any) -> Label:
+    return Label(user_id=application.user_id, offer_id=application.offer_id,
+                 application_id=application.id, level=CV_LEVEL, decision=decision, reasons=[],
+                 correction=correction, **more)  # fmt: skip
+
+
+def decide_cv_change(
+    session: Session, user_id: int, application_id: int, change_id: int, request: AnswerRequest
+) -> CvChange:
+    """Record the candidate's decision on a CV change as a label, and set its status.
+
+    Only a reword has a text to edit. A decision can be changed until the answers gate closes.
+    Raises NotFound, and GateRefused when the application is not drafted or the edit is not
+    of a reword.
+    """
+    application = _tailored_draft(session, user_id, application_id)
+    change = session.get(CvChange, change_id)
+    if change is None or change.application_id != application.id:
+        raise NotFound(change_id)
+    if request.decision == AnswerDecision.EDIT and change.op != "reword":
+        raise GateRefused(f"Change {change_id} is a {change.op}: only a reword has a text.")
+    edited = request.text.strip() if request.text else None
+    change.status, change.edited_text = _STATUS[request.decision], edited
+    diff = word_diff(change.new_text or "", edited) if edited else None
+    session.add(_cv_label(application, _STATUS[request.decision],
+                          request.decision != AnswerDecision.ACCEPT, note=request.reason,
+                          diff=diff))  # fmt: skip
+    session.flush()
+    return change
+
+
+def edit_cv_headline(
+    session: Session, user_id: int, application_id: int, request: HeadlineRequest
+) -> Application:
+    """Replace the CV's title line with the candidate's, a correction. The rules the agent's
+    headline obeys hold: GateRefused says which one it breaks."""
+    application = _tailored_draft(session, user_id, application_id)
+    text = request.text.strip()
+    if problem := headline_problem(text):
+        raise GateRefused(f"The headline {problem}.")
+    before = application.cv_headline or ""
+    application.cv_headline = text
+    session.add(_cv_label(application, AnswerStatus.EDITED, True, diff=word_diff(before, text)))
+    session.flush()
+    return application
+
+
+def switch_cv_photo(
+    session: Session, user_id: int, application_id: int, request: PhotoRequest
+) -> Application:
+    """Set the CV's photo choice to with or without: the candidate's, a correction when it
+    differs from the choice kept."""
+    application = _tailored_draft(session, user_id, application_id)
+    session.add(_cv_label(application, request.photo, request.photo != application.cv_photo))
+    application.cv_photo = request.photo
+    session.flush()
+    return application

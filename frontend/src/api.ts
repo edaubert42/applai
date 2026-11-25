@@ -95,6 +95,20 @@ export interface Answer {
   warnings: string[]; // the judge's, shown without blocking
 }
 
+/** One change CV tailoring kept on the CV: a reorder, a reword or a drop. */
+export interface CvChange {
+  id: number;
+  op: "reorder" | "reword" | "drop";
+  path: string;
+  old_text: string;
+  new_text: string | null; // as drafted; null for a drop
+  edited_text: string | null;
+  old_items: string[] | null; // a reorder's list, before and after
+  new_items: string[] | null;
+  facts: CitedFact[];
+  status: AnswerStatus;
+}
+
 /** GET /api/applications/{id}/draft, as src/applai/correct.py serves it. */
 export interface Draft {
   application_id: number;
@@ -104,6 +118,10 @@ export interface Draft {
   state: string;
   draft_error: string | null;
   answers: Answer[];
+  cv_headline: string | null; // null: the CV source's
+  cv_photo: "with" | "without" | "unknown" | null; // null: no CV tailoring
+  cv_photo_reason: string | null;
+  cv_changes: CvChange[];
   resolved: boolean;
 }
 
@@ -206,6 +224,12 @@ export const api = {
   draft: (id: number) => request<Draft>("GET", `/api/applications/${id}/draft`),
   decideAnswer: (id: number, answer: number, decision: AnswerDecision) =>
     request<Answer>("POST", `/api/applications/${id}/draft/${answer}`, decision),
+  decideCvChange: (id: number, change: number, decision: AnswerDecision) =>
+    request<CvChange>("POST", `/api/applications/${id}/cv/changes/${change}`, decision),
+  editCvHeadline: (id: number, text: string) =>
+    request<Draft>("POST", `/api/applications/${id}/cv/headline`, { text }),
+  switchCvPhoto: (id: number, photo: "with" | "without") =>
+    request<Draft>("POST", `/api/applications/${id}/cv/photo`, { photo }),
   answersChecked: (id: number) => requestEmpty("POST", `/api/applications/${id}/answers-checked`),
   formReview: (id: number) => request<FormReview>("GET", `/api/applications/${id}/review`),
   formChecked: (id: number, corrected_fields: string[], note?: string) =>

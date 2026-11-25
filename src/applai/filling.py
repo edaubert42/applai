@@ -181,14 +181,14 @@ def _chosen(
 
 
 def _render_cv(
-    runner: AgentRunner, database: Engine, data_dir: Path, application_id: int, profile: Profile,
+    database: Engine, data_dir: Path, application_id: int, profile: Profile,
     offer: tuple[str, str | None, str | None],
 ) -> None:  # fmt: skip
     """Render the CV of the offer's language and contract to the application's cv.pdf: the
-    tailored one, else the source's, no photo. A source's CV that fails its checks is a
-    failure, never a fallback to another CV."""
+    one the candidate's choices tailored, else the source's, no photo. A CV that fails its
+    checks is a failure, never a fallback to another CV."""
     chosen = chosen_source(data_dir, profile, *offer)
-    pdf = tailored_pdf(runner, database, data_dir, application_id, profile, chosen)
+    pdf = tailored_pdf(database, data_dir, application_id, chosen)
     if pdf is None:
         lang, source, contract = chosen
         rendered = render_cv(data_dir, lang, contract, source_file=source)
@@ -225,7 +225,7 @@ def plan_fill(
         if profile.cv_sources:
             (data_dir / "applications" / str(application_id) / CV_PDF).unlink(missing_ok=True)
             if any(a.kind == "attach" and a.value == CV for a in actions):
-                _render_cv(runner, database, data_dir, application_id, profile, offer_text)
+                _render_cv(database, data_dir, application_id, profile, offer_text)
         if left:
             actions += _chosen(runner, database, offer_id, application_id, fields, left, profile)
         actions.sort(key=lambda action: action.field)

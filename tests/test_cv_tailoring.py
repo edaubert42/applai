@@ -3,7 +3,7 @@
 import io
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -87,8 +87,13 @@ def _drafted(engine: Engine, data_dir: Path, *results: AgentResult,
 
 
 def _filled(data_dir: Path, application_id: int, *results: AgentResult) -> tuple[bytes, Any]:
-    """Check the answers, which plans the fill: the served CV, and the application's review."""
+    """Accept every CV change, check the answers (which plans the fill): the served CV, and
+    the application's review."""
     with _client(data_dir, *results) as client:
+        draft = client.get(f"/api/applications/{application_id}/draft").json()
+        for change in draft["cv_changes"]:
+            url = f"/api/applications/{application_id}/cv/changes/{change['id']}"
+            assert client.post(url, json={"decision": "accept"}).status_code == 200
         assert client.post(f"/api/applications/{application_id}/answers-checked").status_code == 204
         cv = client.get(f"/api/browser/fills/{application_id}/files/cv")
         assert cv.status_code == 200
@@ -124,7 +129,10 @@ def test_a_headline_a_reorder_and_a_reword_citing_a_validated_fact_reach_the_ser
     )
 
     application_id = _drafted(engine, data_dir, tailored)
-    pdf, _ = _filled(data_dir, application_id)
+    assert [(c.op, c.path, c.status) for c in _changes(engine)] == [
+        ("reorder", BULLETS, "pending"), ("reword", f"{BULLETS}[2]", "pending"),
+    ]  # fmt: skip
+    pdf, _ = _filled(data_dir, application_id)  # the candidate accepts both
 
     text = _text(pdf)
     assert "Analytics engineer" in text and _headline("fr", "permanent") not in text
@@ -134,9 +142,6 @@ def test_a_headline_a_reorder_and_a_reword_citing_a_validated_fact_reach_the_ser
     assert (run.model, run.application_id, run.outcome) == (
         CV_TAILORING_MODEL, application_id, "ok",
     )  # fmt: skip
-    assert [(c.op, c.path, c.status) for c in _changes(engine)] == [
-        ("reorder", BULLETS, "pending"), ("reword", f"{BULLETS}[2]", "pending"),
-    ]  # fmt: skip
 
 
 def test_a_reword_citing_a_fact_it_may_not_use_or_adding_a_capitalized_word_is_refused(
@@ -197,31 +202,6 @@ def test_a_headline_over_30_characters_or_holding_both_forms_is_refused(
 
 
 LONG = _change("reword", f"{BULLETS}[0]", text=" ".join(["données"] * 900) + ".", facts=("F3",))
-
-
-def test_a_cv_over_one_page_asks_the_agent_again_once(engine: Engine, data_dir: Path):
-    application_id = _drafted(engine, data_dir, _tailored(LONG))
-    second = _tailored(_change("drop", f"{BULLETS}[2]"), headline="Data analytics engineer")
-
-    with _client(data_dir, second) as client:
-        assert client.post(f"/api/applications/{application_id}/answers-checked").status_code == 204
-        backend = cast(FakeBackend, client.app.state.watch.runner.backend)  # type: ignore[attr-defined]
-        pdf = client.get(f"/api/browser/fills/{application_id}/files/cv").content
-
-    [spec] = backend.specs
-    assert spec.name == AGENT and '"overflow"' in spec.input
-    assert "Data analytics engineer" in _text(pdf) and "Animation" not in _text(pdf)
-    assert [c.op for c in _changes(engine)] == ["drop"]
-
-
-def test_a_second_overflow_gives_the_untailored_cv_and_a_warning(engine: Engine, data_dir: Path):
-    application_id = _drafted(engine, data_dir, _tailored(LONG))
-
-    pdf, review = _filled(data_dir, application_id, _tailored(LONG))
-
-    assert _headline("fr", "permanent") in _text(pdf) and "Analytics engineer" not in _text(pdf)
-    assert "one page" in review["cv_warning"]
-    assert _changes(engine) == []
 
 
 def _images(pdf: bytes) -> int:

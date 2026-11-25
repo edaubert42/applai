@@ -301,6 +301,57 @@ def decide_answer(
     return correct.answer_view(answer, profile)
 
 
+@api.post("/applications/{application_id}/cv/changes/{change_id}")
+def decide_cv_change(
+    application_id: int,
+    change_id: int,
+    body: correct.AnswerRequest,
+    session: _Session,
+    profile: _Profile,
+) -> correct.CvChangeView:
+    """Accept, edit (a reword) or reject a CV change, recorded as a label (applai.correct)."""
+    try:
+        with session.begin():
+            change = correct.decide_cv_change(
+                session, LOCAL_USER_ID, application_id, change_id, body
+            )
+            return correct.cv_change_view(change, profile)
+    except correct.NotFound:
+        raise HTTPException(404, "no such change") from None
+    except correct.GateRefused as error:
+        raise HTTPException(409, str(error)) from None
+
+
+@api.post("/applications/{application_id}/cv/headline")
+def edit_cv_headline(
+    application_id: int, body: correct.HeadlineRequest, session: _Session, profile: _Profile
+) -> correct.Draft:
+    """Replace the CV's title line with the candidate's (applai.correct): the draft."""
+    try:
+        with session.begin():
+            correct.edit_cv_headline(session, LOCAL_USER_ID, application_id, body)
+            return correct.draft(session, LOCAL_USER_ID, application_id, profile)
+    except correct.NotFound:
+        raise HTTPException(404, "no such application") from None
+    except correct.GateRefused as error:
+        raise HTTPException(409, str(error)) from None
+
+
+@api.post("/applications/{application_id}/cv/photo")
+def switch_cv_photo(
+    application_id: int, body: correct.PhotoRequest, session: _Session, profile: _Profile
+) -> correct.Draft:
+    """Switch the CV's photo between with and without (applai.correct): the draft."""
+    try:
+        with session.begin():
+            correct.switch_cv_photo(session, LOCAL_USER_ID, application_id, body)
+            return correct.draft(session, LOCAL_USER_ID, application_id, profile)
+    except correct.NotFound:
+        raise HTTPException(404, "no such application") from None
+    except correct.GateRefused as error:
+        raise HTTPException(409, str(error)) from None
+
+
 @api.post("/applications/{application_id}/answers-checked", status_code=204)
 def answers_checked(
     application_id: int, session: _Session, request: Request, later: BackgroundTasks

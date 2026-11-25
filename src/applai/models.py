@@ -207,8 +207,9 @@ class CvChange(Base):
     path: Mapped[str]  # in the CV source: experience[0].bullets[2], skills…
     old_text: Mapped[str]
     new_text: Mapped[str | None]  # none for a drop
+    edited_text: Mapped[str | None]  # the candidate's text for a reword; new_text stays as drafted
     facts: Mapped[list[str]] = mapped_column(JSON)  # a reword's fact ids
-    status: Mapped[str] = mapped_column(server_default="pending")
+    status: Mapped[str] = mapped_column(server_default="pending")  # AnswerStatus values
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 
@@ -311,8 +312,8 @@ class Triage(Base):
 class Label(Base):
     """A decision the candidate recorded at a gate, with its reasons (GLOSSARY: label).
 
-    level is "offer" (applai.review) or "answers" (applai.correct), whose labels also name
-    their application. correction says the decision went against the agents' proposal.
+    level is "offer" (applai.review), "answers" or "cv" (applai.correct), whose labels also
+    name their application. correction says the decision went against the agents' proposal.
     reasons is a list, empty unless the offer was declined. diff is an edited answer's,
     word by word against the drafted text.
     """
