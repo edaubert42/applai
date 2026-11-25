@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from applai.cv import offer_contract_type
 from applai.details import ALERT_ONLY, MAX_PAGE_FAILURES
 from applai.models import Label, Offer, OfferState, Triage
 from applai.orchestrator import Actor, move
@@ -101,6 +102,8 @@ class Card(BaseModel):
     can_reread: bool = False  # the button "Relire l'offre" shows (applai.reread)
     rereading: bool = False  # the extension has been asked and has not answered
     reread_error: str | None = None  # one line: why the last read again failed
+    # permanent, fixed_term, internship or apprenticeship, as applai.cv.offer_contract_type finds it
+    contract_type: str | None = None
 
 
 def cards(session: Session, user_id: int, view: View, min_score: int) -> list[Card]:
@@ -156,6 +159,7 @@ def _card(offer: Offer, triage: Triage | None, can_reread: bool = False) -> Card
     card = Card.model_validate(offer)
     card.can_reread = can_reread
     card.rereading = offer.reread_requested_at is not None
+    card.contract_type = offer_contract_type(offer.title, offer.contract)
     from_alert = (offer.description or "").startswith(ALERT_ONLY)
     card.full_text_read = offer.page_failures < MAX_PAGE_FAILURES and not from_alert
     if offer.state == OfferState.SCREENED_OUT:

@@ -42,6 +42,7 @@ export interface Card {
   can_reread: boolean; // the button "Relire l'offre" shows
   rereading: boolean; // the extension was asked and has not answered
   reread_error: string | null; // one line: why the last read again failed
+  contract_type: "permanent" | "fixed_term" | "internship" | "apprenticeship" | null;
 }
 
 export const GROUPS = ["in_progress", "waiting", "sent", "dropped"] as const;
