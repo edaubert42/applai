@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Category, type ScanStatus, type Services } from "./api";
+import { api, type Category, type ScanStatus } from "./api";
+import AddOffer from "./AddOffer";
 import { ServiceLogo } from "./ServiceLogo";
-import { STATE_DOT, serviceName, worstState } from "./service-state";
+import { serviceName } from "./service-state";
 import { useSettings } from "./settings";
 
 const POLL_MS = 3000;
-const SERVICES_MS = 60_000;
 
 function categoryOf(serviceId: string): Category {
   if (serviceId === "mailbox") return "mailbox";
@@ -13,19 +13,19 @@ function categoryOf(serviceId: string): Category {
   return "sites";
 }
 
-/** Where the last scan stands, the worst state of the services, and the button that starts or stops a scan. */
-export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () => void; onOpenSettings: () => void }) {
+/**
+ * The button that starts or stops a scan, the one that adds an offer, where the last scan stands, and
+ * where the offers of the last 24 hours come from. onScanned runs when a scan ends, onAdded when an
+ * offer was added.
+ */
+export default function ScanBar({ onScanned, onAdded }: { onScanned: () => void; onAdded: () => void }) {
   const { t, lookup, formatTime } = useSettings();
   const [status, setStatus] = useState<ScanStatus | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [stopping, setStopping] = useState(false);
-  const [services, setServices] = useState<Services | null>(null);
   const wasRunning = useRef(false);
   const [asked, setAsked] = useState(0); // each change asks the API for the status again
   const refresh = useCallback(() => setAsked((count) => count + 1), []);
-  // Each scan that ends, each return of the window's focus and each minute asks for the services' state again.
-  const [scans, setScans] = useState(0);
-  const askServices = useCallback(() => setScans((count) => count + 1), []);
 
   useEffect(() => {
     let current = true;
@@ -35,10 +35,7 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
         setStatus(next);
         setUnavailable(false);
         if (!next.running) setStopping(false);
-        if (wasRunning.current && !next.running) {
-          onScanned();
-          askServices();
-        }
+        if (wasRunning.current && !next.running) onScanned();
         wasRunning.current = next.running;
       },
       () => current && setUnavailable(true),
@@ -46,27 +43,7 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
     return () => {
       current = false;
     };
-  }, [asked, onScanned, askServices]);
-  useEffect(() => {
-    let current = true;
-    api.services().then(
-      (next) => current && setServices(next),
-      () => current && setServices(null), // no state known: no dot
-    );
-    return () => {
-      current = false;
-    };
-  }, [scans]);
-  useEffect(() => {
-    window.addEventListener("focus", askServices);
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") askServices();
-    }, SERVICES_MS);
-    return () => {
-      window.removeEventListener("focus", askServices);
-      clearInterval(timer);
-    };
-  }, [askServices]);
+  }, [asked, onScanned]);
   // A scan in progress is asked about again, until it ends.
   useEffect(() => {
     if (!status?.running) return;
@@ -102,72 +79,22 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
     : wait !== null
       ? t("scan.wait", { n: Math.ceil(wait / 60) })
       : t("scan.button");
-  const used = status?.running ? status.services_used : [];
 
   return (
-    <section
-      aria-label={t("scan.label")}
-      className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-block bg-surface p-5"
-    >
-      {services && <ServicesDot services={services} onOpenSettings={onOpenSettings} />}
-      <div className="min-w-0 flex-1 basis-80 text-sm">
-        {unavailable ? (
-          <p className="text-muted">{t("scan.unavailable")}</p>
-        ) : !status ? null : !last ? (
-          <p className="text-muted">{t("scan.never")}</p>
-        ) : (
-          <>
-            <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span>{t("scan.last", { time: formatTime(last.finished_at ?? last.started_at) })}</span>
-              <span>{t("scan.new", { n: last.new_offers })}</span>
-              {status.next_slot && (
-                <span className="text-muted">
-                  {t("scan.next", { time: formatTime(status.next_slot) })}
-                </span>
-              )}
-              <span className="text-muted">
-                {t("scan.linkedin", {
-                  n: status.linkedin_reads_today,
-                  max: status.linkedin_reads_per_day,
-                })}
-              </span>
-              {status.running && status.linkedin_progress && (
-                <span className="font-medium">
-                  {t("scan.linkedin_progress", {
-                    n: status.linkedin_progress.read,
-                    total: status.linkedin_progress.total,
-                  })}
-                </span>
-              )}
-              {used.length > 0 && (
-                <span aria-label={t("scan.active_services")} className="inline-flex items-center gap-1.5">
-                  {used.map((id) => {
-                    const name = serviceName(id, lookup);
-                    const active = status.active_service === id;
-                    return (
-                      <span
-                        key={id}
-                        title={name}
-                        className={`inline-flex rounded p-0.5 ${active ? "ring-2 ring-link animate-pulse" : "opacity-75"}`}
-                      >
-                        <ServiceLogo id={id} category={categoryOf(id)} name={name} size="sm" />
-                      </span>
-                    );
-                  })}
-                </span>
-              )}
-            </p>
-            {last.errors.length > 0 && (
-              <ul className="mt-2 list-disc pl-5 text-minus [overflow-wrap:anywhere]">
-                {last.errors.map((error) => (
-                  <li key={error}>{error}</li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
+    <section aria-label={t("scan.label")} className="space-y-3 rounded-block bg-surface p-5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-3">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => void start()}
+          className={`min-h-11 rounded-pill px-5 font-semibold focus-visible:outline-2 focus-visible:outline-link ${
+            disabled
+              ? "cursor-not-allowed border border-outline text-muted"
+              : "cursor-pointer bg-primary text-on-primary hover:brightness-90"
+          }`}
+        >
+          {label}
+        </button>
         {status?.running && (
           <button
             type="button"
@@ -182,42 +109,74 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
             {isStopping ? t("scan.stopping") : t("scan.stop")}
           </button>
         )}
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => void start()}
-          className={`min-h-11 rounded-pill px-5 font-semibold focus-visible:outline-2 focus-visible:outline-link ${
-            disabled
-              ? "cursor-not-allowed border border-outline text-muted"
-              : "cursor-pointer bg-primary text-on-primary hover:brightness-90"
-          }`}
-        >
-          {label}
-        </button>
+        <AddOffer
+          onAdded={() => {
+            refresh(); // the offer shows under "Ajoutée"
+            onAdded();
+          }}
+        />
+        <p className="min-w-0 text-sm text-muted">
+          {unavailable ? (
+            t("scan.unavailable")
+          ) : !status ? null : !last ? (
+            t("scan.never")
+          ) : (
+            t(status.next_slot ? "scan.last_next" : "scan.last", {
+              time: formatTime(last.finished_at ?? last.started_at),
+              next: status.next_slot ? formatTime(status.next_slot) : "",
+            })
+          )}
+        </p>
+        {status?.running && status.linkedin_progress && (
+          <p className="text-sm font-medium">
+            {t("scan.linkedin_progress", { n: status.linkedin_progress.read, total: status.linkedin_progress.total })}
+          </p>
+        )}
       </div>
+      {status && !unavailable && <Last24h status={status} lookup={lookup} />}
+      {last && last.errors.length > 0 && (
+        <ul className="list-disc pl-5 text-sm text-minus [overflow-wrap:anywhere]">
+          {last.errors.map((error) => (
+            <li key={error}>{error}</li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
 
-/** The worst state of /api/services; when not green, a link to Réglages that names the services at fault. */
-function ServicesDot({ services, onOpenSettings }: { services: Services; onOpenSettings: () => void }) {
-  const { t, lookup } = useSettings();
-  const { state, at_fault } = worstState(services);
-  const dot = `size-3 shrink-0 rounded-pill ${STATE_DOT[state]}`;
+/**
+ * The offers of the last 24 hours, one pill per service with its count. While a scan runs the services
+ * it uses are outlined (the active one thickly) and shown even without a count.
+ */
+function Last24h({ status, lookup }: { status: ScanStatus; lookup: (key: string) => string | undefined }) {
+  const { t } = useSettings();
+  const counts = Object.entries(status.last_24h).filter(([, count]) => count > 0);
+  const total = counts.reduce((sum, [, count]) => sum + count, 0);
+  const used = status.running ? status.services_used : [];
+  const ids = [...new Set([...used, ...counts.map(([id]) => id)])];
 
-  if (state === "green") return <span role="img" aria-label={t("scan.services.green")} className={dot} />;
-  const names = at_fault.map((service) => serviceName(service.id, lookup)).join(", ");
   return (
-    <a
-      href="#settings"
-      onClick={(event) => {
-        event.preventDefault();
-        onOpenSettings();
-      }}
-      className="inline-flex min-h-11 items-center gap-2 text-sm font-medium underline focus-visible:outline-2 focus-visible:outline-link [overflow-wrap:anywhere]"
-    >
-      <span aria-hidden="true" className={dot} />
-      {t(`scan.services.${state}`, { names })}
-    </a>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+      <span>{t(total <= 1 ? "scan.last_24h.one" : "scan.last_24h.other", { n: total })}</span>
+      <ul aria-label={t("scan.active_services")} className="flex flex-wrap items-center gap-2">
+        {ids.map((id) => {
+          const count = status.last_24h[id] ?? 0;
+          const name = id === "manual" ? t("scan.manual") : serviceName(id, lookup);
+          const use = !used.includes(id) ? undefined : status.active_service === id ? "active" : "used";
+          const outline = use === "active" ? "ring-2 ring-link animate-pulse" : use === "used" ? "ring-1 ring-link" : "";
+          return (
+            <li
+              key={id}
+              data-use={use}
+              className={`inline-flex items-center gap-1.5 rounded-pill bg-raised py-1 pr-3 pl-1 ${outline}`}
+            >
+              <ServiceLogo id={id} category={categoryOf(id)} name={name} size="sm" />
+              {count > 0 ? `${name} ${count}` : name}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

@@ -24,7 +24,7 @@ from pathlib import Path
 
 import httpx2
 from pydantic import BaseModel, Field
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, case, func, select
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner, AlreadyRunning
@@ -263,6 +263,7 @@ class ScanStatus(BaseModel):
     linkedin_reads_today: int
     linkedin_reads_per_day: int
     linkedin_progress: LinkedInReadProgress | None  # none: no scan is reading LinkedIn
+    last_24h: dict[str, int]  # the offers created in the last 24 hours, by source; by hand: manual
 
 
 class Scanner:
@@ -374,6 +375,7 @@ class Scanner:
                 linkedin_reads_today=reads_today(session, _utc(self._clock()), self._user_id),
                 linkedin_reads_per_day=MAX_READS_PER_DAY,
                 linkedin_progress=self._linkedin,
+                last_24h=_created_since(session, _utc(self._clock()), self._user_id),
             )  # fmt: skip
 
     def _keep_schedule(self) -> None:
@@ -447,6 +449,18 @@ def _refuse_if_too_soon(last: Scan | None, now: datetime) -> None:
             f" in {math.ceil(seconds_left / 60)} minutes.",
             seconds_left=seconds_left,
         )
+
+
+def _created_since(session: Session, now: datetime, user_id: int) -> dict[str, int]:
+    """The candidate's offers created in the 24 hours before now, by source; by hand: manual."""
+    name = case((Offer.origin == OfferOrigin.MANUAL, "manual"), else_=Offer.source)
+    counts = session.execute(
+        select(name, func.count())
+        .where(Offer.user_id == user_id, Offer.created_at >= now - timedelta(hours=24))
+        .where(name.is_not(None))
+        .group_by(name)
+    )
+    return {source: count for source, count in counts}
 
 
 def _utc(moment: datetime) -> datetime:

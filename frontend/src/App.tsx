@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import ApplicationsScreen from "./ApplicationsScreen";
 import ReviewScreen from "./ReviewScreen";
+import ServicesChip from "./ServicesChip";
 import SettingsScreen from "./SettingsScreen";
 import { SettingsProvider, useSettings } from "./settings";
 
@@ -20,6 +21,8 @@ export default function App() {
 function Shell() {
   const { t } = useSettings();
   const [page, setPage] = useState<Page>("review");
+  const [scanEnds, setScanEnds] = useState(0); // each scan that ends asks for the services' state again
+  const scanEnded = useCallback(() => setScanEnds((count) => count + 1), []);
 
   return (
     <div className="min-h-screen bg-background font-sans text-text">
@@ -41,11 +44,12 @@ function Shell() {
             </button>
           ))}
         </nav>
+        <ServicesChip scanEnds={scanEnds} onOpenSettings={() => setPage("settings")} />
       </header>
       <main className="mx-auto min-w-0 max-w-5xl overflow-x-clip p-6">
         <h1 className="mb-4 text-2xl font-semibold">{t(`nav.${page}`)}</h1>
         {page === "review" ? (
-          <ReviewScreen onOpenSettings={() => setPage("settings")} />
+          <ReviewScreen onScanEnded={scanEnded} />
         ) : page === "applications" ? (
           <ApplicationsScreen />
         ) : page === "settings" ? (

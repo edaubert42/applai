@@ -394,6 +394,33 @@ def test_the_status_gives_the_linkedin_reads_of_the_day_and_their_limit(app: Fas
     assert (status["linkedin_reads_today"], status["linkedin_reads_per_day"]) == (0, 50)
 
 
+def test_the_status_counts_the_offers_of_the_last_24_hours_by_source_and_by_hand(
+    data_dir: Path, app: FastAPI
+):
+    def created(slug: str, hours: int, **fields: str) -> Offer:
+        offer = _offer(slug)
+        offer.state = "triaged"
+        offer.created_at = _utc(NOON - timedelta(hours=hours))
+        for name, value in fields.items():
+            setattr(offer, name, value)
+        return offer
+
+    _seed(
+        data_dir,
+        _scan(NOON - timedelta(minutes=30)),  # a scan just ended: none starts
+        created("a", 1, source="alert_linkedin"),
+        created("b", 23, source="alert_linkedin"),
+        created("c", 25, source="alert_linkedin"),
+        created("d", 2, origin="manual"),
+        created("e", 26, origin="manual"),
+    )
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        status = client.get("/api/scan").json()
+
+    assert status["last_24h"] == {"alert_linkedin": 2, "manual": 1}
+
+
 def test_a_scan_reads_a_linkedin_offer_through_the_server_and_triage_takes_it(
     data_dir: Path, app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ):

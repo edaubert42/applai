@@ -119,6 +119,7 @@ export function aScan(overrides: Partial<ScanStatus> = {}): ScanStatus {
     linkedin_reads_today: 3,
     linkedin_reads_per_day: 20,
     linkedin_progress: null,
+    last_24h: {},
     ...overrides,
   };
 }

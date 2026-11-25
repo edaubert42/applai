@@ -177,6 +177,8 @@ export interface ScanStatus {
   linkedin_reads_per_day: number;
   /** The LinkedIn offers the running scan went through, out of the new ones; null when no scan reads LinkedIn. */
   linkedin_progress: { read: number; total: number } | null;
+  /** The offers created in the last 24 hours, by source; the ones added by hand under "manual". */
+  last_24h: Record<string, number>;
 }
 
 export type ServiceState = "green" | "orange" | "red";
