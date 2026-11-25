@@ -119,8 +119,10 @@ _MinScore = Annotated[int, Depends(_min_score)]
 
 
 @api.get("/review")
-def review(view: View, session: _Session, min_score: _MinScore) -> list[Card]:
-    """The cards of one view of the To review screen."""
+def review(view: View, session: _Session, min_score: _MinScore, request: Request) -> list[Card]:
+    """The cards of one view of the To review screen; a re-read ask nobody answered ends first."""
+    reread.expire(session, browser.utc(request.app.state.clock()))
+    session.commit()
     return cards(session, LOCAL_USER_ID, view, min_score)
 
 
