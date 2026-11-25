@@ -6,10 +6,12 @@ form with no open question, a slot for other documents. A form with neither move
 with no agent run. Each answer is a list of sentences, each citing the facts it states; code
 checks every cited fact is in the profile, validated, and not of diffusion never (ADR 0008),
 else nothing is stored, the run's outcome says why, and the application stays form_captured
-with its draft_error. Only those facts reach the agent. Then the judge checks each sentence
-against its facts (applai.drafting_judge); its warnings are kept, never blocking. CV tailoring
-runs last (applai.cv_tailoring). An answer the candidate rejects is drafted again alone, with
-their reason (redraft_answer).
+with its draft_error. Only those facts reach the agent. The cover letter's body comes in 3 or
+4 paragraphs of cited sentences, 300 words at most or refused the same way; code adds its
+greeting and sign-off, in the offer's language, which cite no fact. Then the judge checks
+each sentence against its facts (applai.drafting_judge); its warnings are kept, never
+blocking. CV tailoring runs last (applai.cv_tailoring). An answer the candidate rejects is
+drafted again alone, with their reason (redraft_answer).
 """
 
 import json
@@ -23,6 +25,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner, AgentSpec, RunLock, locked_subject
+from applai.cv import offer_language
 from applai.cv_tailoring import store, tailor_cv
 from applai.drafting_judge import judge_answers
 from applai.models import AgentRun, Application, DraftAnswer, Offer
@@ -35,6 +38,11 @@ AGENT = "drafting"
 DRAFTING_MODEL = "claude-opus-5-5"  # pinned, as the bench measures one version
 QUESTION, COVER_LETTER = "question", "cover_letter"  # draft_answers.kind
 INVALID_CITATION = "invalid_citation"  # the outcome of a run whose citations code refused
+LETTER_TOO_LONG = "letter_too_long"  # the outcome of a run whose letter code refused
+LETTER_WORDS = 300  # at most, in the letter's body
+# The greeting and the sign-off code adds to a letter, in the offer's language.
+_LETTER_ENDS = {"fr": ("Madame, Monsieur,", "Cordialement,"),
+                "en": ("Dear Hiring Team,", "Kind regards,")}  # fmt: skip
 
 
 class AnswerStatus(StrEnum):
@@ -66,6 +74,7 @@ _FACT_ID: dict[str, Any] = {"type": "string", "pattern": r"^F[1-9][0-9]*$"}
 _SENTENCE = _object({"text": {"type": "string", "minLength": 1},
                      "facts": {"type": "array", "items": _FACT_ID, "minItems": 1}})  # fmt: skip
 _SENTENCES: dict[str, Any] = {"type": "array", "items": _SENTENCE, "minItems": 1}
+_PARAGRAPHS: dict[str, Any] = {"type": "array", "items": _SENTENCES, "minItems": 3, "maxItems": 4}
 
 SYSTEM_PROMPT = """\
 You draft parts of one job application for one candidate. You receive a JSON document: the
@@ -73,8 +82,9 @@ offer, the form's open questions (each with its field number), maybe a cover_let
 the candidate's targets, base answers, and the facts about the candidate you may rely on.
 
 - answers: for each question, under its field number, the answer as a list of sentences.
-- cover_letter, when asked: the letter's body as a list of sentences, with no address, no
-  greeting and no sign-off: the candidate adds them.
+- cover_letter, when asked: the letter's body as 3 to 4 paragraphs, each a list of
+  sentences, 300 words at most in all, with no address, no greeting and no sign-off: they
+  are added for you.
 - rejected, when given: the candidate rejected your earlier text for that field, for the
   reason they give. Write it again, following their reason.
 
@@ -132,7 +142,7 @@ def drafting_spec(
     output = {"answers": _object({str(i): _SENTENCES for i in questions})}
     if letter is not None:
         sent["cover_letter"] = {"field": letter, "label": fields[letter]["label"]}
-        output["cover_letter"] = _SENTENCES
+        output["cover_letter"] = _PARAGRAPHS
     if rejected is not None:
         sent["rejected"] = rejected
     return AgentSpec(name=AGENT, model=DRAFTING_MODEL, system_prompt=SYSTEM_PROMPT,
@@ -239,12 +249,14 @@ def _run(
     run_id = _run_id(result.run_id)
     drafted = [(i, QUESTION, result.output["answers"][str(i)]) for i in questions]
     if letter is not None:
-        drafted.append((letter, COVER_LETTER, result.output["cover_letter"]))
+        drafted.append((letter, COVER_LETTER, paragraphed(result.output["cover_letter"])))
     _check_citations(database, run_id, [sentences for _, _, sentences in drafted], profile)
+    if letter is not None:
+        _check_length(database, run_id, drafted[-1][2])
     return [
         DraftAnswer(application_id=application_id, agent_run_id=run_id, kind=kind,
                     field_index=i, label=fields[i]["label"], sentences=sentences,
-                    text=rendered(sentences))
+                    text=_text(kind, sentences, offer, profile))
         for i, kind, sentences in drafted
     ]  # fmt: skip
 
@@ -261,9 +273,26 @@ def _check_citations(
     """Refuse the run if a sentence of its answers cites a fact it may not use (ADR 0008)."""
     for sentences in answers:
         if problem := citation_problem(sentences, profile):
-            with Session(database) as session, session.begin():
-                session.get_one(AgentRun, run_id).outcome = INVALID_CITATION
-            raise DraftingError(f"Drafting refused: {problem}.")
+            _refuse(database, run_id, INVALID_CITATION, problem)
+
+
+def _check_length(database: Engine, run_id: int, letter: list[dict[str, Any]]) -> None:
+    """Refuse the run if its letter's body is over LETTER_WORDS words."""
+    if (words := len(rendered(letter).split())) > LETTER_WORDS:
+        problem = f"the cover letter has {words} words, more than {LETTER_WORDS}"
+        _refuse(database, run_id, LETTER_TOO_LONG, problem)
+
+
+def _refuse(database: Engine, run_id: int, outcome: str, problem: str) -> None:
+    with Session(database) as session, session.begin():
+        session.get_one(AgentRun, run_id).outcome = outcome
+    raise DraftingError(f"Drafting refused: {problem}.")
+
+
+def paragraphed(paragraphs: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """A letter's paragraphs as one list of sentences, each with its paragraph's index."""
+    return [{**s, "paragraph": index} for index, sentences in enumerate(paragraphs)
+            for s in sentences]  # fmt: skip
 
 
 def sentence_text(text: str) -> str:
@@ -272,8 +301,27 @@ def sentence_text(text: str) -> str:
 
 
 def rendered(sentences: list[dict[str, Any]]) -> str:
-    """An answer's text: its sentences, joined, without the facts' ids."""
-    return " ".join(sentence_text(sentence["text"]) for sentence in sentences)
+    """An answer's text, without the facts' ids: its sentences joined with a space, and a
+    letter's paragraphs with a blank line. An answer is one paragraph."""
+    paragraphs: dict[int, list[str]] = {}
+    for sentence in sentences:
+        paragraphs.setdefault(sentence.get("paragraph", 0), []).append(
+            sentence_text(sentence["text"])
+        )
+    return "\n\n".join(" ".join(paragraph) for paragraph in paragraphs.values())
+
+
+def _text(
+    kind: str, sentences: list[dict[str, Any]], offer: dict[str, str | None], profile: Profile
+) -> str:
+    """An answer's text; a letter's body between its greeting and its sign-off, in the offer's
+    language, signed with the candidate's name. Neither states a fact: neither cites one."""
+    if kind != COVER_LETTER:
+        return rendered(sentences)
+    language = offer_language(offer["title"] or "", offer["description"], ("fr", "en"))
+    greeting, sign_off = _LETTER_ENDS[language]
+    name = f"{profile.identity.first_name} {profile.identity.last_name}"
+    return f"{greeting}\n\n{rendered(sentences)}\n\n{sign_off}\n{name}"
 
 
 def redraft_answer(
@@ -301,8 +349,10 @@ def redraft_answer(
     )
     run_id = _run_id(result.run_id)
     output = result.output
-    sentences = output["cover_letter"] if is_letter else output["answers"][str(index)]
+    sentences = paragraphed(output["cover_letter"]) if is_letter else output["answers"][str(index)]
     _check_citations(database, run_id, [sentences], profile)
+    if is_letter:
+        _check_length(database, run_id, sentences)
     judged = DraftAnswer(sentences=sentences)  # judged anew: the old text's warnings go
     judge_answers(runner, database, offer_id, application_id, [judged], profile)
     with Session(database, expire_on_commit=False) as session, session.begin():
@@ -310,7 +360,8 @@ def redraft_answer(
         application = session.get_one(Application, answer.application_id)
         if answer.status != AnswerStatus.REJECTED or application.state != ApplicationState.DRAFTED:
             raise DraftingError(f"Answer {answer_id} was changed while it was drafted again.")
-        answer.agent_run_id, answer.sentences, answer.text = run_id, sentences, rendered(sentences)
+        answer.agent_run_id, answer.sentences = run_id, sentences
+        answer.text = _text(answer.kind, sentences, sent, profile)
         answer.status, answer.edited_text = AnswerStatus.PENDING, None
         answer.judge_issues = judged.judge_issues
     return answer
