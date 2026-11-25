@@ -13,7 +13,7 @@ from pydantic import BaseModel, field_serializer
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from applai.models import Application, Offer, OfferOrigin, StateChange
+from applai.models import Application, Label, Offer, OfferOrigin, StateChange
 from applai.orchestrator import ApplicationState
 
 _S = ApplicationState
@@ -43,6 +43,7 @@ class Row(BaseModel):
     form_url: str | None = None  # where its form lives, or why not (applai.capture)
     form_url_error: str | None = None
     fill_error: str | None = None  # why Filling failed: the plan, or the extension (applai.browser)
+    reasons: list[str] = []  # why the candidate dropped it (applai.validation)
     # Whether the filled form's tab is open; none: not asked, or the extension has not said lately.
     tab_open: bool | None = None
 
@@ -96,6 +97,13 @@ def board(session: Session, user_id: int, open_tabs: list[str] | None = None) ->
         .outerjoin(last_change, last_change.c.application_id == Application.id)
         .where(Application.user_id == user_id)
     )
+    # A drop is terminal: an application has at most one drop label.
+    drops = session.execute(
+        select(Label.application_id, Label.reasons).where(
+            Label.user_id == user_id, Label.level == "application", Label.decision == "dropped"
+        )
+    )
+    drop_reasons = {application_id: reasons for application_id, reasons in drops}
     rows = [
         (
             str(application.state),
@@ -111,6 +119,7 @@ def board(session: Session, user_id: int, open_tabs: list[str] | None = None) ->
                 form_url=application.form_url,
                 form_url_error=application.form_url_error,
                 fill_error=application.fill_error,
+                reasons=drop_reasons.get(application.id, []),
                 tab_open=_tab_open(application, open_tabs),
             ),
         )

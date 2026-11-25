@@ -141,7 +141,7 @@ describe("FinalValidationScreen", () => {
     ]);
   });
 
-  it.each(["fr", "en"] as const)("confirms drop inline, returns to dashboard, and handles action failure in %s", async (language) => {
+  it.each(["fr", "en"] as const)("asks why in the drop panel, returns to dashboard, and handles action failure in %s", async (language) => {
     let board = applicationsRoutes({ waiting: [aRow({ state: "validated" })] });
     let failOnce = true;
     const { calls, words } = await openValidation({
@@ -154,16 +154,21 @@ describe("FinalValidationScreen", () => {
     }, language, aFormReview({ state: "validated" }));
 
     fireEvent.click(screen.getByRole("button", { name: words["validation.drop"] }));
-    fireEvent.click(screen.getByRole("button", { name: words["correct.cancel"] }));
+    fireEvent.click(screen.getByRole("button", { name: words["decline.cancel"] }));
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: words["validation.drop"] }));
-    fireEvent.click(screen.getByRole("button", { name: words["validation.drop_confirm"] }));
+    expect(screen.getByText(words["drop.title"])).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(words["reason.offer_closed"]) }));
+    fireEvent.click(screen.getByRole("button", { name: words["decline.save"] }));
     expect((await screen.findByRole("alert")).textContent).toBe(words["validation.action_failed"]);
 
-    fireEvent.click(screen.getByRole("button", { name: words["validation.drop_confirm"] }));
+    fireEvent.click(screen.getByRole("button", { name: words["decline.save"] }));
     expect(await screen.findByText(words["applications.state.dropped"])).toBeTruthy();
-    expect(calls.filter((c) => c.method === "POST")).toHaveLength(2);
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.body)).toEqual([
+      { reasons: ["offer_closed"] },
+      { reasons: ["offer_closed"] },
+    ]);
   });
 
   it.each(["fr", "en"] as const)("shows the CV warning of the application in %s", async (language) => {

@@ -146,3 +146,36 @@ def test_send_failure_clears_authorization_never_retries_blindly_and_stays_valid
     assert client.post(fail_url, json={"reason": "unknown"}, headers=EXTENSION).status_code == 422
     review = client.get(f"/api/applications/{app_id}/review").json()
     assert (review["send_authorized"], review["send_error"]) == (True, None)
+
+
+def test_a_dropped_application_is_never_listed_for_filling_or_sending_again(
+    engine: Engine, client: TestClient
+):
+    to_fill, to_send = _app(engine, "answers_checked"), _app(engine, "validated")
+    plan = [{"field": 0, "label": "Nom complet", "kind": "fill", "value": "Jeanne Dupont"}]
+    with Session(engine) as session, session.begin():
+        session.get_one(Application, to_fill).fill_plan = plan
+    assert client.post(f"/api/applications/{to_send}/authorize-send").status_code == 204
+    listed = [
+        f["application_id"] for f in client.get("/api/browser/fills", headers=EXTENSION).json()
+    ]
+    assert listed == [to_fill]
+    listed = [
+        s["application_id"] for s in client.get("/api/browser/sends", headers=EXTENSION).json()
+    ]
+    assert listed == [to_send]
+
+    for app_id in (to_fill, to_send):
+        drop = {"reasons": ["offer_closed"]}
+        assert client.post(f"/api/applications/{app_id}/drop", json=drop).status_code == 204
+
+    assert client.get("/api/browser/fills", headers=EXTENSION).json() == []
+    assert client.get("/api/browser/sends", headers=EXTENSION).json() == []
+    assert client.post(f"/api/browser/sends/{to_send}", headers=EXTENSION).status_code == 409
+    filled = {"fields": [{"field": 0, "value": "Jeanne Dupont"}]}
+    resp = client.post(f"/api/browser/fills/{to_fill}", json=filled, headers=EXTENSION)
+    assert resp.status_code == 409
+    with Session(engine) as session:
+        apps = [session.get_one(Application, i) for i in (to_fill, to_send)]
+        assert [a.state for a in apps] == ["dropped", "dropped"]
+        assert apps[1].send_authorized_at is None

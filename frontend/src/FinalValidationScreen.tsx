@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type FormReview, type Row } from "./api";
+import { DROP_REASONS, api, type FormReview, type Row } from "./api";
+import DeclinePanel from "./DeclinePanel";
 import Paragraphs from "./Paragraphs";
 import { serverMessage } from "./server-message";
 import { useSettings } from "./settings";
@@ -181,10 +182,13 @@ export default function FinalValidationScreen({
           </div>
 
           {canDrop && confirmDrop && (
-            <div className="flex flex-wrap items-center gap-3 rounded-block border border-minus-border bg-minus-bg p-4">
-              <p className="text-sm font-medium text-minus">{t("validation.drop_prompt")}</p>
-              <button type="button" disabled={busy} onClick={() => run(() => api.dropApplication(id), onDone)} className={button}>{t("validation.drop_confirm")}</button>
-              <button type="button" disabled={busy} onClick={() => setConfirmDrop(false)} className={button}>{t("correct.cancel")}</button>
+            <div className="rounded-block border border-outline p-4">
+              <DeclinePanel
+                kind="drop"
+                reasons={DROP_REASONS}
+                onCancel={() => setConfirmDrop(false)}
+                onSave={(reasons, note) => run(() => api.dropApplication(id, reasons, note || undefined), onDone)}
+              />
             </div>
           )}
         </>

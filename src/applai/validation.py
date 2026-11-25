@@ -3,10 +3,13 @@
 After Review checks a filled form, the candidate checks the form in Chrome (recording any
 fields corrected by hand as a correction at the form level, ADR 0004), validates the full
 application, and marks it sent once submitted by hand (ADR 0003) — or drops a non-terminal
-application. Functions write in the caller's session and do not commit.
+application, saying why with the offer's decline reasons or offer_closed. A drop is a
+correction at the full-application level unless the offer closing is its only reason, which
+says nothing about the answers or the form. Functions write in the caller's session and do
+not commit.
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -14,6 +17,9 @@ from sqlalchemy.orm import Session
 from applai.capture import MAX_FIELDS, MAX_LABEL
 from applai.models import Application, Label
 from applai.orchestrator import Actor, ApplicationState, move
+from applai.review import Reason
+
+OFFER_CLOSED = "offer_closed"  # the site took the offer down
 
 FORM_LEVEL, APPLICATION_LEVEL = "form", "application"
 type _FieldLabel = Annotated[str, Field(min_length=1, max_length=MAX_LABEL)]
@@ -32,7 +38,12 @@ class FormCheckedRequest(BaseModel):
 
 
 class DropRequest(BaseModel):
+    """Why the candidate drops an application: at least one reason, and a note."""
+
     model_config = ConfigDict(extra="forbid")
+    reasons: list[Reason | Literal["offer_closed"]] = Field(
+        min_length=1, max_length=len(Reason) + 1
+    )
     note: str | None = Field(default=None, max_length=2000)
 
 
@@ -85,8 +96,10 @@ def mark_sent(session: Session, user_id: int, application_id: int) -> Label:
 def drop_application(
     session: Session, user_id: int, application_id: int, request: DropRequest
 ) -> Label:
-    """Drop any non-terminal application and record the label."""
+    """Drop any non-terminal application and record the label with its reasons."""
+    reasons = [str(reason) for reason in request.reasons]
     return _record(
         session, user_id, application_id, ApplicationState.DROPPED, APPLICATION_LEVEL,
-        "dropped", note=request.note,
+        "dropped", reasons=reasons, note=request.note,
+        correction=any(reason != OFFER_CLOSED for reason in reasons),
     )  # fmt: skip

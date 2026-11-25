@@ -154,6 +154,7 @@ def test_a_row_has_the_offers_company_title_link_and_the_last_change(
         "form_url": None,
         "form_url_error": None,
         "fill_error": None,
+        "reasons": [],
         "tab_open": None,
     }
 
@@ -215,6 +216,7 @@ def test_an_old_workflow_offer_is_a_row_in_progress_with_its_origin_and_notion_s
         "form_url": None,
         "form_url_error": None,
         "fill_error": None,
+        "reasons": [],
         "tab_open": None,
     }
     assert board["in_progress"][1]["origin"] == "applai"

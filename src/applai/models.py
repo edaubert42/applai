@@ -318,7 +318,8 @@ class Label(Base):
 
     level is "offer" (applai.review), "answers" or "cv" (applai.correct), whose labels also
     name their application. correction says the decision went against the agents' proposal.
-    reasons is a list, empty unless the offer was declined. diff is an edited answer's,
+    reasons is a list: a declined offer's or a dropped application's reasons, else empty
+    (a form check's lists the fields corrected, applai.validation). diff is an edited answer's,
     word by word against the drafted text.
     """
 
