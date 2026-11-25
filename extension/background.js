@@ -129,9 +129,14 @@ async function fillIn(applicationId, url, actions, fetch, browser, wait) {
   return screenshot ? { fields, screenshot } : { fields };
 }
 
-const pendingSendReports = new Map(); // never click submit twice if reporting the result fails
+// A click's result until ApplAI has taken it: submit is never clicked twice for one application.
+// Kept in chrome.storage.local, as Chrome stops an idle service worker and may itself close; this
+// in-memory copy covers a storage write that failed.
+const pendingSendReports = new Map();
+const sendReportKey = (applicationId) => `send-report:${applicationId}`;
 
 // Submit forms explicitly authorized by the candidate, using only already-open tabs (ADR 0003).
+// A stored result is posted again and nothing is clicked; a storage read that fails clicks nothing.
 export async function sendForms(
   fetch = globalThis.fetch,
   browser = globalThis.chrome,
@@ -145,7 +150,8 @@ export async function sendForms(
     sends = await asked.json();
   } catch { return; }
   for (const { application_id, url } of sends) {
-    let report = pending.get(application_id);
+    const key = sendReportKey(application_id);
+    let report = pending.get(application_id) ?? (await browser.storage.local.get(key))[key];
     if (!report) {
       let path = "", body = {};
       try {
@@ -164,9 +170,13 @@ export async function sendForms(
       }
       report = { path, body };
       pending.set(application_id, report);
+      await browser.storage.local.set({ [key]: report }).catch(() => {}); // kept in memory meanwhile
     }
     const posted = await send(fetch, `/api/browser/sends/${application_id}${report.path}`, report.body);
-    if (posted && (posted.ok || posted.status === 404 || posted.status === 409)) pending.delete(application_id);
+    if (posted && (posted.ok || posted.status === 404 || posted.status === 409)) {
+      pending.delete(application_id);
+      await browser.storage.local.remove(key).catch(() => {}); // posted again next pass, then removed
+    }
   }
 }
 
