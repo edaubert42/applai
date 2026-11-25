@@ -10,8 +10,8 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from applai.database import open_database
 from applai import linkedin
+from applai.database import open_database
 from applai.linkedin import (
     COMMAND_VARIABLE,
     MAX_READS_PER_DAY,
