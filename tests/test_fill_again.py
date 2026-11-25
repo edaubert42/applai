@@ -196,4 +196,6 @@ def test_a_fill_again_posted_without_a_screenshot_drops_the_old_one(
 
     assert posted.status_code == 204
     assert not (data_dir / "applications" / str(app_id) / "filled.png").exists()
-    assert _get(engine, app_id).filled_fields[0]["value"] == "Jeanne D."
+    filled_fields = _get(engine, app_id).filled_fields
+    assert filled_fields is not None
+    assert filled_fields[0]["value"] == "Jeanne D."
