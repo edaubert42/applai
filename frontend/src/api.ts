@@ -163,13 +163,24 @@ export const CATEGORIES = ["sites", "agents", "mailbox", "applai"] as const;
 export type Category = (typeof CATEGORIES)[number];
 export type Services = Record<Category, Service[]>;
 
+/** A request the API answered with an error status; a request that never got an answer throws what fetch throws. */
+export class ApiError extends Error {
+  constructor(
+    method: string,
+    path: string,
+    readonly status: number,
+  ) {
+    super(`${method} ${path}: ${status}`);
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`${method} ${path}: ${response.status}`);
+  if (!response.ok) throw new ApiError(method, path, response.status);
   return (await response.json()) as T;
 }
 
