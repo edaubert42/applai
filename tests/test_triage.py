@@ -194,6 +194,23 @@ def test_an_offer_already_triaged_is_refused_before_any_model_call(
     assert len(_runs(engine)) == len(_triages(engine)) == 1
 
 
+def test_a_triage_that_failed_or_crashed_does_not_block_its_offer(engine: Engine, profile: Profile):
+    offer_id = _offer(engine)
+    crash = RuntimeError("the run crashed")
+    backend = FakeBackend([_result(_without(CARD, "salary")), crash, _result(CARD)])
+    runner = AgentRunner(backend)
+
+    with pytest.raises(AgentError):
+        triage_offer(runner, engine, offer_id, profile)
+    with pytest.raises(RuntimeError):
+        triage_offer(runner, engine, offer_id, profile)
+    triage_offer(runner, engine, offer_id, profile)
+
+    assert len(backend.specs) == 3
+    assert [run.outcome for run in _runs(engine)] == ["schema_mismatch", "unexpected", "ok"]
+    assert _state(engine, offer_id) == "triaged"
+
+
 def test_only_validated_facts_whose_diffusion_is_not_never_reach_the_prompt(profile: Profile):
     def fact(id: str, status: FactStatus, diffusion: Diffusion) -> Fact:
         return Fact(

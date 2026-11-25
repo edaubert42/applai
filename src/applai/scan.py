@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from applai.agents import AgentError, AgentRunner
+from applai.agents import AgentError, AgentRunner, AlreadyRunning
 from applai.details import PageError, describe_offer, on_linkedin, read_by_extension
 from applai.linkedin import MAX_READS_PER_DAY, describe_linkedin_offers, reads_today
 from applai.mail import CLIENT_ID_VARIABLE, MailAuthError, Mailbox, MailError, read_alerts
@@ -98,6 +98,8 @@ def run_scan(
     for offer_id in _offers(engine, OfferState.DESCRIBED, user_id):
         try:
             triage_offer(watch.runner, engine, offer_id, profile)
+        except AlreadyRunning:  # its page's Triage runs (applai.browser) and keeps the card
+            continue
         except Exception as error:
             found.errors.append(f"Offer {offer_id} was not triaged: {_plain(error)}.")
     return found

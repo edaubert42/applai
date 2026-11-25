@@ -219,7 +219,15 @@ def triage_offer(runner: AgentRunner, database: Engine, offer_id: int, profile: 
     An offer with no description is refused with a TriageError and the refusal is recorded
     in its trace; a run that fails raises its AgentError, recorded by run_agent. Either way
     no card is stored and the offer stays described.
+
+    While Triage runs on the offer, another triage_offer() of it raises AlreadyRunning
+    without calling the agent.
     """
+    with runner.lock(AGENT, offer_id=offer_id):
+        return _triage_offer(runner, database, offer_id, profile)
+
+
+def _triage_offer(runner: AgentRunner, database: Engine, offer_id: int, profile: Profile) -> Triage:
     with Session(database) as session:
         offer = session.get_one(Offer, offer_id)
         if offer.state != OfferState.DESCRIBED:

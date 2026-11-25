@@ -271,7 +271,8 @@ def _failed(session: Session, offer: Offer, error: str, now: datetime) -> bool:
 
 
 def _triage(engine: Engine, data_dir: Path, runner: AgentRunner, offer_id: int) -> None:
-    """Triage the offer; a failure, recorded in its trace, leaves it described for the scan."""
+    """Triage the offer; a failure, recorded in its trace, leaves it described for the scan.
+    An offer a scan is triaging already is left to it (AlreadyRunning)."""
     with suppress(Exception):
         triage_offer(runner, engine, offer_id, load_profile(data_dir))
 

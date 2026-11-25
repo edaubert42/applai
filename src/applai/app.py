@@ -28,11 +28,12 @@ from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from applai import browser, correct, notion, reread, review_form, validation
-from applai.agents import AgentError
+from applai.agents import AgentError, AlreadyRunning
 from applai.applications import Board, board
 from applai.capture import find_form
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
+from applai.drafting import AGENT as DRAFTING
 from applai.drafting import DraftingError, draft_in_background, redraft_answer
 from applai.filling import Slot, file_path, plan_in_background
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferState, Triage
@@ -218,7 +219,10 @@ def paste_form_url(application_id: int, body: FormUrl, session: _Session) -> For
 
 @api.post("/applications/{application_id}/draft", status_code=202)
 def draft(application_id: int, session: _Session, request: Request, later: BackgroundTasks) -> None:
-    """Draft a form_captured application again, after a failure, in the background."""
+    """Draft a form_captured application again, after a failure, in the background.
+
+    Refused while Drafting runs on it: its lock is taken here and released by the
+    background task, however it ends."""
     application = session.get(Application, application_id)
     if application is None or application.user_id != LOCAL_USER_ID:
         raise HTTPException(404, "no such application")
@@ -227,10 +231,18 @@ def draft(application_id: int, session: _Session, request: Request, later: Backg
     watch: Watch | None = request.app.state.watch
     if watch is None:
         raise HTTPException(503, "The watch is off: ApplAI was started without it.")
-    application.draft_error = None
-    session.commit()
+    try:
+        lock = watch.runner.lock(DRAFTING, application_id=application_id)
+    except AlreadyRunning:
+        raise HTTPException(409, f"Application {application_id} is being drafted.") from None
+    try:
+        application.draft_error = None
+        session.commit()
+    except BaseException:  # the commit failed: no background task will release the lock
+        lock.release()
+        raise
     s = request.app.state
-    later.add_task(draft_in_background, s.engine, s.data_dir, watch.runner, application_id)
+    later.add_task(draft_in_background, s.engine, s.data_dir, watch.runner, application_id, lock)
 
 
 def _profile(request: Request) -> Profile:

@@ -14,7 +14,7 @@ their reason (redraft_answer).
 
 import json
 import re
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -22,7 +22,7 @@ from typing import Any
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from applai.agents import AgentError, AgentRunner, AgentSpec
+from applai.agents import AgentError, AgentRunner, AgentSpec, RunLock, locked_subject
 from applai.cv_tailoring import store, tailor_cv
 from applai.drafting_judge import judge_answers
 from applai.models import AgentRun, Application, DraftAnswer, Offer
@@ -158,9 +158,13 @@ def citation_problem(sentences: list[dict[str, Any]], profile: Profile) -> str |
 
 
 def draft_application(
-    runner: AgentRunner, database: Engine, application_id: int, profile: Profile,
+    runner: AgentRunner,
+    database: Engine,
+    application_id: int,
+    profile: Profile,
     data_dir: Path | None = None,
-) -> list[DraftAnswer]:  # fmt: skip
+    lock: RunLock | None = None,
+) -> list[DraftAnswer]:
     """Draft a form_captured application, store its answers and move it to drafted.
 
     Any failure, a failed run or a fact it may not cite, is raised and kept as the
@@ -168,7 +172,26 @@ def draft_application(
     runs after the answers and is stored with them; it never fails Drafting. No session is
     held open while the agents run: move() refuses the application if another session moved
     it meanwhile.
+
+    While Drafting runs on the application, another draft of it raises AlreadyRunning
+    without calling the agent. lock is the caller's lock of Drafting on it, released at
+    the end; without it, this takes one.
     """
+    if lock is None:
+        lock = runner.lock(AGENT, application_id=application_id)
+    elif (lock.agent, lock.on) != (AGENT, locked_subject(application_id=application_id)):
+        raise ValueError(f"the lock is not Drafting's on application {application_id}")
+    with lock:
+        return _draft_application(runner, database, application_id, profile, data_dir)
+
+
+def _draft_application(
+    runner: AgentRunner,
+    database: Engine,
+    application_id: int,
+    profile: Profile,
+    data_dir: Path | None,
+) -> list[DraftAnswer]:
     with Session(database) as session:
         application = session.get_one(Application, application_id)
         if application.state != ApplicationState.FORM_CAPTURED:
@@ -302,13 +325,22 @@ def record_failure(database: Engine, application_id: int, error: str) -> None:
 
 
 def draft_in_background(
-    database: Engine, data_dir: Path, runner: AgentRunner, application_id: int
+    database: Engine,
+    data_dir: Path,
+    runner: AgentRunner,
+    application_id: int,
+    lock: RunLock | None = None,
 ) -> None:
-    """Draft the application; a failure stays on it as its draft_error, for a retry."""
-    try:
-        profile = load_profile(data_dir)
-    except ProfileError as error:  # its message holds no value of the profile
-        record_failure(database, application_id, str(error))
-        return
-    with suppress(Exception):  # recorded by draft_application
-        draft_application(runner, database, application_id, profile, data_dir)
+    """Draft the application; a failure stays on it as its draft_error, for a retry.
+
+    lock, the caller's lock of Drafting on the application, is released at the end,
+    however it ends; without it, an application Drafting runs on already is left to it.
+    """
+    with lock or nullcontext():
+        try:
+            profile = load_profile(data_dir)
+        except ProfileError as error:  # its message holds no value of the profile
+            record_failure(database, application_id, str(error))
+            return
+        with suppress(Exception):  # recorded by draft_application, or AlreadyRunning
+            draft_application(runner, database, application_id, profile, data_dir, lock)
