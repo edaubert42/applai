@@ -13,7 +13,7 @@ the candidate rejects is drafted again alone, with their reason (redraft_answer)
 
 import json
 import re
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ from typing import Any
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from applai.agents import AgentError, AgentRunner, AgentSpec
+from applai.agents import AgentError, AgentRunner, AgentSpec, Claim, claimed_subject
 from applai.drafting_judge import judge_answers
 from applai.models import AgentRun, Application, DraftAnswer, Offer
 from applai.orchestrator import Actor, ApplicationState, move
@@ -156,14 +156,33 @@ def citation_problem(sentences: list[dict[str, Any]], profile: Profile) -> str |
 
 
 def draft_application(
-    runner: AgentRunner, database: Engine, application_id: int, profile: Profile
+    runner: AgentRunner,
+    database: Engine,
+    application_id: int,
+    profile: Profile,
+    claim: Claim | None = None,
 ) -> list[DraftAnswer]:
     """Draft a form_captured application, store its answers and move it to drafted.
 
     Any failure, a failed run or a fact it may not cite, is raised and kept as the
     application's draft_error; nothing is stored. No session is held open while the agent
     runs: move() refuses the application if another session moved it meanwhile.
+
+    While Drafting runs on the application, another draft of it raises AlreadyRunning
+    without calling the agent. claim is the caller's claim of Drafting on it, released at
+    the end; without it, this claims one.
     """
+    if claim is None:
+        claim = runner.claim(AGENT, application_id=application_id)
+    elif (claim.agent, claim.on) != (AGENT, claimed_subject(application_id=application_id)):
+        raise ValueError(f"the claim is not Drafting's on application {application_id}")
+    with claim:
+        return _draft_application(runner, database, application_id, profile)
+
+
+def _draft_application(
+    runner: AgentRunner, database: Engine, application_id: int, profile: Profile
+) -> list[DraftAnswer]:
     with Session(database) as session:
         application = session.get_one(Application, application_id)
         if application.state != ApplicationState.FORM_CAPTURED:
@@ -294,13 +313,22 @@ def record_failure(database: Engine, application_id: int, error: str) -> None:
 
 
 def draft_in_background(
-    database: Engine, data_dir: Path, runner: AgentRunner, application_id: int
+    database: Engine,
+    data_dir: Path,
+    runner: AgentRunner,
+    application_id: int,
+    claim: Claim | None = None,
 ) -> None:
-    """Draft the application; a failure stays on it as its draft_error, for a retry."""
-    try:
-        profile = load_profile(data_dir)
-    except ProfileError as error:  # its message holds no value of the profile
-        record_failure(database, application_id, str(error))
-        return
-    with suppress(Exception):  # recorded by draft_application
-        draft_application(runner, database, application_id, profile)
+    """Draft the application; a failure stays on it as its draft_error, for a retry.
+
+    claim, the caller's claim of Drafting on the application, is released at the end,
+    however it ends; without it, an application Drafting runs on already is left to it.
+    """
+    with claim or nullcontext():
+        try:
+            profile = load_profile(data_dir)
+        except ProfileError as error:  # its message holds no value of the profile
+            record_failure(database, application_id, str(error))
+            return
+        with suppress(Exception):  # recorded by draft_application, or AlreadyRunning
+            draft_application(runner, database, application_id, profile, claim)

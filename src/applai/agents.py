@@ -5,6 +5,10 @@ field it does not know, and the ClaudeCLI backend always passes --tools "" and
 --strict-mcp-config with no --mcp-config. Giving agents tools from ApplAI's own MCP
 server will be a change to this module, never something a spec can ask for.
 
+The same agent never runs twice at once on one offer or application: a run claims it with
+AgentRunner.claim() and the claim is released when the run ends, however it ends. Claims
+live in this process, the only one ApplAI runs.
+
 An agent's input may hold the candidate's data. It reaches the CLI on stdin, not on the
 command line, and an AgentError names the agent and the kind of failure, never the input
 nor what the CLI printed, which may quote it.
@@ -45,6 +49,47 @@ class AgentError(Exception):
         self.agent = agent
         self.kind = kind
         super().__init__(f"agent {agent} failed: {kind}" + (f" ({detail})" if detail else ""))
+
+
+class AlreadyRunning(Exception):
+    """The agent already runs on this offer or application: this run does not start."""
+
+    def __init__(self, agent: str, on: str) -> None:
+        super().__init__(f"agent {agent} is already running on {on}")
+
+
+class Claim:
+    """One agent marked running on one offer or application, until release().
+
+    As a context manager it is released on leaving the block, whatever ends it. Releasing it
+    again does nothing: it never frees a later claim of the same agent on the same subject.
+    """
+
+    def __init__(
+        self, agent: str, on: str, claimed: set[tuple[str, str]], lock: threading.Lock
+    ) -> None:
+        self.agent, self.on = agent, on
+        self._claimed, self._lock = claimed, lock
+        self._released = False
+
+    def release(self) -> None:
+        with self._lock:
+            if not self._released:
+                self._released = True
+                self._claimed.discard((self.agent, self.on))
+
+    def __enter__(self) -> "Claim":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.release()
+
+
+def claimed_subject(*, offer_id: int | None = None, application_id: int | None = None) -> str:
+    """What a claim is on: one offer or one application."""
+    if (offer_id is None) == (application_id is None):
+        raise ValueError("a claim is on an offer_id or an application_id, one of them")
+    return f"offer {offer_id}" if application_id is None else f"application {application_id}"
 
 
 class _Frozen(BaseModel):
@@ -95,6 +140,19 @@ class AgentRunner:
         self.backend = backend
         self.max_parallel_agents = max_parallel_agents
         self._slots = threading.BoundedSemaphore(max_parallel_agents)
+        self._claimed: set[tuple[str, str]] = set()
+        self._claims_lock = threading.Lock()
+
+    def claim(
+        self, agent: str, *, offer_id: int | None = None, application_id: int | None = None
+    ) -> Claim:
+        """Mark the agent running on the offer or the application, or raise AlreadyRunning."""
+        on = claimed_subject(offer_id=offer_id, application_id=application_id)
+        with self._claims_lock:
+            if (agent, on) in self._claimed:
+                raise AlreadyRunning(agent, on)
+            self._claimed.add((agent, on))
+        return Claim(agent, on, self._claimed, self._claims_lock)
 
     def run_agent(
         self,
@@ -262,16 +320,30 @@ def _read(spec: AgentSpec, stdout: str) -> AgentResult:
 
 
 class FakeBackend:
-    """Returns its scripted results in order and records the specs it received."""
+    """Returns its scripted results in order, raising those that are exceptions, and records
+    the specs it received.
 
-    def __init__(self, results: Iterable[AgentResult]) -> None:
+    Given hold, each run sets started, then waits until hold is set to return.
+    """
+
+    def __init__(
+        self, results: Iterable[AgentResult | Exception], hold: threading.Event | None = None
+    ) -> None:
         self._results = deque(results)
         self._lock = threading.Lock()
+        self._hold = hold
+        self.started = threading.Event()
         self.specs: list[AgentSpec] = []
 
     def run(self, spec: AgentSpec) -> AgentResult:
         with self._lock:
             self.specs.append(spec)
-            if not self._results:
-                raise LookupError(f"FakeBackend has no result left for agent {spec.name}")
-            return self._results.popleft()
+            result = self._results.popleft() if self._results else None
+        self.started.set()
+        if self._hold is not None:
+            self._hold.wait()
+        if result is None:
+            raise LookupError(f"FakeBackend has no result left for agent {spec.name}")
+        if isinstance(result, Exception):
+            raise result
+        return result
