@@ -1,14 +1,16 @@
 """The full text and the logo of each offer the first screening kept, read from its page.
 
 describe_offers() reads the page of each offer ApplAI found that is still new: its JobPosting
-JSON-LD when it has one, else its main text. The description always comes from the page; the
-rest only fills what the offer lacks, since screening judged the alert's location and
-contract: from the JSON-LD, the work mode (remote only: schema.org has no hybrid), the years
-required (monthsOfExperience ÷ 12, rounded down) and the salary (baseSalary, else
-estimatedSalary). The offer then moves new → described. A page that fails records its error
-on the offer, which stays new and is read again on the next run. LinkedIn offers are left new: their
-reader is another one, through the candidate's LinkedIn MCP server. So are those of
-EXTENSION_SITES, whose pages the ApplAI extension reads in the candidate's Chrome.
+JSON-LD when it has one, else its main text. The description always comes from the page: its
+main text when that holds the JSON-LD's description and more (a posting often stops before the
+profile and the key facts), else the JSON-LD's. The rest only fills what the offer lacks, since
+screening judged the alert's location and contract: from the JSON-LD, the work mode (remote
+only: schema.org has no hybrid), the years required (monthsOfExperience ÷ 12, rounded down)
+and the salary (baseSalary, else estimatedSalary). The offer then moves new → described. A page
+that fails records its error on the offer, which stays new and is read again on the next run.
+LinkedIn offers are left new: their reader is another one, through the candidate's LinkedIn MCP
+server. So are those of EXTENSION_SITES, whose pages the ApplAI extension reads in the
+candidate's Chrome.
 
 The logo is the posting's, else the page's og:image, else the site's icon, downloaded once per
 company into logos/ in the data directory; none found, the UI shows initials. Every request
@@ -176,7 +178,7 @@ def read_page(html: str) -> Details:
     logo = _at(organization, "logo")
     location_type = posting.get("jobLocationType")
     return Details(
-        _Page.of(str(posting.get("description") or "")).text(),
+        _description(page.text(), _Page.of(str(posting.get("description") or "")).text()),
         company=_string(_at(organization, "name")) or _string(organization),
         location="; ".join(filter(None, map(_place, _list(posting.get("jobLocation"))))) or None,
         contract=", ".join(_strings(posting.get("employmentType"))) or None,
@@ -185,6 +187,16 @@ def read_page(html: str) -> Details:
         years_required=_years(posting.get("experienceRequirements")),
         logos=(*_strings(_at(logo, "url") or logo), *page.og_images, *page.icons),
     )
+
+
+def _description(page: str, posting: str) -> str:
+    """The page's text when it holds the posting's description and more, else the posting's.
+
+    A posting's description often stops before the profile and the key facts the page shows;
+    a page drawn by script has no such text, and the posting is all there is.
+    """
+    squeezed = " ".join(page.split())
+    return page if posting and " ".join(posting.split()) in squeezed else posting
 
 
 def _read(http: httpx2.Client, url: str) -> tuple[str, Details]:
