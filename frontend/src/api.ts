@@ -14,6 +14,10 @@ export const REASONS: readonly Reason[] = [
   "other",
 ];
 
+/** Why the candidate drops an application: an offer's decline reasons, or the offer closed. */
+export type DropReason = Reason | "offer_closed";
+export const DROP_REASONS: readonly DropReason[] = [...REASONS, "offer_closed"];
+
 export type Decision =
   | { decision: "interested" | "later" }
   | { decision: "not_interested"; reasons: Reason[]; note?: string };
@@ -64,6 +68,8 @@ export interface Row {
   form_url: string | null;
   form_url_error: string | null;
   fill_error: string | null;
+  /** Why the candidate dropped it; empty for any other application. */
+  reasons: DropReason[];
 }
 
 export interface BrowserStatus {
@@ -228,7 +234,7 @@ async function requestEmpty(method: string, path: string, body?: unknown): Promi
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`${method} ${path}: ${response.status}`);
+  if (!response.ok) throw new ApiError(method, path, response.status);
 }
 
 export const api = {
@@ -259,8 +265,8 @@ export const api = {
   validateApplication: (id: number) => requestEmpty("POST", `/api/applications/${id}/validate`),
   authorizeSend: (id: number) => requestEmpty("POST", `/api/applications/${id}/authorize-send`),
   markSent: (id: number) => requestEmpty("POST", `/api/applications/${id}/sent`),
-  dropApplication: (id: number, note?: string) =>
-    requestEmpty("POST", `/api/applications/${id}/drop`, note ? { note } : undefined),
+  dropApplication: (id: number, reasons: DropReason[], note?: string) =>
+    requestEmpty("POST", `/api/applications/${id}/drop`, note ? { reasons, note } : { reasons }),
   scanStatus: () => request<ScanStatus>("GET", "/api/scan"),
   services: () => request<Services>("GET", "/api/services"),
   startScan: () => request<unknown>("POST", "/api/scan"),

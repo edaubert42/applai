@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ApiError, GROUPS, api, type Applications, type Row } from "./api";
+import { ApiError, DROP_REASONS, GROUPS, api, type Applications, type DropReason, type Row } from "./api";
 import CorrectScreen from "./CorrectScreen";
+import DeclinePanel from "./DeclinePanel";
 import FinalValidationScreen from "./FinalValidationScreen";
 import { Logo } from "./ReviewCard";
 import { serverMessage } from "./server-message";
@@ -33,6 +34,8 @@ function Board({ onCorrect, onValidate }: { onCorrect: (row: Row) => void; onVal
   const [extensionConnected, setExtensionConnected] = useState(true);
   const [loads, setLoads] = useState(0); // a row found stale asks for the board again
   const reload = useCallback(() => setLoads((count) => count + 1), []);
+  // The application whose drop panel is open: one at a time, as the panel listens to the keys.
+  const [dropping, setDropping] = useState<number | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -70,6 +73,12 @@ function Board({ onCorrect, onValidate }: { onCorrect: (row: Row) => void; onVal
                     onCorrect={onCorrect}
                     onValidate={onValidate}
                     onStale={reload}
+                    dropping={row.id !== null && row.id === dropping}
+                    onDrop={() => setDropping(row.id)}
+                    onDropEnd={(dropped) => {
+                      setDropping(null);
+                      if (dropped) reload();
+                    }}
                   />
                 ))}
               </ul>
@@ -86,12 +95,19 @@ function ApplicationRow({
   onCorrect,
   onValidate,
   onStale,
+  dropping,
+  onDrop,
+  onDropEnd,
 }: {
   row: Row;
   extensionConnected: boolean;
   onCorrect: (row: Row) => void;
   onValidate: (row: Row) => void;
   onStale: () => void;
+  dropping: boolean;
+  onDrop: () => void;
+  /** The panel closes: dropped is true once the application moved, the board loads again. */
+  onDropEnd: (dropped: boolean) => void;
 }) {
   const { t, lookup, formatTime } = useSettings();
   const old = row.origin === "old_workflow";
@@ -105,6 +121,27 @@ function ApplicationRow({
   const [failed, setFailed] = useState<"failed" | "past" | "unreachable" | "error" | null>(null);
   const id = row.id;
   const canPaste = id !== null && row.state === "created" && !form.url;
+  const canDrop = id !== null && row.state !== "sent" && row.state !== "dropped";
+  const [dropBusy, setDropBusy] = useState(false);
+  const [dropFailed, setDropFailed] = useState(false);
+
+  function drop(id: number, reasons: DropReason[], note: string) {
+    if (dropBusy) return; // Enter pressed again while the drop is on its way
+    setDropBusy(true);
+    setDropFailed(false);
+    api.dropApplication(id, reasons, note || undefined).then(
+      () => {
+        setDropBusy(false);
+        onDropEnd(true);
+      },
+      (error: unknown) => {
+        setDropBusy(false);
+        // 409: the application moved on meanwhile; the board shows where it stands.
+        if (error instanceof ApiError && error.status === 409) onDropEnd(true);
+        else setDropFailed(true);
+      },
+    );
+  }
 
   function paste(event: FormEvent, id: number) {
     event.preventDefault();
@@ -136,6 +173,11 @@ function ApplicationRow({
       </div>
       {old && <span className={`${pill} text-muted`}>{t("applications.origin.old_workflow")}</span>}
       {state && <span className={pill}>{state}</span>}
+      {row.reasons.map((reason) => (
+        <span key={reason} className={`${pill} text-muted`}>
+          {lookup(`reason.${reason}`) ?? reason}
+        </span>
+      ))}
       <time dateTime={row.changed_at} className="text-sm text-muted">
         {formatTime(row.changed_at)}
       </time>
@@ -156,6 +198,29 @@ function ApplicationRow({
         <button type="button" onClick={() => onValidate(row)} className={button}>
           {t("validation.open")}
         </button>
+      )}
+      {canDrop && !dropping && (
+        <button type="button" onClick={onDrop} className={button}>
+          {t("validation.drop")}
+        </button>
+      )}
+      {canDrop && dropping && (
+        <div className="basis-full">
+          <DeclinePanel
+            kind="drop"
+            reasons={DROP_REASONS}
+            onCancel={() => {
+              setDropFailed(false);
+              onDropEnd(false);
+            }}
+            onSave={(reasons, note) => drop(id, reasons, note)}
+          />
+        </div>
+      )}
+      {dropFailed && (
+        <p role="alert" className="basis-full text-sm text-minus">
+          {t("applications.drop_failed")}
+        </p>
       )}
       {row.state === "answers_checked" && (row.fill_error || !extensionConnected) && (
         <p role="alert" className="basis-full text-sm text-minus">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { VIEWS, api, type Card, type Decision, type View } from "./api";
+import { REASONS, VIEWS, api, type Card, type Decision, type View } from "./api";
 import DeclinePanel from "./DeclinePanel";
 import { Header, Logo, OfferRow, ReviewCard, useSourceName } from "./ReviewCard";
 import ScanBar from "./ScanBar";
@@ -196,6 +196,7 @@ export default function ReviewScreen({ onScanEnded }: { onScanEnded: () => void 
           <>
             <Header card={card} compact />
             <DeclinePanel
+              reasons={REASONS}
               onCancel={() => setDeclining(null)}
               onSave={(reasons, note) =>
                 void decide(card, { decision: "not_interested", reasons, ...(note ? { note } : {}) })

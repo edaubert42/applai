@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { aRow, applicationsRoutes, fakeApi, reviewRoutes } from "./fake-api";
@@ -220,5 +220,141 @@ describe("the Applications dashboard", () => {
 
     const alert = await screen.findByText(fill(words["applications.fill.error"], { error: words["message.fill_not_loaded"] }));
     expect(alert.getAttribute("role")).toBe("alert");
+  });
+});
+
+describe("dropping an application", () => {
+  const states = ["created", "form_captured", "drafted", "answers_checked", "filled", "reviewed", "form_checked", "validated"];
+  const open = states.map((state, i) => aRow({ id: i + 1, offer_id: i + 1, title: `Poste ${state}`, state }));
+  const sent = aRow({ id: 20, offer_id: 20, title: "Envoyée", state: "sent" });
+  const dropped = aRow({ id: 21, offer_id: 21, title: "Abandonnée", state: "dropped", reasons: ["salary", "offer_closed"] });
+  const old = aRow({ id: null, offer_id: 22, title: "Ancienne", state: "Candidature envoyée", origin: "old_workflow" });
+  const rowOf = (title: string) => within(screen.getByRole("heading", { name: title }).closest("li") as HTMLElement);
+  const boardOf = (groups: Parameters<typeof applicationsRoutes>[0]) => applicationsRoutes(groups)["GET /api/applications"];
+
+  async function openBoard(routes: Record<string, unknown>, language: "fr" | "en" = "fr") {
+    const calls = fakeApi({ ...reviewRoutes(), ...applicationsRoutes(), ...routes });
+    if (language === "en") localStorage.setItem("applai.language", "en");
+    render(<App />);
+    const words = language === "en" ? en : fr;
+    fireEvent.click(screen.getByRole("button", { name: words["nav.applications"] }));
+    await screen.findAllByRole("region");
+    return calls;
+  }
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("offers Drop on every application not sent or dropped, whatever its state, in %s", async (language, words) => {
+    await openBoard(applicationsRoutes({ in_progress: [...open, old], sent: [sent], dropped: [dropped] }), language);
+
+    for (const state of states) {
+      expect(rowOf(`Poste ${state}`).getByRole("button", { name: words["validation.drop"] })).toBeTruthy();
+    }
+    for (const title of ["Envoyée", "Abandonnée", "Ancienne"]) {
+      expect(rowOf(title).queryByRole("button", { name: words["validation.drop"] })).toBeNull();
+    }
+    expect(rowOf("Abandonnée").getByText(words["reason.salary"])).toBeTruthy();
+    expect(rowOf("Abandonnée").getByText(words["reason.offer_closed"])).toBeTruthy();
+  });
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("asks why in the decline panel, with Offer closed, then lists the row under Dropped, in %s", async (language, words) => {
+    const capturing = aRow({ id: 5, offer_id: 5, title: "Agent de quai", state: "form_captured" });
+    let board = boardOf({ in_progress: [capturing] });
+    const calls = await openBoard(
+      {
+        "GET /api/applications": () => board,
+        "POST /api/applications/5/drop": () => {
+          board = boardOf({ dropped: [{ ...capturing, state: "dropped", reasons: ["offer_closed"] }] });
+          return new Response(null, { status: 204 });
+        },
+      },
+      language,
+    );
+    fireEvent.click(screen.getByRole("button", { name: words["validation.drop"] }));
+
+    expect(screen.getByText(words["drop.title"])).toBeTruthy();
+    expect(screen.getByText(words["drop.keys"])).toBeTruthy();
+    const pills = ["company", "mission", "experience", "skills", "salary", "location", "other", "offer_closed"] as const;
+    for (const [i, reason] of pills.entries()) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${i + 1}\\s*${words[`reason.${reason}`]}$`) })).toBeTruthy();
+    }
+    const save = screen.getByRole("button", { name: words["decline.save"] }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.keyDown(document, { key: "8" });
+    fireEvent.change(screen.getByLabelText(words["decline.note"]), { target: { value: "Retirée du site" } });
+    fireEvent.click(save);
+
+    const droppedGroup = within(await screen.findByRole("region", { name: fill(words["applications.group.dropped"], { n: 1 }) }));
+    expect(droppedGroup.getByText(words["reason.offer_closed"])).toBeTruthy();
+    expect(screen.queryByText(words["drop.title"])).toBeNull();
+    expect(calls.filter((call) => call.method === "POST")).toEqual([
+      { method: "POST", path: "/api/applications/5/drop", body: { reasons: ["offer_closed"], note: "Retirée du site" } },
+    ]);
+  });
+
+  it("is cancelled without a call; a failed drop keeps the panel and says so, and a retry drops once", async () => {
+    let fails = true;
+    let board = boardOf({ waiting: [aRow()] });
+    const calls = await openBoard({
+      "GET /api/applications": () => board,
+      "POST /api/applications/1/drop": () => {
+        if (fails) return new Response("boom", { status: 500 });
+        board = boardOf({ dropped: [aRow({ state: "dropped", reasons: ["company"] })] });
+        return new Response(null, { status: 204 });
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: fr["validation.drop"] }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByText(fr["drop.title"])).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: fr["validation.drop"] }));
+    fireEvent.keyDown(document, { key: "1" });
+    fireEvent.keyDown(document, { key: "Enter" });
+    expect((await screen.findByRole("alert")).textContent).toBe(fr["applications.drop_failed"]);
+    expect(screen.getByText(fr["drop.title"])).toBeTruthy();
+    expect(screen.getByText(fr["applications.state.drafted"])).toBeTruthy();
+
+    fails = false;
+    fireEvent.keyDown(document, { key: "Enter" });
+    await waitFor(() => expect(screen.queryByText(fr["drop.title"])).toBeNull());
+    expect(await screen.findByText(fr["applications.state.dropped"])).toBeTruthy();
+    expect(calls.filter((call) => call.method === "POST").map((call) => call.body)).toEqual([
+      { reasons: ["company"] },
+      { reasons: ["company"] },
+    ]);
+  });
+
+  it("loads the board again when the application moved on meanwhile", async () => {
+    let board = boardOf({ waiting: [aRow({ state: "validated" })] });
+    await openBoard({
+      "GET /api/applications": () => board,
+      "POST /api/applications/1/drop": () => {
+        board = boardOf({ sent: [aRow({ state: "sent" })] });
+        return new Response("{}", { status: 409 });
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: fr["validation.drop"] }));
+    fireEvent.keyDown(document, { key: "2" });
+    fireEvent.keyDown(document, { key: "Enter" });
+
+    expect(await screen.findByText(fr["applications.state.sent"])).toBeTruthy();
+    expect(screen.queryByText(fr["drop.title"])).toBeNull();
+    expect(screen.queryByRole("button", { name: fr["validation.drop"] })).toBeNull();
+  });
+
+  it("leaves digits and Enter typed in a URL field to that field while the panel is open", async () => {
+    const calls = await openBoard(applicationsRoutes({ in_progress: [aRow({ id: 7, offer_id: 7, state: "created" })] }));
+    fireEvent.click(screen.getByRole("button", { name: fr["validation.drop"] }));
+    fireEvent.keyDown(document, { key: "8" }); // a reason chosen: Enter would save
+    const url = screen.getByLabelText(fr["applications.form_url.label"]);
+    fireEvent.keyDown(url, { key: "1" });
+    fireEvent.keyDown(url, { key: "Enter" });
+
+    expect(screen.getByRole("button", { name: new RegExp(fr["reason.company"]) }).getAttribute("aria-pressed")).toBe("false");
+    expect(calls.filter((call) => call.method === "POST")).toEqual([]);
   });
 });
