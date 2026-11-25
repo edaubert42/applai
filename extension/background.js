@@ -219,10 +219,10 @@ const GROUP = { title: "ApplAI", color: "green" };
 // grouped is still read, filled or submitted.
 async function groupTab(tab, browser) {
   try {
-    const window = tab.windowId === undefined ? {} : { windowId: tab.windowId };
-    const [group] = await browser.tabGroups.query({ ...window, title: GROUP.title });
+    const where = tab.windowId === undefined ? {} : { windowId: tab.windowId };
+    const [group] = await browser.tabGroups.query({ ...where, title: GROUP.title });
     if (!group) {
-      const created = await browser.tabs.group({ tabIds: [tab.id], createProperties: window });
+      const created = await browser.tabs.group({ tabIds: [tab.id], createProperties: where });
       await browser.tabGroups.update(created, GROUP);
     } else if (tab.groupId !== group.id) {
       await browser.tabs.group({ groupId: group.id, tabIds: [tab.id] });
