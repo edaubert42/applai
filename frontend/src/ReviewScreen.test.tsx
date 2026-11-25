@@ -36,7 +36,8 @@ const manyOffers = (n: number) =>
   Array.from({ length: n }, (_, index) =>
     aCard({ id: index + 1, title: `Offre ${index + 1}`, company: `Société ${index + 1}`, logo: null }),
   );
-const rows = () => screen.queryAllByRole("button", { expanded: false });
+const rows = () =>
+  screen.queryAllByRole("button", { expanded: false }).filter((row) => row.textContent !== fr["review.add.open"]);
 const rowOf = (title: RegExp | string) => screen.getByRole("button", { name: title });
 
 function decisions(calls: { method: string; path: string; body: unknown }[]) {
@@ -605,12 +606,6 @@ describe("the scan bar", () => {
 
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/scan")).toBe(true));
   });
-
-  it("shows the last scan, the new offers and the LinkedIn reads left", async () => {
-    await openScreen();
-    expect(await screen.findByText(fill(fr["scan.new"], { n: 4 }))).toBeTruthy();
-    expect(screen.getByText(fill(fr["scan.linkedin"], { n: 3, max: 20 }))).toBeTruthy();
-  });
 });
 
 describe("the views", () => {
@@ -645,10 +640,23 @@ describe("adding an offer by its URL", () => {
     if (language === "en") localStorage.setItem("applai.language", "en");
     const calls = await openScreen({ ...reviewRoutes({ to_review: [aCard()] }), "POST /api/offers": answer }, false);
     const words = language === "fr" ? fr : en;
+    fireEvent.click(screen.getByRole("button", { name: words["review.add.open"] }));
     fireEvent.change(screen.getByRole("textbox", { name: words["review.add.label"] }), { target: { value: ` ${url} ` } });
     fireEvent.click(screen.getByRole("button", { name: words["review.add.submit"] }));
     return { calls, words };
   }
+
+  it("opens the URL field in place from the Add an offer button, and not before", async () => {
+    await openScreen(reviewRoutes({ to_review: [aCard()] }), false);
+    expect(screen.queryByRole("textbox", { name: fr["review.add.label"] })).toBeNull();
+    const open = screen.getByRole("button", { name: fr["review.add.open"] });
+    expect(open.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(open);
+
+    expect(screen.getByRole("textbox", { name: fr["review.add.label"] })).toBeTruthy();
+    expect(open.getAttribute("aria-expanded")).toBe("true");
+  });
 
   it.each(["fr", "en"] as const)("calls the route and shows the offer as added, in %s", async (language) => {
     const { calls, words } = await add({ id: 9, url, state: "new", added: true }, language);
@@ -658,6 +666,8 @@ describe("adding an offer by its URL", () => {
       { method: "POST", path: "/api/offers", body: { url } },
     ]);
     expect((screen.getByRole("textbox", { name: words["review.add.label"] }) as HTMLInputElement).value).toBe("");
+    // the scan status, which counts the offers added by hand, is asked again
+    await waitFor(() => expect(calls.filter((call) => call.path === "/api/scan")).toHaveLength(2));
   });
 
   it("says when the offer was already known", async () => {

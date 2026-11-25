@@ -25,8 +25,9 @@ const PICTURES: Record<string, string> = {
   notion,
 };
 
-// ApplAI's own services, drawn: a search, a person, an archive box.
+// ApplAI's own services, drawn: a search, a person, an archive box; and a plus for the offers added by hand.
 const DRAWINGS: Record<string, ReactNode> = {
+  manual: <path d="M12 5v14M5 12h14" />,
   scan: (
     <>
       <circle cx="11" cy="11" r="7" />

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VIEWS, api, type Card, type Decision, type View } from "./api";
-import AddOffer from "./AddOffer";
 import DeclinePanel from "./DeclinePanel";
 import { Header, Logo, OfferRow, ReviewCard, useSourceName } from "./ReviewCard";
 import ScanBar from "./ScanBar";
@@ -16,9 +15,9 @@ const REREAD_POLL_MS = 5000;
 /**
  * The To review screen: the scan, the three views, and the offers with their decisions.
  * To review lists its offers as rows and opens one card at a time; Later shows its cards.
- * onOpenSettings opens Réglages, where a failing service is explained.
+ * onScanEnded tells the page that a scan ended, so it asks for the services' state again.
  */
-export default function ReviewScreen({ onOpenSettings }: { onOpenSettings: () => void }) {
+export default function ReviewScreen({ onScanEnded }: { onScanEnded: () => void }) {
   const { t } = useSettings();
   const [view, setView] = useState<View>("to_review");
   const [sort, setSort] = useState<Sort>("score");
@@ -34,6 +33,10 @@ export default function ReviewScreen({ onOpenSettings }: { onOpenSettings: () =>
 
   const [loads, setLoads] = useState(0); // each change loads the cards again
   const reload = useCallback(() => setLoads((count) => count + 1), []);
+  const scanned = useCallback(() => {
+    reload();
+    onScanEnded();
+  }, [reload, onScanEnded]);
 
   useEffect(() => {
     let current = true;
@@ -215,8 +218,7 @@ export default function ReviewScreen({ onOpenSettings }: { onOpenSettings: () =>
 
   return (
     <div className="mx-auto max-w-215 space-y-7">
-      <ScanBar onScanned={reload} onOpenSettings={onOpenSettings} />
-      <AddOffer onAdded={reload} />
+      <ScanBar onScanned={scanned} onAdded={reload} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="tablist" aria-label={t("review.tabs")} className="flex flex-wrap gap-1 rounded-pill bg-surface p-1">
           {VIEWS.map((name) => (

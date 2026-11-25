@@ -13,6 +13,7 @@ const fill = (template: string, values: Record<string, string>) =>
   template.replace(/\{(\w+)\}/g, (_, name: string) => values[name] ?? "");
 
 const scanBar = () => within(screen.getByRole("region", { name: fr["scan.label"] }));
+const header = () => within(screen.getByRole("banner"));
 
 const red = aService({ id: "mailbox", state: "red", hint: "Run applai mail login." });
 const orange = aService({ id: "triage", state: "orange", hint: "Check Claude login, API key, or quota." });
@@ -22,14 +23,17 @@ function openReview(services: Parameters<typeof servicesRoutes>[0]) {
   render(<App />);
 }
 
-describe("the scan bar's dot", () => {
-  it("is red with one red service and one orange, names the red one and leads to Réglages", async () => {
+describe("the header's services chip", () => {
+  it("is red with one red service and one orange, counts and names the red one and leads to Réglages", async () => {
     openReview({ sites: [aService()], agents: [orange], mailbox: [red] });
 
-    const name = fill(fr["scan.services.red"], { names: fr["settings.service.mailbox"] });
-    const link = await scanBar().findByRole("link", { name });
-    expect(link.textContent).not.toContain(fr["settings.service.triage"]);
+    const name = fill(fr["services.red"], { names: fr["settings.service.mailbox"] });
+    const link = await header().findByRole("link", { name });
+    expect(link.textContent).toBe(fill(fr["services.chip.red"], { n: "1" }));
+    expect(link.getAttribute("title")).toBe(name);
     expect(link.querySelector(".bg-minus")).not.toBeNull();
+    expect(scanBar().queryByRole("link")).toBeNull();
+    expect(scanBar().queryByText(/en panne/i)).toBeNull();
 
     fireEvent.click(link);
 
@@ -37,49 +41,140 @@ describe("the scan bar's dot", () => {
     expect(screen.getByRole("button", { name: fr["nav.settings"] }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("names every red service", async () => {
+  it("counts and names every red service", async () => {
     const extension = aService({ id: "extension", state: "red", hint: "Install the extension." });
     openReview({ sites: [extension], mailbox: [red] });
 
     const names = `${fr["settings.service.extension"]}, ${fr["settings.service.mailbox"]}`;
-    expect(await scanBar().findByRole("link", { name: fill(fr["scan.services.red"], { names }) })).toBeTruthy();
+    const link = await header().findByRole("link", { name: fill(fr["services.red"], { names }) });
+    expect(link.textContent).toBe(fill(fr["services.chip.red"], { n: "2" }));
   });
 
-  it("is orange with only an orange service, and leads to Réglages", async () => {
+  it("is orange with only an orange service, counts it in the singular and leads to Réglages", async () => {
     openReview({ sites: [aService()], agents: [orange] });
 
-    const name = fill(fr["scan.services.orange"], { names: fr["settings.service.triage"] });
-    const link = await scanBar().findByRole("link", { name });
+    const name = fill(fr["services.orange"], { names: fr["settings.service.triage"] });
+    const link = await header().findByRole("link", { name });
+    expect(link.textContent).toBe(fill(fr["services.chip.orange.one"], { n: "1" }));
     expect(link.querySelector(".bg-unknown")).not.toBeNull();
   });
 
-  it("is green and not a link when no service is red or orange", async () => {
+  it("counts several orange services in the plural", async () => {
+    openReview({ sites: [aService({ state: "orange" })], agents: [orange] });
+
+    const link = await header().findByRole("link");
+    expect(link.textContent).toBe(fill(fr["services.chip.orange.other"], { n: "2" }));
+  });
+
+  it("is a green dot alone, not a link, when no service is red or orange", async () => {
     openReview({ sites: [aService()], agents: [aService({ id: "triage" })] });
 
-    const dot = await scanBar().findByRole("img", { name: fr["scan.services.green"] });
+    const dot = await header().findByRole("img", { name: fr["services.green"] });
     expect(dot.className).toContain("bg-plus");
-    expect(scanBar().queryByRole("link")).toBeNull();
+    expect(dot.textContent).toBe("");
+    expect(header().queryByRole("link")).toBeNull();
+  });
+
+  it("shows no dot when the services' state is unknown", async () => {
+    fakeApi({ ...reviewRoutes(), "GET /api/services": new Response("boom", { status: 500 }) });
+    render(<App />);
+
+    await scanBar().findByText(/Dernière recherche/);
+    expect(header().queryByRole("img", { name: fr["services.green"] })).toBeNull();
+    expect(header().queryByRole("link")).toBeNull();
   });
 });
 
-describe("the scan bar while a scan reads LinkedIn", () => {
-  it("shows how many of the new LinkedIn offers it went through", async () => {
+describe("the scan bar", () => {
+  it("shows the last and the next scan on the action row, and no LinkedIn reads of the day", async () => {
+    fakeApi({ ...reviewRoutes(), ...servicesRoutes() });
+    render(<App />);
+
+    const last = await scanBar().findByText(/^Dernière recherche /);
+    expect(last.textContent).toMatch(/^Dernière recherche .+ · prochaine .+$/);
+    expect(scanBar().queryByText(/Lectures LinkedIn/)).toBeNull();
+    expect(scanBar().queryByText(/Nouvelles offres/)).toBeNull();
+  });
+
+  it("shows how many of the new LinkedIn offers a running scan went through", async () => {
     const scan = aScan({ running: true, linkedin_progress: { read: 12, total: 130 } });
     fakeApi({ ...reviewRoutes({}, scan), ...servicesRoutes() });
     render(<App />);
 
-    expect(await scanBar().findByText("LinkedIn : 12 / 130")).toBeTruthy();
+    expect(await scanBar().findByText("LinkedIn 12 / 130")).toBeTruthy();
   });
 
   it("shows no LinkedIn progress when no scan reads LinkedIn", async () => {
     fakeApi({ ...reviewRoutes(), ...servicesRoutes() });
     render(<App />);
 
-    await scanBar().findByText(fill(fr["scan.new"], { n: "4" }));
-    expect(scanBar().queryByText(/LinkedIn : \d+ \/ \d+/)).toBeNull();
+    await scanBar().findByText(/^Dernière recherche /);
+    expect(scanBar().queryByText(/LinkedIn \d+ \/ \d+/)).toBeNull();
+  });
+});
+
+describe("the offers of the last 24 hours", () => {
+  it("are counted, by service with its logo, and by hand as Ajoutée", async () => {
+    const scan = aScan({ last_24h: { alert_linkedin: 12, manual: 1 } });
+    fakeApi({ ...reviewRoutes({}, scan), ...servicesRoutes() });
+    render(<App />);
+
+    expect(await scanBar().findByText(fill(fr["scan.last_24h.other"], { n: "13" }))).toBeTruthy();
+    const linkedin = scanBar().getByText("LinkedIn 12").closest("li");
+    expect(linkedin?.querySelector("[data-logo='alert_linkedin']")).not.toBeNull();
+    const byHand = scanBar().getByText(`${fr["scan.manual"]} 1`).closest("li");
+    expect(byHand?.querySelector("[data-logo='manual']")).not.toBeNull();
+    expect(scanBar().queryByText(/Lectures LinkedIn aujourd’hui/)).toBeNull();
   });
 
-  it("shows the active services with small logos and a Stop button while running", async () => {
+  it("show only the sources that have offers", async () => {
+    const scan = aScan({ last_24h: { alert_linkedin: 1, alert_wttj: 0 } });
+    fakeApi({ ...reviewRoutes({}, scan), ...servicesRoutes() });
+    render(<App />);
+
+    expect(await scanBar().findByText(fill(fr["scan.last_24h.one"], { n: "1" }))).toBeTruthy();
+    expect(scanBar().getByText("LinkedIn 1")).toBeTruthy();
+    expect(scanBar().queryByText(/Welcome to the Jungle/)).toBeNull();
+  });
+});
+
+describe("the scan bar while a scan runs", () => {
+  it("outlines the active service thickly, the others used thinly, and an Outlook that has no count", async () => {
+    let running = true;
+    fakeApi({
+      ...reviewRoutes(),
+      "GET /api/scan": () =>
+        aScan(
+          running
+            ? {
+                running: true,
+                active_service: "alert_linkedin",
+                services_used: ["mailbox", "alert_linkedin"],
+                last_24h: { alert_linkedin: 12 },
+              }
+            : { last_24h: { alert_linkedin: 12 } },
+        ),
+      ...servicesRoutes(),
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<App />);
+
+    const linkedin = (await scanBar().findByText("LinkedIn 12")).closest("li");
+    expect(linkedin?.getAttribute("data-use")).toBe("active");
+    expect(linkedin?.className).toContain("animate-pulse");
+    const outlook = scanBar().getByText(fr["settings.service.mailbox"]).closest("li");
+    expect(outlook?.getAttribute("data-use")).toBe("used");
+    expect(outlook?.className).not.toContain("animate-pulse");
+
+    running = false;
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+
+    expect(scanBar().queryByText(fr["settings.service.mailbox"])).toBeNull();
+    const done = scanBar().getByText("LinkedIn 12").closest("li");
+    expect(done?.getAttribute("data-use")).toBeNull();
+  });
+
+  it("shows a Stop button and the logos of the services used", async () => {
     let stopping = false;
     const calls = fakeApi({
       ...reviewRoutes(),
@@ -110,11 +205,11 @@ describe("the scan bar while a scan reads LinkedIn", () => {
     expect(calls.filter((c) => c.method === "POST" && c.path === "/api/scan/stop")).toHaveLength(1);
   });
 
-  it("hides the Stop button and service logos when no scan is running", async () => {
+  it("hides the Stop button and the services used when no scan is running", async () => {
     fakeApi({ ...reviewRoutes(), ...servicesRoutes() });
     render(<App />);
 
-    await scanBar().findByText(fill(fr["scan.new"], { n: "4" }));
+    await scanBar().findByText(/^Dernière recherche /);
     expect(scanBar().queryByRole("button", { name: fr["scan.stop"] })).toBeNull();
     const region = screen.getByRole("region", { name: fr["scan.label"] });
     expect(region.querySelectorAll("[data-logo]")).toHaveLength(0);
@@ -136,20 +231,21 @@ describe("the scan bar while a scan reads LinkedIn", () => {
   });
 });
 
-describe("the scan bar's dot stays fresh", () => {
+describe("the header's chip stays fresh", () => {
   const servicesCalls = (calls: { method: string; path: string }[]) =>
     calls.filter((call) => call.method === "GET" && call.path === "/api/services").length;
 
   /** The services answer green first, then red: a service that failed since the page opened. */
-  async function openGreenThenRed() {
+  async function openGreenThenRed(scan: () => ReturnType<typeof aScan> = () => aScan()) {
     let asked = 0;
     const calls = fakeApi({
       ...reviewRoutes(),
+      "GET /api/scan": scan,
       "GET /api/services": () =>
         servicesRoutes(asked++ === 0 ? { sites: [aService()] } : { mailbox: [red] })["GET /api/services"],
     });
     render(<App />);
-    await scanBar().findByRole("img", { name: fr["scan.services.green"] });
+    await header().findByRole("img", { name: fr["services.green"] });
     return calls;
   }
 
@@ -159,8 +255,8 @@ describe("the scan bar's dot stays fresh", () => {
 
     fireEvent.focus(window);
 
-    const name = fill(fr["scan.services.red"], { names: fr["settings.service.mailbox"] });
-    expect(await scanBar().findByRole("link", { name })).toBeTruthy();
+    const name = fill(fr["services.red"], { names: fr["settings.service.mailbox"] });
+    expect(await header().findByRole("link", { name })).toBeTruthy();
     expect(servicesCalls(calls)).toBe(2);
   });
 
@@ -174,5 +270,19 @@ describe("the scan bar's dot stays fresh", () => {
     expect(servicesCalls(calls)).toBe(2);
     await act(() => vi.advanceTimersByTimeAsync(60_000));
     expect(servicesCalls(calls)).toBe(3);
+  });
+
+  it("fetches the services again when a scan ends", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let running = true;
+    const calls = await openGreenThenRed(() => aScan({ running }));
+    expect(servicesCalls(calls)).toBe(1);
+
+    running = false;
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+
+    const name = fill(fr["services.red"], { names: fr["settings.service.mailbox"] });
+    expect(await header().findByRole("link", { name })).toBeTruthy();
+    expect(servicesCalls(calls)).toBe(2);
   });
 });
