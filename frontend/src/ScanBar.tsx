@@ -110,6 +110,14 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
                   max: status.linkedin_reads_per_day,
                 })}
               </span>
+              {status.running && status.linkedin_progress && (
+                <span className="font-medium">
+                  {t("scan.linkedin_progress", {
+                    n: status.linkedin_progress.read,
+                    total: status.linkedin_progress.total,
+                  })}
+                </span>
+              )}
             </p>
             {last.errors.length > 0 && (
               <ul className="mt-2 list-disc pl-5 text-minus [overflow-wrap:anywhere]">

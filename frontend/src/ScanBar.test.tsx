@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { aService, fakeApi, reviewRoutes, servicesRoutes } from "./fake-api";
+import { aScan, aService, fakeApi, reviewRoutes, servicesRoutes } from "./fake-api";
 import fr from "./locales/fr.json";
 
 afterEach(() => {
@@ -59,6 +59,24 @@ describe("the scan bar's dot", () => {
     const dot = await scanBar().findByRole("img", { name: fr["scan.services.green"] });
     expect(dot.className).toContain("bg-plus");
     expect(scanBar().queryByRole("link")).toBeNull();
+  });
+});
+
+describe("the scan bar while a scan reads LinkedIn", () => {
+  it("shows how many of the new LinkedIn offers it went through", async () => {
+    const scan = aScan({ running: true, linkedin_progress: { read: 12, total: 130 } });
+    fakeApi({ ...reviewRoutes({}, scan), ...servicesRoutes() });
+    render(<App />);
+
+    expect(await scanBar().findByText("LinkedIn : 12 / 130")).toBeTruthy();
+  });
+
+  it("shows no LinkedIn progress when no scan reads LinkedIn", async () => {
+    fakeApi({ ...reviewRoutes(), ...servicesRoutes() });
+    render(<App />);
+
+    await scanBar().findByText(fill(fr["scan.new"], { n: "4" }));
+    expect(scanBar().queryByText(/LinkedIn : \d+ \/ \d+/)).toBeNull();
   });
 });
 

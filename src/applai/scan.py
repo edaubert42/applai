@@ -1,7 +1,7 @@
 """The scan: the watch finding new offers without the candidate asking.
 
 run_scan() reads the job alerts (applai.mail), then screens each new offer and reads its
-page (applai.screening, applai.details), reads one screened LinkedIn offer through the
+page (applai.screening, applai.details), reads the screened LinkedIn offers through the
 candidate's LinkedIn MCP server within its pacing (applai.linkedin), then triages each
 described offer (applai.triage). JobTeaser's pages are left to the ApplAI extension
 (applai.browser).
@@ -15,6 +15,7 @@ errors. Every time comes from its clock: tests move the clock instead of waiting
 
 import math
 import threading
+import time as time_module
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
@@ -27,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner, AlreadyRunning
 from applai.details import PageError, describe_offer, on_linkedin, read_by_extension
-from applai.linkedin import MAX_READS_PER_DAY, describe_linkedin_offers, reads_today
+from applai.linkedin import MAX_READS_PER_DAY, Progress, describe_linkedin_offers, reads_today
 from applai.mail import CLIENT_ID_VARIABLE, MailAuthError, Mailbox, MailError, read_alerts
 from applai.models import LOCAL_USER_ID, Offer, OfferOrigin, OfferState, Scan
 from applai.orchestrator import TransitionError
@@ -51,11 +52,13 @@ def local_now() -> datetime:
 
 @dataclass(frozen=True)
 class Watch:
-    """What a scan reads with: the network, the agents, ApplAI's application id at Microsoft."""
+    """What a scan reads with: the network, the agents, ApplAI's application id at Microsoft,
+    and how it waits between two LinkedIn reads."""
 
     http: httpx2.Client
     runner: AgentRunner
     ms_client_id: str | None
+    sleep: Callable[[float], None] = time_module.sleep
 
 
 @dataclass
@@ -70,8 +73,12 @@ def run_scan(
     watch: Watch,
     user_id: int = LOCAL_USER_ID,
     clock: Clock = local_now,
+    progress: Progress | None = None,
 ) -> Found:
-    """Find the new offers, and take each as far as Triage; return what the scan found."""
+    """Find the new offers, and take each as far as Triage; return what the scan found.
+
+    progress hears how far the LinkedIn reads went, after each offer.
+    """
     found = Found()
     found.new_offers = _read_mail(engine, data_dir, watch, user_id, found.errors)
     try:
@@ -94,7 +101,7 @@ def run_scan(
                 session.rollback()
                 found.errors.append(f"Offer {offer_id} was not screened nor read: {_plain(error)}.")
             session.commit()
-    _read_linkedin(engine, user_id, clock, found.errors)
+    _read_linkedin(engine, user_id, clock, watch.sleep, progress, found.errors)
     for offer_id in _offers(engine, OfferState.DESCRIBED, user_id):
         try:
             triage_offer(watch.runner, engine, offer_id, profile)
@@ -128,13 +135,22 @@ def _read_mail(
     return reading.offers
 
 
-def _read_linkedin(engine: Engine, user_id: int, clock: Clock, errors: list[str]) -> None:
-    """Read a screened LinkedIn offer, if the reader's pacing allows; it reads one per run."""
+def _read_linkedin(
+    engine: Engine,
+    user_id: int,
+    clock: Clock,
+    sleep: Callable[[float], None],
+    progress: Progress | None,
+    errors: list[str],
+) -> None:
+    """Read the screened LinkedIn offers, as far as the reader's pacing allows."""
     try:
         with Session(engine) as session:
-            describing = describe_linkedin_offers(session, _utc(clock()), user_id)
+            describing = describe_linkedin_offers(
+                session, lambda: _utc(clock()), sleep, user_id, progress
+            )
     except Exception as error:
-        errors.append(f"LinkedIn: no offer was read: {_plain(error)}.")
+        errors.append(f"LinkedIn: the reads stopped: {_plain(error)}.")  # the read ones stay
         return
     errors.extend(f"LinkedIn: {error}." for error in describing.errors)
 
@@ -167,6 +183,11 @@ class LastScan(BaseModel):
     errors: list[str]
 
 
+class LinkedInReadProgress(BaseModel):
+    read: int  # the LinkedIn offers the running scan went through, read or failed
+    total: int  # the new LinkedIn offers it had to read
+
+
 class ScanStatus(BaseModel):
     running: bool
     last_scan: LastScan | None
@@ -174,15 +195,19 @@ class ScanStatus(BaseModel):
     manual_scan_in_s: int | None  # seconds before a scan by hand is allowed; none: now
     linkedin_reads_today: int
     linkedin_reads_per_day: int
+    linkedin_progress: LinkedInReadProgress | None  # none: no scan is reading LinkedIn
 
 
 class Scanner:
-    """Runs scan, one at a time, at the slots of scan_times and by hand; records each in scans."""
+    """Runs scan, one at a time, at the slots of scan_times and by hand; records each in scans.
+
+    scan is given where to report how far its LinkedIn reads went, for status().
+    """
 
     def __init__(
         self,
         engine: Engine,
-        scan: Callable[[], Found],
+        scan: Callable[[Progress], Found],
         clock: Clock = local_now,
         scan_times: Sequence[str] = SCAN_TIMES,
         user_id: int = LOCAL_USER_ID,
@@ -193,6 +218,7 @@ class Scanner:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._schedule: threading.Thread | None = None
+        self._linkedin: LinkedInReadProgress | None = None  # replaced whole: read by other threads
 
     def start(self, by_hand: bool = True) -> int:
         """Start a scan in the background and return its id, or raise ScanRefused."""
@@ -262,6 +288,7 @@ class Scanner:
                 manual_scan_in_s=_cooldown_left(last, _utc(self._clock())),
                 linkedin_reads_today=reads_today(session, _utc(self._clock()), self._user_id),
                 linkedin_reads_per_day=MAX_READS_PER_DAY,
+                linkedin_progress=self._linkedin,
             )  # fmt: skip
 
     def _keep_schedule(self) -> None:
@@ -294,7 +321,7 @@ class Scanner:
     def _run(self, scan_id: int) -> None:
         try:
             try:
-                found = self._scan()
+                found = self._scan(self._report_linkedin)
             except Exception as error:
                 found = Found(errors=[f"The scan stopped: {_plain(error)}."])
             with Session(self._engine) as session:
@@ -303,7 +330,11 @@ class Scanner:
                 scan.new_offers, scan.errors = found.new_offers, found.errors
                 session.commit()
         finally:
+            self._linkedin = None
             self._running.release()
+
+    def _report_linkedin(self, read: int, total: int) -> None:
+        self._linkedin = LinkedInReadProgress(read=read, total=total)
 
 
 def _cooldown_left(last: Scan | None, now: datetime) -> int | None:

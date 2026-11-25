@@ -39,6 +39,7 @@
   "scan.new": "New offers: {n}",
   "scan.next": "Next scan: {time}",
   "scan.linkedin": "LinkedIn reads today: {n} of {max}",
+  "scan.linkedin_progress": "LinkedIn: {n} / {total}",
   "scan.running": "Scan running…",
   "scan.button": "Find offers",
   "scan.wait": "Find offers · in {n} min",

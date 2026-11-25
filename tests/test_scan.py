@@ -3,9 +3,10 @@
 import json
 import shlex
 import shutil
+import sqlite3
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -50,13 +51,20 @@ CARD = {
 
 
 class Clock:
-    """The time the app sees, moved by the test."""
+    """The time the app sees, moved by the test, and by the scan's waits instead of sleeping."""
 
     def __init__(self, now: datetime) -> None:
         self.now = now
+        self.slept: list[float] = []
+        self.on_sleep: Callable[[], None] = lambda: None  # runs in the scan's thread
 
     def __call__(self) -> datetime:
         return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.on_sleep()
+        self.slept.append(seconds)
+        self.now += timedelta(seconds=seconds)
 
 
 class Network:
@@ -126,6 +134,31 @@ def _serve_linkedin(
     return calls_file
 
 
+def _calls(calls_file: Path) -> list[str]:
+    """The job ids the fictional LinkedIn server was asked for, in order."""
+    if not calls_file.exists():
+        return []
+    return [json.loads(line)["arguments"]["job_id"] for line in calls_file.read_text().splitlines()]
+
+
+def _reads(data_dir: Path) -> list[datetime]:
+    engine = open_database(data_dir)
+    with Session(engine) as session:
+        reads = list(session.scalars(select(LinkedInRead.read_at).order_by(LinkedInRead.id)))
+    engine.dispose()
+    return reads
+
+
+def _write_now(data_dir: Path) -> None:
+    """Take the database's write lock at once: fails while another connection holds it."""
+    connection = sqlite3.connect(data_dir / "applai.db", timeout=0)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.rollback()
+    finally:
+        connection.close()
+
+
 def _scans(data_dir: Path) -> list[Scan]:
     engine = open_database(data_dir)
     with Session(engine) as session:
@@ -156,15 +189,23 @@ def clock() -> Clock:
 
 
 @pytest.fixture
-def backend() -> FakeBackend:
+def cards() -> int:
+    """How many Triage cards the agent backend has: a test parametrizes it for more."""
+    return 1
+
+
+@pytest.fixture
+def backend(cards: int) -> FakeBackend:
     usage = Usage(model=TRIAGE_MODEL, input_tokens=900, output_tokens=300)
-    return FakeBackend([AgentResult(output=CARD, usage=usage)])
+    return FakeBackend([AgentResult(output=CARD, usage=usage)] * cards)
 
 
 @pytest.fixture
 def app(data_dir: Path, network: Network, clock: Clock, backend: FakeBackend) -> Iterator[FastAPI]:
     """The app, not started: a test seeds the database first, then starts it."""
-    watch = Watch(http=network.client, runner=AgentRunner(backend), ms_client_id=None)
+    watch = Watch(
+        http=network.client, runner=AgentRunner(backend), ms_client_id=None, sleep=clock.sleep
+    )
     yield create_app(data_dir, frontend_dir=data_dir / "no-frontend", watch=watch, clock=clock)
 
 
@@ -350,7 +391,7 @@ def test_the_status_gives_the_linkedin_reads_of_the_day_and_their_limit(app: Fas
         _scanner(client).wait()
         status = client.get("/api/scan").json()
 
-    assert (status["linkedin_reads_today"], status["linkedin_reads_per_day"]) == (0, 30)
+    assert (status["linkedin_reads_today"], status["linkedin_reads_per_day"]) == (0, 50)
 
 
 def test_a_scan_reads_a_linkedin_offer_through_the_server_and_triage_takes_it(
@@ -376,6 +417,86 @@ def test_a_scan_reads_a_linkedin_offer_through_the_server_and_triage_takes_it(
     assert status["linkedin_reads_today"] == 1
 
 
+LINKEDIN_JOB = {"sections": {"job_posting": "Pivoine Analytics recrute. Python et SQL, à Paris."}}
+
+
+@pytest.mark.parametrize("cards", [3])
+def test_a_scan_reads_every_new_linkedin_offer_10_seconds_apart_then_triages_them(
+    data_dir: Path, app: FastAPI, clock: Clock, monkeypatch: pytest.MonkeyPatch
+):
+    job_ids = ("4000000001", "4000000002", "4000000003")
+    jobs: dict[str, object] = dict.fromkeys(job_ids, LINKEDIN_JOB)
+    calls = _serve_linkedin(data_dir, monkeypatch, jobs)
+    ids = _seed(data_dir, *(_linkedin_offer(job_id) for job_id in jobs))
+    progress: list[tuple[int, int]] = []
+
+    def meanwhile() -> None:  # while the scan waits, the rest of the app may write
+        _write_now(data_dir)
+        status = cast(Scanner, app.state.scanner).status()
+        assert status.linkedin_progress is not None
+        progress.append((status.linkedin_progress.read, status.linkedin_progress.total))
+
+    clock.on_sleep = meanwhile
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _scanner(client).wait()
+        status = client.get("/api/scan").json()
+
+    assert _calls(calls) == list(jobs)  # oldest first
+    assert _reads(data_dir) == [_utc(NOON) + timedelta(seconds=10 * i) for i in range(3)]
+    assert clock.slept == [10.0, 10.0]
+    assert progress == [(1, 3), (2, 3)]
+    assert _states(data_dir) == dict.fromkeys(ids, "triaged")
+    assert status["linkedin_progress"] is None  # the scan has ended
+    assert status["last_scan"]["errors"] == [
+        "Outlook is not set up: set APPLAI_MS_CLIENT_ID, then run applai mail login."
+    ]
+
+
+@pytest.mark.parametrize("cards", [2])
+def test_with_50_reads_made_today_no_call_is_made_and_the_next_days_scan_reads_the_rest(
+    data_dir: Path, app: FastAPI, clock: Clock, monkeypatch: pytest.MonkeyPatch
+):
+    jobs: dict[str, object] = dict.fromkeys(("4000000001", "4000000002"), LINKEDIN_JOB)
+    calls = _serve_linkedin(data_dir, monkeypatch, jobs)
+    first, second = _seed(data_dir, *(_linkedin_offer(job_id) for job_id in jobs))
+    _seed(data_dir, *(
+        LinkedInRead(user_id=1, offer_id=first, read_at=_utc(NOON) - timedelta(minutes=i))
+        for i in range(1, 51)
+    ))  # fmt: skip
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _scanner(client).wait()
+        assert _calls(calls) == []
+        assert _states(data_dir) == {first: "new", second: "new"}
+        clock.now = datetime(2026, 11, 21, 8, 30, tzinfo=PARIS)
+        assert _scanner(client).tick() is not None
+        _scanner(client).wait()
+
+    assert _calls(calls) == list(jobs)
+    assert _states(data_dir) == {first: "triaged", second: "triaged"}
+
+
+def test_after_3_failed_linkedin_calls_in_a_row_the_scan_stops_reading_linkedin_and_says_why(
+    data_dir: Path, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+):
+    calls = _serve_linkedin(data_dir, monkeypatch, {})  # the server knows no job: each call fails
+    ids = _seed(data_dir, *(_linkedin_offer(f"400000000{i}") for i in range(1, 5)))
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _scanner(client).wait()
+        errors = client.get("/api/scan").json()["last_scan"]["errors"]
+
+    assert _calls(calls) == ["4000000001", "4000000002", "4000000003"]
+    failed = "the LinkedIn MCP server could not read the offer"
+    assert errors[1:] == [
+        *(f"LinkedIn: offer {offer_id}: {failed}." for offer_id in ids[:3]),
+        "LinkedIn: 3 calls failed in a row, so the scan stopped reading LinkedIn:"
+        " LinkedIn may be limiting the account.",
+    ]
+    assert _states(data_dir) == dict.fromkeys(ids, "new")
+
+
 def test_without_the_linkedin_variable_the_offers_stay_new_with_one_error_naming_it(
     data_dir: Path, app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ):
@@ -389,6 +510,7 @@ def test_without_the_linkedin_variable_the_offers_stay_new_with_one_error_naming
     assert _states(data_dir) == {first: "new", second: "new"}
     assert len(errors) == 2  # Outlook is not set up, and the variable
     assert COMMAND_VARIABLE in errors[1]
+    assert _reads(data_dir) == []  # no call is made
 
 
 def test_a_failed_linkedin_read_is_an_error_of_the_scan_and_the_other_offers_go_on(
