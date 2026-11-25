@@ -1,7 +1,7 @@
 import json
 import shlex
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -18,7 +18,8 @@ from applai.linkedin import (
     call_tool,
     describe_linkedin_offers,
 )
-from applai.models import LinkedInRead, Offer, StateChange
+from applai.models import LinkedInRead, Offer, OfferState, StateChange
+from applai.orchestrator import Actor, move
 
 SERVER = Path(__file__).parent / "fixtures" / "linkedin_mcp_server.py"
 NOON = datetime(2026, 11, 20, 12, 0)
@@ -87,11 +88,13 @@ class Clock:
     def __init__(self, now: datetime = NOON) -> None:
         self.now = now
         self.slept: list[float] = []
+        self.on_sleep: Callable[[], None] = lambda: None
 
     def __call__(self) -> datetime:
         return self.now
 
     def sleep(self, seconds: float) -> None:
+        self.on_sleep()
         self.slept.append(seconds)
         self.now += timedelta(seconds=seconds)
 
@@ -213,6 +216,26 @@ def test_a_run_waits_out_the_interval_since_the_last_read_then_reads_each_offer_
     assert clock.slept == [6.0, 10.0]
     assert _read_times(engine)[1:] == [NOON + timedelta(seconds=6), NOON + timedelta(seconds=16)]
     assert (_get(engine, first).state, _get(engine, second).state) == ("described", "described")
+
+
+def test_an_offer_that_left_new_while_the_run_waited_is_not_read(
+    engine: Engine, server: FictionalServer
+):
+    server.serve({"4000000001": _job(POSTING), "4000000002": _job(POSTING)})
+    first, second = _offer(engine, "4000000001"), _offer(engine, "4000000002")
+    clock = Clock()
+
+    def screen_out_second() -> None:  # the rest of ApplAI writes while the run waits
+        with Session(engine) as session:
+            move(session, session.get_one(Offer, second), OfferState.SCREENED_OUT, Actor.WATCH)
+            session.commit()
+
+    clock.on_sleep = screen_out_second
+
+    assert _run(engine, clock) == []
+
+    assert (_get(engine, first).state, _get(engine, second).state) == ("described", "screened_out")
+    assert len(server.calls()) == 1
 
 
 def test_only_failed_calls_in_a_row_stop_the_reads(engine: Engine, server: FictionalServer):

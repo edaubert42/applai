@@ -43,10 +43,10 @@ STOPPED = (
     f"{FAILURES_IN_A_ROW} calls failed in a row, so the scan stopped reading LinkedIn:"
     " LinkedIn may be limiting the account"
 )
-
-type Progress = Callable[[int, int], None]  # offers a run went through, and offers it has
 TIMEOUT = 120.0  # seconds, the server's start included: it may open a browser
 _JOB_ID = re.compile(r"/jobs/view/(?:[^/]*-)?(\d+)/?$")
+
+type Progress = Callable[[int, int], None]  # offers a run went through, and offers it has
 
 
 class LinkedInError(Exception):
@@ -114,6 +114,8 @@ def describe_linkedin_offers(
         session.commit()
         return describing
     failures = 0
+    if progress and offers:
+        progress(0, len(offers))  # the first call may take a while: the server opens a browser
     for done, offer in enumerate(offers, start=1):
         match = _JOB_ID.search(urlsplit(offer.url).path)
         if match is None:
@@ -122,8 +124,9 @@ def describe_linkedin_offers(
             now = _wait_turn(session, user_id, clock, sleep)
             if now is None:
                 break  # the daily limit: the offers left wait for the next day
-            read = _describe(session, offer, command, match.group(1), now, describing)
-            failures = 0 if read else failures + 1
+            if offer.state == OfferState.NEW:  # reloaded: another part of ApplAI may have moved it
+                read = _describe(session, offer, command, match.group(1), now, describing)
+                failures = 0 if read else failures + 1
         session.commit()
         if progress:
             progress(done, len(offers))

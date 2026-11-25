@@ -150,7 +150,7 @@ def _read_linkedin(
                 session, lambda: _utc(clock()), sleep, user_id, progress
             )
     except Exception as error:
-        errors.append(f"LinkedIn: no offer was read: {_plain(error)}.")
+        errors.append(f"LinkedIn: the reads stopped: {_plain(error)}.")  # the read ones stay
         return
     errors.extend(f"LinkedIn: {error}." for error in describing.errors)
 
