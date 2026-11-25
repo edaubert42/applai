@@ -1,7 +1,7 @@
 // The ApplAI extension's service worker: it reads offer pages and forms, and fills waiting forms
 // with this Chrome's session, blocking every submission in code (ADR 0003). Setup: docs/extension.md.
 import { fillForm } from "./fill.js";
-import { readForm, readText } from "./forms.js";
+import { readForm, readHtml, readText } from "./forms.js";
 import { hideOverlay, showOverlay } from "./overlay.js";
 import { isConfirmed, submitForm } from "./send.js";
 
@@ -11,9 +11,10 @@ const LOADED_WITHIN_MS = 30_000; // a form's tab, then it is reported as not loa
 const TRIES = 3; // a page may draw its form after it loads: read it again 2 s later
 
 // Ask ApplAI for the pages to read, fetch each with the browser's cookies, send back its HTML.
-// Only JobTeaser's and Google's, as the manifest's host permissions. A page that fails is reported: ApplAI
+// Only JobTeaser's and Google's, as the manifest's host permissions. Google draws its jobs with
+// JavaScript: its page is read in an inactive tab instead. A page that fails is reported: ApplAI
 // asks for it again only after its next scan, never every minute.
-export async function readPages(fetch = globalThis.fetch) {
+export async function readPages(fetch = globalThis.fetch, browser = globalThis.chrome, wait = sleep) {
   let pages;
   try {
     const asked = await fetch(`${APPLAI}/api/browser/pages`, {});
@@ -26,10 +27,14 @@ export async function readPages(fetch = globalThis.fetch) {
     if (!onAllowedHost(url)) continue;
     let path = "", body;
     try {
-      const page = await fetch(url, { credentials: "include" });
-      // A session that expired answers 200 with a sign-in page: that is a failure, not the offer.
-      if (page.ok && !leftTheOffer(page, url)) body = { html: await page.text() };
-      else [path, body] = ["/failure", { status: page.status }];
+      if (onGoogle(url)) {
+        body = { html: await inTab(url, browser, wait, (tab) => htmlOf(tab, browser, wait)) };
+      } else {
+        const page = await fetch(url, { credentials: "include" });
+        // A session that expired answers 200 with a sign-in page: that is a failure, not the offer.
+        if (page.ok && !leftTheOffer(page, url)) body = { html: await page.text() };
+        else [path, body] = ["/failure", { status: page.status }];
+      }
     } catch {
       [path, body] = ["/failure", {}]; // not fetched
     }
@@ -77,7 +82,8 @@ export async function readForms(fetch = globalThis.fetch, browser = globalThis.c
   }
 }
 
-async function readIn(url, browser, wait) {
+// Open url in an inactive ApplAI tab, run work there once it has loaded, then close the tab.
+async function inTab(url, browser, wait, work) {
   if (!onHosts(url, browser.runtime.getManifest().host_permissions)) throw new Error("not_allowed");
   const tab = await browser.tabs.create({ url, active: false });
   try {
@@ -86,21 +92,32 @@ async function readIn(url, browser, wait) {
       if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
       await wait(500);
     }
-    return await framed(tab, browser, async () => {
-      let fields = [];
-      for (let tries = 0; tries < TRIES && !fields.length; tries++) {
-        if (tries) await wait(2000);
-        const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readForm });
-        fields = read?.result ?? [];
-      }
-      if (fields.length) return { fields };
-      // No control it knows: ApplAI's agent reads the fields in the page's text.
-      const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readText });
-      return { fields, text: read?.result ?? "" };
-    });
+    return await framed(tab, browser, () => work(tab));
   } finally {
     await browser.tabs.remove(tab.id).catch(() => {}); // the candidate closed it already
   }
+}
+
+// Google's script draws the jobs after the page loads.
+async function htmlOf(tab, browser, wait) {
+  await wait(2000);
+  const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readHtml });
+  return read?.result ?? "";
+}
+
+async function readIn(url, browser, wait) {
+  return inTab(url, browser, wait, async (tab) => {
+    let fields = [];
+    for (let tries = 0; tries < TRIES && !fields.length; tries++) {
+      if (tries) await wait(2000);
+      const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readForm });
+      fields = read?.result ?? [];
+    }
+    if (fields.length) return { fields };
+    // No control it knows: ApplAI's agent reads the fields in the page's text.
+    const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readText });
+    return { fields, text: read?.result ?? "" };
+  });
 }
 
 // Ask ApplAI for forms to fill; fetch attachments, fill in an inactive tab (fill.js), capture a
@@ -325,6 +342,7 @@ function onHosts(url, patterns) {
 }
 
 const HOSTS = [".jobteaser.com", ".google.com", ".google.fr"];
+const onGoogle = (url) => onHosts(url, ["https://*.google.com/*", "https://*.google.fr/*"]);
 
 function onAllowedHost(url) {
   try {

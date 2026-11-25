@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import { APPLAI, fillForms, readForms, readPages, sendForms } from "./background.js";
 import { fillForm } from "./fill.js";
-import { readForm, readText } from "./forms.js";
+import { readForm, readHtml, readText } from "./forms.js";
 import manifest from "./manifest.json" with { type: "json" };
 import { hideOverlay, showOverlay } from "./overlay.js";
 import { isConfirmed, submitForm } from "./send.js";
@@ -66,22 +66,48 @@ test("a page redirected outside the offer's host or path is a failure, never its
   assert.equal(elsewhere[2][0], `${APPLAI}/api/browser/pages/7/failure`);
 });
 
+const GOOGLE = "https://www.google.fr/search?q=data+engineer&ibp=htl%3Bjobs";
+const DRAWN = "<html>Postuler sur Lever</html>"; // the jobs Google's script draws, a fetch never sees
+
+async function readGoogle(options) {
+  const calls = [];
+  const chrome = chromeWith(calls, options);
+  chrome.scripting.executeScript = async ({ target, func }) =>
+    func === readHtml ? calls.push(["run", target]) && [{ result: DRAWN }] : [];
+  await readPages(
+    async (url, init) => {
+      calls.push([url, init]);
+      return url === `${APPLAI}/api/browser/pages` ? Response.json([{ offer_id: 7, url: GOOGLE }]) : new Response(null, { status: 204 });
+    },
+    chrome,
+    async () => {}, // no real wait
+  );
+  return plain(calls);
+}
+
+test("a Google page is read in an inactive tab, where its jobs are drawn, never fetched", async () => {
+  assert.deepEqual(await readGoogle(), [
+    [`${APPLAI}/api/browser/pages`, {}],
+    ["open", { url: GOOGLE, active: false }],
+    ["run", { tabId: 3 }],
+    ["close", 3],
+    [`${APPLAI}/api/browser/pages/7`, { ...SENT, body: JSON.stringify({ html: DRAWN }) }],
+  ]);
+});
+
+test("a Google tab that does not load is reported as a page that was not fetched", async () => {
+  assert.deepEqual((await readGoogle({ status: "loading" })).slice(-2), [
+    ["close", 3],
+    [`${APPLAI}/api/browser/pages/7/failure`, { ...SENT, body: JSON.stringify({}) }],
+  ]);
+});
+
 test("a page answering 200 without a redirect, or redirected within the offer's path, posts its HTML", async () => {
   const html = JSON.stringify({ html: "<html>Connexion</html>" });
   for (const calls of [await readRedirected(OFFER, false), await readRedirected(`${OFFER}/`)]) {
     assert.equal(calls[2][0], `${APPLAI}/api/browser/pages/7`);
     assert.equal(calls[2][1].body, html);
   }
-});
-
-test("it fetches Google offer pages with the browser's session too", async () => {
-  const google = "https://www.google.fr/search?q=Data+engineer&udm=8&htidocid=1";
-  const headers = { "Content-Type": "application/json" };
-  assert.deepEqual(await readWith([{ offer_id: 9, url: google }]), [
-    [`${APPLAI}/api/browser/pages`, {}],
-    [google, { credentials: "include" }],
-    [`${APPLAI}/api/browser/pages/9`, { method: "POST", headers, body: JSON.stringify({ html: `<html>${google}</html>` }) }],
-  ]);
 });
 
 test("it fetches no page outside JobTeaser and Google, whatever ApplAI asks", async () => {

@@ -91,3 +91,9 @@ export function readText(root = document) {
   const text = parts.join(" ").slice(0, MAX_TEXT);
   return /[\ud800-\udbff]$/.test(text) ? text.slice(0, -1) : text; // no half of a character
 }
+
+// A page's HTML as its scripts drew it: Google draws its jobs with JavaScript, so a fetch of its
+// page never shows them (background.js reads Google's pages in a tab with this).
+export function readHtml(root = document) {
+  return root.documentElement.outerHTML;
+}

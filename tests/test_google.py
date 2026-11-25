@@ -50,7 +50,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     def _run(
         links: list[tuple[str, str]], responses: dict[str, tuple[int, str]],
         *, company: str = "Givre Énergie", view: str | None = None, scanned: bool = True,
-        li_jobs: dict[str, Any] | None = None, li_reads: int = 0, sub: str = "",
+        li_jobs: dict[str, Any] | None = None, li_reads: int = 0, sub: str = "", html: str = "",
     ) -> tuple[Offer, list[str], list[dict[str, Any]], list[dict[str, Any]], Path]:  # fmt: skip
         root = (tmp_path / sub) if sub else tmp_path
         root.mkdir(exist_ok=True)
@@ -89,7 +89,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
             if not scanned:
                 app.state.scanner.wait()
             listed = c.get("/api/browser/pages", headers=EXT).json()
-            path, body = f"/api/browser/pages/{oid}", {"html": _html(links, company)}
+            path, body = f"/api/browser/pages/{oid}", {"html": html or _html(links, company)}
             assert c.post(path, json=body, headers=EXT).status_code == 204
             cards: list[Any] = c.get("/api/review", params={"view": view}).json() if view else []
             with Session(app.state.engine) as s:
@@ -109,6 +109,29 @@ def test_ats_before_trusted_board_and_untrusted_never_requested(run: Any):
     assert bad not in asked and ok not in asked and ats in asked
     assert (offer.state, offer.description) == ("triaged", "Texte Lever.")
     assert [(c["id"], c["full_text_read"]) for c in review] == [(offer.id, True)]
+
+
+def _drawn(title: str, company: str, links: list[tuple[str, str]]) -> str:
+    """One offer as Google's script keeps it: a <template>, its links titled "Postuler sur"."""
+    a = "".join(f'<a href="{u}" title="Postuler sur {b}"><span>{b}</span></a>' for b, u in links)
+    return (
+        f"<template><div aria-label=\"Détails de l'offre d'emploi pour {title}\">"
+        f'<div><b>G</b><div>{company}</div><div aria-label="Ajouter {title}">Enregistrer</div>'
+        "</div>"
+        f"<div><div>{title}</div><div><b>{company}</b> · <b>Paris</b> · via Lever</div></div>"
+        f"<div><h2>Plus d'infos sur cette offre d'emploi sur</h2><div>{a}</div></div>"
+        "</div></template>"
+    )
+
+
+def test_an_offer_drawn_in_googles_templates_is_read_from_its_links(run: Any):
+    ats, other = "https://jobs.lever.co/givre/7", "https://jobs.ashbyhq.com/autre/1"
+    page = _drawn("Chef", "Autre SA", [("Ashby", other)]) + _drawn(
+        "Data engineer", "Givre Énergie", [("Indeed", "https://fr.indeed.com/1"), ("Lever", ats)]
+    )
+    offer, asked, _, _, _ = run([], {ats: (200, "<main>Texte Lever.</main>")}, html=page)
+    assert ats in asked and other not in asked
+    assert (offer.state, offer.description) == ("triaged", "Texte Lever.")
 
 
 @pytest.mark.parametrize(("url", "ok"), [
