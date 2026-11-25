@@ -47,6 +47,7 @@
   "scan.stopping": "Arrêt…",
   "scan.active_services": "Services utilisés",
   "card.score": "Score {n}",
+  "card.collapse": "Réduire l’offre",
   "card.seen": "Vue dans {source}",
   "card.original": "Voir l’offre d’origine",
   "card.fullTextNotRead": "texte complet non lu",
