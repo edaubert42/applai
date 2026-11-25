@@ -82,7 +82,7 @@ export interface OfferAdded {
   added: boolean;
 }
 
-export type Applications =Record<Group, Row[]>;
+export type Applications = Record<Group, Row[]>;
 
 export type AnswerStatus = "pending" | "accepted" | "edited" | "rejected";
 
