@@ -2,6 +2,7 @@
 // with this Chrome's session, blocking every submission in code (ADR 0003). Setup: docs/extension.md.
 import { fillForm } from "./fill.js";
 import { readForm, readText } from "./forms.js";
+import { hideOverlay, showOverlay } from "./overlay.js";
 import { isConfirmed, submitForm } from "./send.js";
 
 export const APPLAI = "http://127.0.0.1:8000"; // applai serve's address
@@ -80,20 +81,23 @@ async function readIn(url, browser, wait) {
   if (!onHosts(url, browser.runtime.getManifest().host_permissions)) throw new Error("not_allowed");
   const tab = await browser.tabs.create({ url, active: false });
   try {
+    await groupTab(tab, browser);
     for (let waited = 0; (await browser.tabs.get(tab.id)).status !== "complete"; waited += 500) {
       if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
       await wait(500);
     }
-    let fields = [];
-    for (let tries = 0; tries < TRIES && !fields.length; tries++) {
-      if (tries) await wait(2000);
-      const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readForm });
-      fields = read?.result ?? [];
-    }
-    if (fields.length) return { fields };
-    // No control it knows: ApplAI's agent reads the fields in the page's text.
-    const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readText });
-    return { fields, text: read?.result ?? "" };
+    return await framed(tab, browser, async () => {
+      let fields = [];
+      for (let tries = 0; tries < TRIES && !fields.length; tries++) {
+        if (tries) await wait(2000);
+        const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readForm });
+        fields = read?.result ?? [];
+      }
+      if (fields.length) return { fields };
+      // No control it knows: ApplAI's agent reads the fields in the page's text.
+      const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readText });
+      return { fields, text: read?.result ?? "" };
+    });
   } finally {
     await browser.tabs.remove(tab.id).catch(() => {}); // the candidate closed it already
   }
@@ -129,16 +133,21 @@ async function fillIn(applicationId, url, actions, fetch, browser, wait) {
   const tab = await browser.tabs.create({ url, active: false });
   let filled = false;
   try {
+    await groupTab(tab, browser);
     for (let waited = 0; (await browser.tabs.get(tab.id)).status !== "complete"; waited += 500) {
       if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
       await wait(500);
     }
-    let fields = [];
-    for (let tries = 0; tries < TRIES && !fields.length; tries++) {
-      if (tries) await wait(2000);
-      const [done] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: fillForm, args: [actions, files] });
-      fields = done?.result ?? [];
-    }
+    // The frame is gone before the screenshot: it shows only the page.
+    const fields = await framed(tab, browser, async () => {
+      let fields = [];
+      for (let tries = 0; tries < TRIES && !fields.length; tries++) {
+        if (tries) await wait(2000);
+        const [done] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: fillForm, args: [actions, files] });
+        fields = done?.result ?? [];
+      }
+      return fields;
+    });
     const screenshot = await captureTab(tab, browser);
     filled = true;
     return screenshot ? { fields, screenshot } : { fields };
@@ -177,12 +186,16 @@ export async function sendForms(
         const tab = ((await browser.tabs.query({})) ?? []).find((t) => sameFormUrl(t.url, url));
         if (!tab) [path, body] = ["/failure", { reason: "no_tab" }];
         else {
-          const [ran] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: submitForm });
-          const res = ran?.result;
-          if (!res?.ok) [path, body] = ["/failure", { reason: res?.reason ?? "not_sent" }];
-          else if (!(await confirmedIn(tab.id, url, res.beforeText ?? "", browser, wait))) {
-            [path, body] = ["/failure", { reason: "not_confirmed" }];
-          }
+          await groupTab(tab, browser); // the candidate may have moved it out of the group
+          [path, body] = await framed(tab, browser, async () => {
+            const [ran] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: submitForm });
+            const res = ran?.result;
+            if (!res?.ok) return ["/failure", { reason: res?.reason ?? "not_sent" }];
+            if (!(await confirmedIn(tab.id, url, res.beforeText ?? "", browser, wait))) {
+              return ["/failure", { reason: "not_confirmed" }];
+            }
+            return ["", {}];
+          });
         }
       } catch {
         [path, body] = ["/failure", { reason: "not_sent" }];
@@ -196,6 +209,40 @@ export async function sendForms(
       pending.delete(application_id);
       await browser.storage.local.remove(key).catch(() => {}); // posted again next pass, then removed
     }
+  }
+}
+
+const GROUP = { title: "ApplAI", color: "green" };
+
+// Put a tab the extension uses in its window's ApplAI tab group, made when missing, so the candidate
+// sees which tabs it uses. A tab already in the group is left there. Never fatal: a tab that is not
+// grouped is still read, filled or submitted.
+async function groupTab(tab, browser) {
+  try {
+    const where = tab.windowId === undefined ? {} : { windowId: tab.windowId };
+    const [group] = await browser.tabGroups.query({ ...where, title: GROUP.title });
+    if (!group) {
+      const created = await browser.tabs.group({ tabIds: [tab.id], createProperties: where });
+      await browser.tabGroups.update(created, GROUP);
+    } else if (tab.groupId !== group.id) {
+      await browser.tabs.group({ groupId: group.id, tabIds: [tab.id] });
+    }
+  } catch { /* the tab goes on ungrouped */ }
+}
+
+// Run work while the page shows the frame of a tab in use, and remove it when the work ends, success
+// or failure. A frame that cannot be drawn or removed (a page Chrome does not script) is not an error.
+async function framed(tab, browser, work) {
+  const run = async (func) => {
+    try {
+      await browser.scripting.executeScript({ target: { tabId: tab.id }, func });
+    } catch { /* the page is gone or not scriptable */ }
+  };
+  await run(showOverlay);
+  try {
+    return await work();
+  } finally {
+    await run(hideOverlay);
   }
 }
 

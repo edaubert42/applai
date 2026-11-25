@@ -3,6 +3,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 
 import { readForm, readText } from "../../extension/forms.js";
+import { hideOverlay, showOverlay } from "../../extension/overlay.js";
 
 const FORM = `
   <form action="/apply" method="post">
@@ -107,4 +108,59 @@ test("it sends at most what ApplAI accepts: 20000 characters", () => {
   document.body.innerHTML = `<p>${"Pivoine ".repeat(4000)}</p>`;
 
   expect(readText(document)).toHaveLength(20000);
+});
+
+// The frame the extension draws on a tab it uses (extension/overlay.js).
+test("a page with the overlay gives the same fields and text as without it", () => {
+  document.body.innerHTML = FORM;
+  const [fields, text] = [readForm(document), readText(document)];
+
+  showOverlay(document);
+
+  expect(document.getElementById("applai-overlay")).not.toBeNull();
+  expect(readForm(document)).toEqual(fields);
+  expect(readForm(document)).toHaveLength(8);
+  expect(readText(document)).toBe(text);
+  expect(readText(document)).not.toContain("ApplAI");
+  hideOverlay(document);
+});
+
+test("the overlay is a 4 px green frame and a label that catch no click, and one call removes it", () => {
+  document.body.innerHTML = FORM;
+  const attach = vi.spyOn(Element.prototype, "attachShadow");
+
+  showOverlay(document);
+  showOverlay(document); // asked again: still one frame
+
+  const host = document.getElementById("applai-overlay") as HTMLElement;
+  const shadow = attach.mock.results.at(-1)?.value as ShadowRoot;
+  const frame = shadow.children[0] as HTMLElement;
+  const label = shadow.children[1] as HTMLElement;
+  expect(document.querySelectorAll("#applai-overlay")).toHaveLength(1);
+  expect(host.style.position).toBe("fixed");
+  expect(host.style.pointerEvents).toBe("none");
+  expect(host.shadowRoot).toBeNull(); // closed: the page's scripts do not reach in
+  expect(frame.style.pointerEvents).toBe("none");
+  expect(frame.style.borderWidth).toBe("4px");
+  expect(frame.style.borderColor).toBe("rgb(30, 142, 62)"); // #1e8e3e
+  expect(label.textContent).toBe("ApplAI is using this tab");
+  expect(label.style.pointerEvents).toBe("none");
+  expect(label.style.top).toBe("4px");
+  expect(label.style.right).toBe("4px");
+  expect(document.body.textContent).not.toContain("ApplAI");
+
+  hideOverlay(document);
+
+  expect(document.getElementById("applai-overlay")).toBeNull();
+});
+
+test("the overlay runs alone as Chrome sends it", () => {
+  document.body.innerHTML = FORM;
+  const show = new Function(`return (${showOverlay.toString()})`)() as typeof showOverlay;
+  const hide = new Function(`return (${hideOverlay.toString()})`)() as typeof hideOverlay;
+
+  show();
+  expect(document.getElementById("applai-overlay")).not.toBeNull();
+  hide();
+  expect(document.getElementById("applai-overlay")).toBeNull();
 });

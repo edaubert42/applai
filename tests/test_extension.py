@@ -24,7 +24,8 @@ def test_the_extension_may_read_a_form_on_every_ats_the_finder_knows():
     allowed = {f"https://*.{host}/*" for host in ATS_HOSTS + BOARD_HOSTS}
     assert allowed <= set(manifest["host_permissions"])
     # No tabs, cookies or debugger. storage: a click's unreported result survives a restart.
-    assert manifest["permissions"] == ["alarms", "scripting", "storage"]
+    # tabGroups: the tabs the extension uses are grouped as ApplAI.
+    assert manifest["permissions"] == ["alarms", "scripting", "storage", "tabGroups"]
 
 
 def test_the_extension_may_read_a_form_a_board_hosts_itself():

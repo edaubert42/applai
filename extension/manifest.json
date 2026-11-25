@@ -3,7 +3,7 @@
   "name": "ApplAI",
   "version": "0.3.0",
   "description": "Reads offer pages and forms, and fills waiting forms with this Chrome's session. Never sends.",
-  "permissions": ["alarms", "scripting", "storage"],
+  "permissions": ["alarms", "scripting", "storage", "tabGroups"],
   "host_permissions": [
     "<all_urls>",
     "https://*.jobteaser.com/*",
