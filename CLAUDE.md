@@ -31,7 +31,7 @@ Agents in `.github/workflows/agent-*.yml` build ApplAI from GitHub issues ([ADR 
 How agents work on a PR:
 
 - A PR comment is short: outcome first, then at most 5 short lines or a short checklist. No paragraphs. Details go in the commit message or inline comments.
-- A review reports only what blocks a merge: at most 5 findings, at most 3 lines per inline comment. Minor points share one non-blocking line.
+- A review reports only what blocks a merge: at most 5 findings, at most 3 lines per inline comment. Minor points share one non-blocking line. A bug blocks, even a rare one.
 - A tool you need is on `main` but not on your branch: `git merge origin/main`, then go on. Never rebase, never force-push.
 - A new migration takes the next number after the last one on `main` and writes that number in `src/applai/migrations/HEAD`. A conflict on that file means another PR took the number: merge `origin/main` and take the next one.
 
