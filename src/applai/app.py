@@ -17,13 +17,14 @@ from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from alembic.runtime.migration import MigrationContext
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.datastructures import Headers
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -36,7 +37,7 @@ from applai.details import IMAGE_TYPES, LOGOS_DIR
 from applai.drafting import AGENT as DRAFTING
 from applai.drafting import DraftingError, draft_in_background, redraft_answer
 from applai.filling import Slot, file_path, plan_in_background
-from applai.models import LOCAL_USER_ID, Application, Offer, OfferState, Triage
+from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Triage
 from applai.orchestrator import ApplicationState, TransitionError
 from applai.profile import Profile, ProfileError, load_profile
 from applai.reread import RereadRefused
@@ -101,6 +102,52 @@ def offers(state: OfferState, session: _Session) -> list[OfferSummary]:
         .order_by(Offer.created_at.desc(), Offer.id.desc())
     )
     return [OfferSummary.model_validate(row) for row in rows]
+
+
+class NewOffer(BaseModel):
+    """The URL of an offer the candidate adds by hand: https only, kept as given."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(max_length=2000)
+
+    @field_validator("url")
+    @classmethod
+    def _https(cls, url: str) -> str:
+        parts = urlsplit(url.strip())
+        if parts.scheme != "https" or not parts.hostname:
+            raise ValueError("the offer's URL starts with https://")
+        return url.strip()
+
+
+class OfferAdded(BaseModel):
+    id: int
+    url: str
+    state: OfferState
+    added: bool  # false: the URL was already known, and id is that offer's
+
+
+@api.post("/offers", status_code=201)
+def add_offer(body: NewOffer, session: _Session, response: Response) -> OfferAdded:
+    """Add an offer the candidate found elsewhere, new and with origin manual: the next scan
+    reads its page (the extension, for its hosts) and triages it. A URL already known is not
+    added twice: 200, and the answer names the offer it belongs to."""
+    known = select(Offer).where(Offer.user_id == LOCAL_USER_ID, Offer.url == body.url)
+    offer = session.scalar(known)
+    added = offer is None
+    if offer is None:
+        # The page gives the company; until it is read, the URL is the title.
+        offer = Offer(user_id=LOCAL_USER_ID, url=body.url, title=body.url, company="")
+        offer.origin = OfferOrigin.MANUAL
+        session.add(offer)
+        try:
+            session.commit()
+        except IntegrityError:  # the same URL added at the same time
+            session.rollback()
+            offer, added = session.scalars(known).one(), False
+    if not added:
+        response.status_code = 200
+    return OfferAdded(id=offer.id, url=offer.url, state=OfferState(offer.state), added=added)
 
 
 @api.get("/applications")

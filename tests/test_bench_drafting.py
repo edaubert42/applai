@@ -20,11 +20,13 @@ CASES = [yaml.safe_load(path.read_text()) for path in sorted(ROOT.glob("bench/dr
 OFFERS = [case for case in CASES if "sentences" not in case]
 JUDGED = [case for case in CASES if "sentences" in case]
 LABELS = {s["text"]: s["expected"] == "supported" for case in JUDGED for s in case["sentences"]}
-DRAFTED = [len(case.get("questions", [])) + bool(case.get("cover_letter")) for case in OFFERS]
+# Sentences per run: one per question, one per paragraph of a letter's 3.
+DRAFTED = [len(case.get("questions", [])) + 3 * bool(case.get("cover_letter")) for case in OFFERS]
 
 
 class Scripted:
-    """Drafting writes one sentence per field, citing cite(run); the judge says verdict(label)."""
+    """Drafting writes one sentence per question and per letter paragraph, citing cite(run);
+    the judge says verdict(label)."""
 
     def __init__(
         self,
@@ -41,7 +43,7 @@ class Scripted:
             run = sum(spec.name == "drafting" for spec in self.specs) - 1
             one = [{"text": "Une phrase.", "facts": self.cite(run)}]
             output = {"answers": {str(q["field"]): one for q in sent["questions"]}}
-            output |= {"cover_letter": one} if "cover_letter" in sent else {}
+            output |= {"cover_letter": [one, one, one]} if "cover_letter" in sent else {}
             return AgentResult(output=output, usage=Usage(model=DRAFTING_MODEL, cost_usd=0.1))
         verdicts = [self.verdict(LABELS[s["text"]]) for s in sent["sentences"]]
         output = {"verdicts": [{"supported": v, "reason": None} for v in verdicts]}

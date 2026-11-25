@@ -52,13 +52,16 @@ def _offer(
     day: int = 1,
     user_id: int = 1,
     source: str | None = None,
+    title: str | None = None,
+    contract: str | None = None,
 ) -> int:
     """Store an offer of the fictional Pivoine Analytics, with a Triage card if it has a score."""
     with Session(engine) as session, session.begin():
         offer = Offer(
             user_id=user_id,
             url=f"https://jobs.example.org/pivoine-analytics/{slug}",
-            title=slug.replace("-", " ").capitalize(),
+            title=title or slug.replace("-", " ").capitalize(),
+            contract=contract,
             company="Pivoine Analytics",
             state=state,
             screened_rule=rule,
@@ -144,8 +147,29 @@ def test_a_card_has_the_triage_result_and_the_logo(engine: Engine, client: TestC
         "can_reread": False,
         "rereading": False,
         "reread_error": None,
+        "contract_type": None,
         **CARD,
     }
+
+
+@pytest.mark.parametrize(
+    ("title", "contract", "expected"),
+    [
+        ("Data engineer", "Contrat en alternance", "apprenticeship"),
+        ("Stage - Data", None, "internship"),
+        ("Data engineer", None, None),
+        ("Stage - Data", "CDI", "permanent"),  # the offer's own contract comes before its title
+        ("Data engineer", "Freelance", None),  # a contract with no name here is none
+    ],
+)
+def test_a_card_has_the_contract_type_found_in_the_contract_then_the_title(
+    engine: Engine, client: TestClient, title: str, contract: str | None, expected: str | None
+):
+    _offer(engine, "data-engineer", "triaged", score=82, title=title, contract=contract)
+
+    [card] = client.get("/api/review", params={"view": "to_review"}).json()
+
+    assert card["contract_type"] == expected
 
 
 def test_each_card_of_every_view_has_its_offers_source(engine: Engine, client: TestClient):

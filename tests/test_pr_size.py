@@ -57,10 +57,23 @@ def test_failure_prints_the_changed_lines_and_the_limit(
     assert f"limit {LIMIT}" in out
 
 
+def test_a_merge_checkout_counts_only_the_pr_after_main_moved(repo: Path):
+    """GitHub checks out the PR merged into today's main; the event's base sha stays old."""
+    stale = subprocess.run(
+        ["git", "rev-parse", "main"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    _commit(repo, {"src/pr.py": 100})
+    _git(repo, "checkout", "-q", "main")
+    _commit(repo, {"src/merged_since.py": 600})
+    _git(repo, "merge", "-q", "--no-ff", "-m", "merge", "work")
+    assert main([stale]) == 1
+    assert main(["HEAD^1"]) == 0
+
+
 def test_ci_runs_the_check_on_pull_requests_unless_labeled_big_ok():
     workflow = yaml.safe_load(CI.read_text())
     job = workflow["jobs"]["size"]
     assert "pull_request" in job["if"]
     run = "\n".join(step.get("run", "") for step in job["steps"])
-    assert "tools/pr_size.py" in run
+    assert "tools/pr_size.py HEAD^1" in run
     assert "big-ok" in run

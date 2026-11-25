@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Answer, type CitedFact, type Draft, type Row } from "./api";
 import CvBlock from "./CvBlock";
+import Paragraphs from "./Paragraphs";
 import { useSettings } from "./settings";
 import { button } from "./styles";
 
@@ -160,15 +161,7 @@ function AnswerCard({
           {t("correct.warning", { warning })}
         </p>
       ))}
-      {answer.edited_text !== null ? (
-        <p className="whitespace-pre-line [overflow-wrap:anywhere]">{answer.edited_text}</p>
-      ) : (
-        <p className="[overflow-wrap:anywhere]">
-          {answer.sentences.map((sentence, index) => (
-            <span key={index}>{index > 0 && " "}{sentence.text}</span>
-          ))}
-        </p>
-      )}
+      <Paragraphs text={shown} />
       <Facts sentences={answer.sentences} />
 
       {mode === "view" && (

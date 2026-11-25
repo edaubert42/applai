@@ -42,6 +42,7 @@ export interface Card {
   can_reread: boolean; // the button "Relire l'offre" shows
   rereading: boolean; // the extension was asked and has not answered
   reread_error: string | null; // one line: why the last read again failed
+  contract_type: "permanent" | "fixed_term" | "internship" | "apprenticeship" | null;
 }
 
 export const GROUPS = ["in_progress", "waiting", "sent", "dropped"] as const;
@@ -56,7 +57,7 @@ export interface Row {
   company: string;
   /** The application's state, or the Notion status as written for an old-workflow offer. */
   state: string | null;
-  origin: "applai" | "old_workflow";
+  origin: "applai" | "manual" | "old_workflow";
   changed_at: string;
   /** Where the offer's form lives, or why it was not found: the candidate pastes it. */
   form_url: string | null;
@@ -72,6 +73,14 @@ export interface BrowserStatus {
 export interface FormUrl {
   form_url: string;
   form_url_error: null;
+}
+
+/** The answer to adding an offer by its URL: added is false when the URL was already known. */
+export interface OfferAdded {
+  id: number;
+  url: string;
+  state: string;
+  added: boolean;
 }
 
 export type Applications = Record<Group, Row[]>;
@@ -216,6 +225,7 @@ export const api = {
   cards: (view: View) => request<Card[]>("GET", `/api/review?view=${view}`),
   decide: (id: number, decision: Decision) =>
     request<unknown>("POST", `/api/offers/${id}/decision`, decision),
+  addOffer: (url: string) => request<OfferAdded>("POST", "/api/offers", { url }),
   reread: (id: number) => request<unknown>("POST", `/api/offers/${id}/reread`),
   applications: () => request<Applications>("GET", "/api/applications"),
   browserStatus: () => request<BrowserStatus>("GET", "/api/browser/status"),

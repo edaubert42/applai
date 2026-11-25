@@ -28,7 +28,8 @@ export function Logo({ card, className }: { card: Pick<Card, "company" | "logo">
         src={`/api/logos/${encodeURIComponent(card.logo)}`}
         alt={card.company}
         onError={() => setBroken(true)}
-        className={`${className} bg-white object-contain`}
+        // logos are drawn for white, in either theme; the theme has no white token
+        className={`${className} bg-[#fff] object-contain`}
       />
     );
   }
@@ -127,10 +128,10 @@ export function Header({ card, compact = false }: { card: Card; compact?: boolea
   );
 }
 
-/** An offer as a compact row: the logo, the title, the company, the score, the place and the work mode. */
+/** An offer as a compact row: the logo, the title, the company, the contract type and the score. */
 export function OfferRow({ card, onOpen }: { card: Card; onOpen: () => void }) {
-  const { t } = useSettings();
-  const tags = [card.tags?.location, card.tags?.work_mode].filter((tag) => tag !== undefined);
+  const { t, lookup } = useSettings();
+  const contract = card.contract_type && lookup(`contract.${card.contract_type}`);
   return (
     <button
       type="button"
@@ -149,15 +150,9 @@ export function OfferRow({ card, onOpen }: { card: Card; onOpen: () => void }) {
         <span className="block font-semibold [overflow-wrap:anywhere]">{card.title}</span>
         <span className="block text-sm text-link [overflow-wrap:anywhere]">{card.company}</span>
       </span>
-      {tags.map((tag) => (
-        <span
-          key={tag.text}
-          className={`flex gap-1.5 rounded-pill border bg-background px-3 py-1 text-sm ${MARKS[tag.verdict].frame}`}
-        >
-          <Mark verdict={tag.verdict} />
-          <span>{tag.text}</span>
-        </span>
-      ))}
+      {contract && (
+        <span className="rounded-pill border border-border bg-background px-3 py-1 text-sm">{contract}</span>
+      )}
       {card.score !== null && (
         <span className="rounded-pill bg-primary px-4 py-1 font-semibold text-on-primary">
           {t("card.score", { n: card.score })}

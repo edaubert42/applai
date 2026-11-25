@@ -11,7 +11,7 @@ import base64
 import copy
 import json
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self, cast
@@ -185,6 +185,21 @@ def offer_language(title: str, description: str | None, sources: Collection[Lang
     return "fr" if "fr" in sources else "en"
 
 
+def _contracts_named(title: str, contract: str | None) -> Iterator[str]:
+    """The contract the offer's own text names, then the one its title names, if any."""
+    for text in (contract or "", title):
+        folded = f" {fold(text)} "
+        found = next((word for key, word in _CONTRACTS.items() if f" {key} " in folded), None)
+        if found is not None:
+            yield found
+
+
+def offer_contract_type(title: str, contract: str | None) -> str | None:
+    """The offer's contract in the profile's words (permanent, fixed_term, internship,
+    apprenticeship): the offer's own text, then its title's. None when neither names one."""
+    return next(_contracts_named(title, contract), None)
+
+
 def offer_contract(
     title: str, contract: str | None, headlines: Collection[str], targets: Sequence[str]
 ) -> str:
@@ -192,11 +207,9 @@ def offer_contract(
 
     Unknown or without a headline: the first of targets that has one. CvError when none does.
     """
-    for text in (contract or "", title):
-        folded = f" {fold(text)} "
-        found = next((word for key, word in _CONTRACTS.items() if f" {key} " in folded), None)
+    for found in _contracts_named(title, contract):
         if found in headlines:
-            return cast(str, found)
+            return found
     for target in targets:
         if target in headlines:
             return target

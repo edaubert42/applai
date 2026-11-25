@@ -26,7 +26,7 @@ async function openPage(language: "fr" | "en" = "fr", routes = servicesRoutes(se
 
 describe("the Settings page", () => {
   it.each(["fr", "en"] as const)(
-    "shows the four categories in order, each row with its state and, when not green, its sentence, in %s",
+    "shows the four categories in order, each row with its light, named only for screen readers, and, when not green, its sentence, in %s",
     async (language) => {
       const { words } = await openPage(language);
 
@@ -41,22 +41,23 @@ describe("the Settings page", () => {
 
       const site = rowOf(words["settings.category.sites"]);
       expect(site.getByText(words["settings.service.alert_wttj"])).toBeTruthy();
-      expect(site.getByText(words["settings.state.green"])).toBeTruthy();
+      expect(site.getByRole("img", { name: words["settings.state.green"] })).toBeTruthy();
       expect(site.queryByText(/\./)).toBeNull();
+      expect(site.queryByText(words["settings.state.green"])).toBeNull();
 
       const agent = rowOf(words["settings.category.agents"]);
       expect(agent.getByText(words["settings.service.triage"])).toBeTruthy();
-      expect(agent.getByText(words["settings.state.orange"])).toBeTruthy();
+      expect(agent.getByRole("img", { name: words["settings.state.orange"] })).toBeTruthy();
       expect(agent.getByText("Check Claude login, API key, or quota.")).toBeTruthy();
 
       const mail = rowOf(words["settings.category.mailbox"]);
       expect(mail.getByText(words["settings.service.mailbox"])).toBeTruthy();
-      expect(mail.getByText(words["settings.state.red"])).toBeTruthy();
+      expect(mail.getByRole("img", { name: words["settings.state.red"] })).toBeTruthy();
       expect(mail.getByText("Run applai mail login.")).toBeTruthy();
 
       const applai = rowOf(words["settings.category.applai"]);
       expect(applai.getByText(words["settings.service.scan"])).toBeTruthy();
-      expect(applai.getByText(words["settings.state.green"])).toBeTruthy();
+      expect(applai.getByRole("img", { name: words["settings.state.green"] })).toBeTruthy();
     },
   );
 
@@ -67,6 +68,30 @@ describe("the Settings page", () => {
     const rows = within(screen.getByRole("region", { name: fr["settings.category.sites"] })).getAllByRole("listitem");
 
     expect(rows.map((row) => row.querySelector("h3")?.textContent)).toEqual([fr["settings.service.extension"], "alert_custom"]);
+  });
+
+  it("puts a logo before every service's name, its own for each service", async () => {
+    const sites = [aService({ id: "extension" }), aService({ id: "alert_wttj" }), aService({ id: "alert_custom" })];
+    const agents = [aService({ id: "triage" }), aService({ id: "drafting" })];
+    const applai = [aService({ id: "scan" }), aService({ id: "backup" })];
+    await openPage("fr", servicesRoutes({ ...services, sites, agents, applai }));
+
+    const logoOf = (name: string) => {
+      const row = screen.getByRole("heading", { name, level: 3 }).closest("li") as HTMLElement;
+      return row.querySelector("[data-logo]")?.getAttribute("data-logo");
+    };
+    const logos = [
+      fr["settings.service.extension"],
+      fr["settings.service.alert_wttj"],
+      fr["settings.service.mailbox"],
+      fr["settings.service.scan"],
+      fr["settings.service.backup"],
+    ].map(logoOf);
+
+    expect(logos.every(Boolean)).toBe(true);
+    expect(new Set(logos).size).toBe(logos.length);
+    expect(logoOf(fr["settings.service.triage"])).toBe(logoOf("drafting"));
+    expect(logoOf("alert_custom")).toBeTruthy();
   });
 
   it("opens from Réglages, the last item of the navigation", async () => {

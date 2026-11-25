@@ -19,7 +19,13 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 
 from applai.agents import AgentError, AgentRunner, Backend
 from applai.bench.triage import DEMO_DIR, BenchError
-from applai.drafting import DRAFTING_MODEL, citation_problem, drafted_fields, drafting_spec
+from applai.drafting import (
+    DRAFTING_MODEL,
+    citation_problem,
+    drafted_fields,
+    drafting_spec,
+    paragraphed,
+)
 from applai.drafting_judge import JUDGE_MODEL, judge_spec
 from applai.profile import Profile, load_profile
 
@@ -158,7 +164,8 @@ def _draft(runner: AgentRunner, case: OfferCase, profile: Profile, totals: _Tota
         return
     totals.drafting_cost += result.usage.cost_usd
     answers: list[list[dict[str, Any]]] = list(result.output["answers"].values())
-    sentences = [s for answer in [*answers, result.output.get("cover_letter", [])] for s in answer]
+    letter = paragraphed(result.output.get("cover_letter", []))  # every paragraph's sentences
+    sentences = [s for answer in [*answers, letter] for s in answer]
     totals.sentences += len(sentences)
     totals.invalid += sum(citation_problem([s], profile) is not None for s in sentences)
 

@@ -116,7 +116,7 @@ def _waiting(offer: Offer, last_scan: datetime | None) -> bool:
     return (
         offer.user_id == LOCAL_USER_ID
         and offer.state == OfferState.NEW
-        and offer.origin == OfferOrigin.APPLAI
+        and offer.origin != OfferOrigin.OLD_WORKFLOW
         and read_by_extension(offer.url)
         and (failed is None or (last_scan is not None and last_scan > failed))
     )

@@ -150,7 +150,7 @@ describe("a card", () => {
 });
 
 describe("the list of offers", () => {
-  it("shows every offer as a row with its logo, title, company, score and tags, and no card open", async () => {
+  it("shows every offer as a row with its logo, title, company, score and contract, and no card open", async () => {
     const more = manyOffers(18).map((card) => ({ ...card, id: card.id + 10, title: `Autre ${card.id}` }));
     await openScreen(reviewRoutes({ to_review: [aCard(), bob, ...more] }), false);
 
@@ -158,12 +158,46 @@ describe("the list of offers", () => {
     expect(screen.queryByRole("article")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Ingénieur logiciel" })).toBeNull();
     const row = within(rowOf(/Ingénieur logiciel/));
-    for (const text of ["Acme Robotics", fill(fr["card.score"], { n: 87 }), "Paris 11e", "Hybride"]) {
+    for (const text of ["Ingénieur logiciel", "Acme Robotics", fill(fr["card.score"], { n: 87 }), "CDI"]) {
       expect(row.getByText(text)).toBeTruthy();
     }
-    expect(row.queryByText("CDI")).toBeNull();
+    for (const text of ["Paris 11e", "Hybride"]) expect(row.queryByText(text)).toBeNull();
     expect(row.getByRole("img", { hidden: true }).getAttribute("src")).toBe("/api/logos/acme-robotics.png");
     expect(within(rowOf(/Développeuse web/)).getByText("GS")).toBeTruthy();
+  });
+
+  it.each([
+    ["permanent", "fr", "CDI"],
+    ["fixed_term", "fr", "CDD"],
+    ["internship", "fr", "Stage"],
+    ["apprenticeship", "fr", "Alternance"],
+    ["permanent", "en", "Permanent"],
+    ["fixed_term", "en", "Fixed-term"],
+    ["internship", "en", "Internship"],
+    ["apprenticeship", "en", "Apprenticeship"],
+  ] as const)("words the %s contract of a row in %s as %s", async (contractType, language, word) => {
+    if (language === "en") localStorage.setItem("applai.language", "en");
+    await openScreen(reviewRoutes({ to_review: [aCard({ contract_type: contractType }), bob] }), false);
+
+    expect(within(rowOf(/Ingénieur logiciel/)).getByText(word)).toBeTruthy();
+  });
+
+  it("shows no contract on the row of an offer with no contract type", async () => {
+    await openScreen(reviewRoutes({ to_review: [aCard({ contract_type: null }), bob] }), false);
+
+    const row = within(rowOf(/Ingénieur logiciel/));
+    for (const word of ["CDI", "CDD", "Stage", "Alternance"]) expect(row.queryByText(word)).toBeNull();
+    expect(row.getByText("Acme Robotics")).toBeTruthy();
+  });
+
+  it("opens the full card from a row, with the place and the work mode in its header", async () => {
+    await openScreen(reviewRoutes({ to_review: [aCard(), bob] }), false);
+
+    fireEvent.click(rowOf(/Ingénieur logiciel/));
+
+    const card = within(screen.getByRole("article", { name: /Ingénieur logiciel/ }));
+    expect(card.getByText("Paris 11e")).toBeTruthy();
+    expect(card.getByText("Hybride")).toBeTruthy();
   });
 
   it("opens the card of a row by a click, and by Enter, in place of the row", async () => {
@@ -467,5 +501,45 @@ describe("the views", () => {
     await waitFor(() => expect(decisions(calls)).toHaveLength(1));
     expect(decisions(calls)[0]).toEqual(["/api/offers/3/decision", { decision: "interested" }]);
     await waitFor(() => expect(screen.queryByText("Directeur technique")).toBeNull());
+  });
+});
+
+describe("adding an offer by its URL", () => {
+  const url = "https://jobs.example.org/pivoine-analytics/data-engineer?utm_source=newsletter";
+
+  async function add(answer: unknown, language: "fr" | "en" = "fr") {
+    if (language === "en") localStorage.setItem("applai.language", "en");
+    const calls = await openScreen({ ...reviewRoutes({ to_review: [aCard()] }), "POST /api/offers": answer }, false);
+    const words = language === "fr" ? fr : en;
+    fireEvent.change(screen.getByRole("textbox", { name: words["review.add.label"] }), { target: { value: ` ${url} ` } });
+    fireEvent.click(screen.getByRole("button", { name: words["review.add.submit"] }));
+    return { calls, words };
+  }
+
+  it.each(["fr", "en"] as const)("calls the route and shows the offer as added, in %s", async (language) => {
+    const { calls, words } = await add({ id: 9, url, state: "new", added: true }, language);
+
+    expect(await screen.findByText(words["review.add.added"])).toBeTruthy();
+    expect(calls.filter((call) => call.method === "POST" && call.path === "/api/offers")).toEqual([
+      { method: "POST", path: "/api/offers", body: { url } },
+    ]);
+    expect((screen.getByRole("textbox", { name: words["review.add.label"] }) as HTMLInputElement).value).toBe("");
+  });
+
+  it("says when the offer was already known", async () => {
+    await add({ id: 3, url, state: "triaged", added: false });
+
+    expect(await screen.findByText(fr["review.add.known"])).toBeTruthy();
+    expect(screen.queryByText(fr["review.add.added"])).toBeNull();
+  });
+
+  it.each([
+    [new Response("{}", { status: 422 }), "review.add.refused"],
+    [new Response("boom", { status: 500 }), "review.add.error"],
+  ] as const)("says why an offer was not added", async (answer, key) => {
+    await add(answer);
+
+    expect((await screen.findByRole("alert")).textContent).toBe(fr[key]);
+    expect(screen.queryByText(fr["review.add.added"])).toBeNull();
   });
 });

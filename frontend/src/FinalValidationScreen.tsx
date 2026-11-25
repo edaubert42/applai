@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type FormReview, type Row } from "./api";
+import Paragraphs from "./Paragraphs";
 import { useSettings } from "./settings";
 import { button } from "./styles";
 
@@ -125,7 +126,7 @@ export default function FinalValidationScreen({
                         )}
                       </div>
                     ) : value ? (
-                      <p className="whitespace-pre-line text-sm [overflow-wrap:anywhere]">{value}</p>
+                      <Paragraphs text={value} className="text-sm" />
                     ) : (
                       <p className="text-sm text-muted">{field.unfilled ?? t("validation.field.empty")}</p>
                     )}

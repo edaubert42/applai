@@ -142,7 +142,7 @@ def _read_linkedin(engine: Engine, user_id: int, clock: Clock, errors: list[str]
 def _offers(engine: Engine, state: OfferState, user_id: int) -> list[int]:
     with Session(engine) as session:
         return list(session.scalars(select(Offer.id).where(
-            Offer.user_id == user_id, Offer.state == state, Offer.origin == OfferOrigin.APPLAI
+            Offer.user_id == user_id, Offer.state == state, Offer.origin != OfferOrigin.OLD_WORKFLOW
         ).order_by(Offer.id)))  # fmt: skip
 
 
