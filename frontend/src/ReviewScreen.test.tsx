@@ -244,6 +244,56 @@ describe("the list of offers", () => {
     expect(within(rowOf(/Ingénieur logiciel/)).getByText(expected)).toBeTruthy();
   });
 
+  it("sorts by score by default and switches to newest date first when Par date is chosen", async () => {
+    const olderBest = aCard({ id: 1, title: "Ingénieur logiciel", score: 92, seen_at: "2026-11-20T09:00:00Z" });
+    const newerLower = aCard({ id: 2, title: "Développeuse web", score: 65, seen_at: "2026-11-24T12:00:00Z" });
+    const middle = aCard({ id: 3, title: "Data engineer", score: 80, seen_at: "2026-11-22T15:00:00Z" });
+    await openScreen(reviewRoutes({ to_review: [olderBest, middle, newerLower] }), false);
+
+    const byScore = screen.getByRole("button", { name: fr["review.sort.score"] });
+    const byDate = screen.getByRole("button", { name: fr["review.sort.date"] });
+    expect(byScore.getAttribute("aria-pressed")).toBe("true");
+    expect(byDate.getAttribute("aria-pressed")).toBe("false");
+    expect(rows().map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Ingénieur logiciel"),
+      expect.stringContaining("Data engineer"),
+      expect.stringContaining("Développeuse web"),
+    ]);
+
+    fireEvent.click(byDate);
+
+    expect(byScore.getAttribute("aria-pressed")).toBe("false");
+    expect(byDate.getAttribute("aria-pressed")).toBe("true");
+    expect(rows().map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Développeuse web"),
+      expect.stringContaining("Data engineer"),
+      expect.stringContaining("Ingénieur logiciel"),
+    ]);
+
+    fireEvent.click(byScore);
+    expect(rows().map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Ingénieur logiciel"),
+      expect.stringContaining("Data engineer"),
+      expect.stringContaining("Développeuse web"),
+    ]);
+
+    fireEvent.click(screen.getByRole("tab", { name: fill(fr["review.tab.screened_out"], { n: 0 }) }));
+    expect(screen.queryByRole("group", { name: fr["review.sort.label"] })).toBeNull();
+  });
+
+  it("opens the next offer in date order when deciding while sorted by date, and labels the sort in English", async () => {
+    localStorage.setItem("applai.language", "en");
+    const olderBest = aCard({ id: 1, title: "Ingénieur logiciel", score: 92, seen_at: "2026-11-20T09:00:00Z" });
+    const newerLower = aCard({ id: 2, title: "Développeuse web", score: 65, seen_at: "2026-11-24T12:00:00Z" });
+    const middle = aCard({ id: 3, title: "Data engineer", score: 80, seen_at: "2026-11-22T15:00:00Z" });
+    await openScreen(reviewRoutes({ to_review: [olderBest, middle, newerLower] }), false);
+
+    fireEvent.click(screen.getByRole("button", { name: en["review.sort.date"] }));
+    fireEvent.click(rowOf(/Développeuse web/));
+    fireEvent.click(within(screen.getByRole("article")).getByRole("button", { name: en["card.later"] }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Data engineer" })).toBeTruthy());
+  });
   it("opens the full card from a row, with the place and the work mode in its header", async () => {
     await openScreen(reviewRoutes({ to_review: [aCard(), bob] }), false);
 
