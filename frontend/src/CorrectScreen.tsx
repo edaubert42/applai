@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Answer, type CitedFact, type Draft, type Row } from "./api";
+import CvBlock from "./CvBlock";
 import { useSettings } from "./settings";
 import { button } from "./styles";
 
@@ -54,7 +55,10 @@ export default function CorrectScreen({
     });
   }
 
-  const ready = draft !== null && draft.answers.every((a) => RESOLVED.includes(a.status));
+  const ready =
+    draft !== null &&
+    draft.answers.every((a) => RESOLVED.includes(a.status)) &&
+    draft.cv_changes.every((c) => c.status !== "pending");
 
   return (
     <div className="mx-auto max-w-215 space-y-6">
@@ -85,6 +89,7 @@ export default function CorrectScreen({
               ))}
             </ul>
           )}
+          {draft.cv_photo !== null && <CvBlock draft={draft} onDraft={setDraft} />}
           {refused && <p role="alert" className="text-minus">{t("correct.validate_failed")}</p>}
           <button type="button" disabled={!ready || validating} onClick={validate} className={button}>
             {t("correct.validate")}

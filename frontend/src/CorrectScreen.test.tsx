@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Answer, Draft } from "./api";
-import { aDraft, aRow, anAnswer, applicationsRoutes, fakeApi, reviewRoutes } from "./fake-api";
+import { aCvChange, aDraft, aRow, anAnswer, applicationsRoutes, fakeApi, reviewRoutes } from "./fake-api";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
 
@@ -337,5 +337,120 @@ describe("the answers gate", () => {
     );
     expect(names.filter((name) => !allowed.includes(name ?? ""))).toEqual([]);
     expect(screen.queryByRole("button", { name: /fill|send|submit|rempli|envoy|soumett/i })).toBeNull();
+  });
+});
+
+describe("the CV block", () => {
+  const reword = aCvChange();
+  const drop = aCvChange({ id: 11, op: "drop", path: "experience[0].bullets[2]", old_text: "Animation d’un atelier.", new_text: null, facts: [] });
+  const reorder = aCvChange({
+    id: 12,
+    op: "reorder",
+    path: "skills",
+    old_text: "[]",
+    new_text: "[]",
+    old_items: ["SQL", "Python"],
+    new_items: ["Python", "SQL"],
+    facts: [],
+  });
+  const tailored = (changes = [reword, drop, reorder]) =>
+    aDraft([anAnswer({ status: "accepted" })], {
+      cv_headline: "Analytics engineer",
+      cv_photo: "with",
+      cv_photo_reason: "Entreprise française.",
+      cv_changes: changes,
+    });
+  const change = (id: number) => `POST /api/applications/1/cv/changes/${id}`;
+  const block = () => within(screen.getByRole("region", { name: fr["cv.title"] }));
+  const rowOf = (text: string) => within(screen.getByText(text).closest("li") as HTMLElement);
+
+  it("shows the headline, a reword before and after with its facts, the new order and the dropped line", async () => {
+    await openCorrect({}, "fr", tailored());
+
+    expect(block().getByText("Analytics engineer")).toBeTruthy();
+    expect(block().getByText(reword.old_text)).toBeTruthy();
+    expect(block().getByText(reword.new_text as string)).toBeTruthy();
+    expect(block().getByText(/Retards de livraison réduits de 20 %/)).toBeTruthy();
+    expect(block().getAllByRole("listitem").map((item) => item.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining("Animation d’un atelier.")]),
+    );
+    expect(block().getByText(/Python/).closest("ol")?.textContent).toBe("PythonSQL");
+    expect(block().getByText("Entreprise française.")).toBeTruthy();
+  });
+
+  it("rejects a change with a reason through the reject route", async () => {
+    const rejected = { ...reword, status: "rejected" };
+    const { calls } = await openCorrect({ [change(10)]: rejected }, "fr", tailored());
+    const row = rowOf(reword.new_text as string);
+
+    fireEvent.click(row.getByRole("button", { name: fr["cv.reject"] }));
+    fireEvent.change(row.getByLabelText(fr["correct.reject_reason"]), { target: { value: "Trop vague" } });
+    fireEvent.click(row.getByRole("button", { name: fr["cv.reject_confirm"] }));
+
+    expect(await row.findByText(fr["correct.status.rejected"])).toBeTruthy();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([
+      { method: "POST", path: "/api/applications/1/cv/changes/10", body: { decision: "reject", reason: "Trop vague" } },
+    ]);
+  });
+
+  it("edits a reword's text and the headline", async () => {
+    const edited = { ...reword, status: "edited", edited_text: "Réduit les retards de 20 %." };
+    const { calls } = await openCorrect(
+      {
+        [change(10)]: edited,
+        "POST /api/applications/1/cv/headline": { ...tailored(), cv_headline: "Data lead" },
+      },
+      "fr",
+      tailored(),
+    );
+    const row = rowOf(reword.new_text as string);
+
+    fireEvent.click(row.getByRole("button", { name: fr["correct.edit"] }));
+    fireEvent.change(row.getByLabelText(fr["correct.edit_text"]), { target: { value: "Réduit les retards de 20 %." } });
+    fireEvent.click(row.getByRole("button", { name: fr["correct.save"] }));
+    expect(await row.findByText("Réduit les retards de 20 %.")).toBeTruthy();
+
+    fireEvent.click(block().getByRole("button", { name: fr["cv.headline_edit"] }));
+    fireEvent.change(block().getByLabelText(fr["cv.headline"]), { target: { value: "Data lead" } });
+    fireEvent.click(block().getByRole("button", { name: fr["correct.save"] }));
+    expect(await block().findByText("Data lead")).toBeTruthy();
+
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.body)).toEqual([
+      { decision: "edit", text: "Réduit les retards de 20 %." },
+      { text: "Data lead" },
+    ]);
+  });
+
+  it("offers a reorder and a drop no edit, and keeps Validate off until each change is decided", async () => {
+    await openCorrect({}, "fr", tailored());
+    const validate = () => screen.getByRole("button", { name: fr["correct.validate"] }) as HTMLButtonElement;
+
+    expect(rowOf("Animation d’un atelier.").queryByRole("button", { name: fr["correct.edit"] })).toBeNull();
+    expect(validate().disabled).toBe(true);
+  });
+
+  it("enables Validate once every change is decided", async () => {
+    const decided = tailored([{ ...reword, status: "accepted" }, { ...drop, status: "rejected" }]);
+    await openCorrect({}, "fr", decided);
+
+    expect((screen.getByRole("button", { name: fr["correct.validate"] }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("switches the photo and shows its reason", async () => {
+    const without = { ...tailored(), cv_photo: "without" };
+    const { calls } = await openCorrect({ "POST /api/applications/1/cv/photo": without }, "fr", tailored());
+
+    fireEvent.click(block().getByRole("button", { name: fr["cv.photo_without"] }));
+
+    expect(await block().findByText(fr["cv.photo.without"])).toBeTruthy();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([
+      { method: "POST", path: "/api/applications/1/cv/photo", body: { photo: "without" } },
+    ]);
+  });
+
+  it("has no CV block when nothing was tailored", async () => {
+    await openCorrect();
+
+    expect(screen.queryByRole("region", { name: fr["cv.title"] })).toBeNull();
   });
 });

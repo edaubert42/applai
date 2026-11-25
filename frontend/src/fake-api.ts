@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type {
-  Answer, Applications, BrowserStatus, Card, Draft, FormReview, ReviewedField, Row, ScanStatus, Service, Services,
+  Answer, Applications, BrowserStatus, Card, CvChange, Draft, FormReview, ReviewedField, Row, ScanStatus, Service, Services,
 } from "./api";
 
 export interface Call {
@@ -184,7 +184,28 @@ export function aDraft(answers: Answer[] = [anAnswer()], overrides: Partial<Draf
     state: "drafted",
     draft_error: null,
     answers,
+    cv_headline: null,
+    cv_photo: null,
+    cv_photo_reason: null,
+    cv_changes: [],
     resolved: answers.every((a) => a.status === "accepted" || a.status === "edited"),
+    ...overrides,
+  };
+}
+
+/** A fictional CV change: a reword of one bullet, still pending. */
+export function aCvChange(overrides: Partial<CvChange> = {}): CvChange {
+  return {
+    id: 10,
+    op: "reword",
+    path: "experience[0].bullets[1]",
+    old_text: "Suivi des retards de livraison.",
+    new_text: "Réduit les retards de livraison de 20 %.",
+    edited_text: null,
+    old_items: null,
+    new_items: null,
+    facts: [{ id: "F2", text: "Retards de livraison réduits de 20 % en 2024." }],
+    status: "pending",
     ...overrides,
   };
 }
