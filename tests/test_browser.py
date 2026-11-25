@@ -106,6 +106,15 @@ def _seed(
     return ids
 
 
+def _scan(data_dir: Path, started: datetime, finished: datetime | None) -> None:
+    """A scan of the watch that ran from started to finished (UTC), none while it runs."""
+    engine = open_database(data_dir)
+    with Session(engine) as session, session.begin():
+        session.add(Scan(user_id=1, by_hand=True, started_at=started, finished_at=finished,
+                         new_offers=0, errors=[]))  # fmt: skip
+    engine.dispose()
+
+
 def _offers(data_dir: Path) -> dict[int, Offer]:
     engine = open_database(data_dir)
     with Session(engine) as session:
@@ -288,3 +297,34 @@ def test_a_scan_does_not_triage_again_an_offer_whose_posted_page_is_triaging(dat
     assert last["finished_at"] is not None
     assert not any(f"Offer {offer_id}" in error for error in last["errors"])
     assert _offers(data_dir)[offer_id].state == "triaged"
+
+
+def test_a_page_that_fails_during_a_scan_waits_for_the_next_scan_to_start(
+    data_dir: Path, app: FastAPI
+):
+    (offer_id,) = _seed(data_dir, JOBTEASER)
+    failed_at = NOON.astimezone(UTC).replace(tzinfo=None)  # 11:00 UTC
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        failure = f"/api/browser/pages/{offer_id}/failure"
+        assert client.post(failure, json={"status": 403}, headers=EXTENSION).status_code == 204
+        _scan(data_dir, failed_at - timedelta(minutes=1), failed_at + timedelta(minutes=1))
+        during = client.get("/api/browser/pages", headers=EXTENSION).json()
+        _scan(data_dir, failed_at + timedelta(minutes=2), None)  # the next one, still running
+        after = client.get("/api/browser/pages", headers=EXTENSION).json()
+
+    assert during == []
+    assert after == [{"offer_id": offer_id, "url": JOBTEASER}]
+
+
+def test_a_page_that_failed_before_the_last_scan_started_is_listed(data_dir: Path, app: FastAPI):
+    (offer_id,) = _seed(data_dir, JOBTEASER)
+    failed_at = NOON.astimezone(UTC).replace(tzinfo=None)
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        failure = f"/api/browser/pages/{offer_id}/failure"
+        assert client.post(failure, json={"status": 403}, headers=EXTENSION).status_code == 204
+        _scan(data_dir, failed_at + timedelta(seconds=1), failed_at + timedelta(minutes=2))
+        listed = client.get("/api/browser/pages", headers=EXTENSION).json()
+
+    assert listed == [{"offer_id": offer_id, "url": JOBTEASER}]

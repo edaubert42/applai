@@ -7,10 +7,11 @@ was, through the allowed links (applai.google): a text that reads replaces the p
 and the offer is triaged again in place (applai.triage), still triaged, its card updated;
 a score under the review threshold moves the card to Screened out. A read that fails, or a
 triage that fails, leaves the offer as it was and records one line saying why, shown on the
-card until the next ask. Nothing retries by itself.
+card until the next ask. An ask the extension does not answer within REREAD_WITHIN ends the
+same way, when the offers are listed or the ask is repeated. Nothing retries by itself.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx2
 from sqlalchemy import Engine, select
@@ -24,6 +25,8 @@ from applai.models import Offer, OfferState, Triage
 from applai.profile import Profile
 
 AGENT_FAILED = "the offer could not be triaged again"
+REREAD_WITHIN = timedelta(minutes=10)  # an ask the extension has not answered by then ends
+UNANSWERED = "The extension did not send the page."
 
 
 class RereadRefused(Exception):
@@ -46,6 +49,8 @@ def request(offer: Offer, triage: Triage | None, min_score: int, now: datetime) 
     Only an offer of To review is read again: a score under the threshold is Screened out.
     A new ask clears the last reason.
     """
+    if _unanswered(offer, now):
+        fail(offer, UNANSWERED, now)  # the new ask replaces it
     if offer.reread_requested_at is not None:
         raise RereadRefused(f"Offer {offer.id} is already being read again.")
     if triage is None or triage.score < min_score or not rereadable(offer):
@@ -57,6 +62,20 @@ def asked(session: Session) -> list[Offer]:
     """The offers whose page the extension is waiting to send, oldest ask first."""
     pending = select(Offer).where(Offer.reread_requested_at.is_not(None))
     return list(session.scalars(pending.order_by(Offer.reread_requested_at, Offer.id)))
+
+
+def _unanswered(offer: Offer, now: datetime) -> bool:
+    """Asked more than REREAD_WITHIN ago, and the extension has not sent the page."""
+    asked_at = offer.reread_requested_at
+    return asked_at is not None and now - asked_at > REREAD_WITHIN
+
+
+def expire(session: Session, now: datetime) -> None:
+    """End the asks the extension left unanswered, without committing; the candidate can ask
+    again."""
+    for offer in asked(session):
+        if _unanswered(offer, now):
+            fail(offer, UNANSWERED, now)
 
 
 def fail(offer: Offer, error: str, now: datetime) -> None:

@@ -7,8 +7,9 @@ the browser's session and sends its HTML back. Only the extension's origin reach
 routes (applai.app.SameOriginWrites). Each offer is screened first, as the scan screens it;
 without the profile none is listed. A page received describes its offer as a page read over
 HTTP would, then the offer is triaged in the background, not at the next scan. A page that
-fails, reported by the extension or with no text, is asked for again only after the next scan;
-after MAX_PAGE_FAILURES the offer is described from its alert's fields, then triaged.
+fails, reported by the extension or with no text, is asked for again only once the next scan
+has started (a failure during a scan waits for the following one); after MAX_PAGE_FAILURES
+the offer is described from its alert's fields, then triaged.
 
 Form capture: an application created with its form's URL (applai.capture) and no fields is
 listed for the extension, which opens the form in a tab, lists its controls without filling
@@ -19,6 +20,7 @@ is asked for again only after the next scan; after MAX_FORM_FAILURES its URL is 
 candidate pastes one, which counts from zero again.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
 page received for one is read for its text, and the offer is triaged again in the background.
+An ask the extension leaves unanswered for REREAD_WITHIN ends when the pages are listed.
 
 Filling: an answers_checked application with a fill plan (applai.filling) is listed with its
 actions; the extension fetches the files they attach, fills the form without sending it,
@@ -109,7 +111,7 @@ class BrowserStatus(BaseModel):
 
 
 def _waiting(offer: Offer, last_scan: datetime | None) -> bool:
-    """New, read by the extension, and not failed since the last scan finished."""
+    """New, read by the extension, and not failed since the last scan started."""
     failed = offer.page_failed_at
     return (
         offer.user_id == LOCAL_USER_ID
@@ -121,8 +123,10 @@ def _waiting(offer: Offer, last_scan: datetime | None) -> bool:
 
 
 def _last_scan(session: Session) -> datetime | None:
-    finished = select(func.max(Scan.finished_at)).where(Scan.user_id == LOCAL_USER_ID)
-    return session.scalar(finished)
+    """When the last scan started, running or not: a page that failed during a scan waits for
+    the next one to start, not for this one to end."""
+    started = select(func.max(Scan.started_at)).where(Scan.user_id == LOCAL_USER_ID)
+    return session.scalar(started)
 
 
 @router.get("/pages")
@@ -135,10 +139,11 @@ def pages(request: Request) -> list[PageToRead]:
         return []
     with Session(request.app.state.engine) as session:
         last_scan = _last_scan(session)
+        reread.expire(session, utc(request.app.state.clock()))
         new = session.scalars(select(Offer).where(Offer.state == OfferState.NEW).order_by(Offer.id))
         listed = [o for o in new if _waiting(o, last_scan)]
         waiting = [o for o in listed if not screen_offer(session, o, profile)]
-        session.commit()  # the offers screening set aside
+        session.commit()  # the offers screening set aside, the asks that ended
         return [PageToRead(offer_id=o.id, url=o.url) for o in [*waiting, *reread.asked(session)]]
 
 
@@ -273,7 +278,7 @@ def _triage(engine: Engine, data_dir: Path, runner: AgentRunner, offer_id: int) 
 
 
 def _form_waiting(application: Application, last_scan: datetime | None) -> bool:
-    """Created, with a form's URL and no fields, and not failed since the last scan finished."""
+    """Created, with a form's URL and no fields, and not failed since the last scan started."""
     failed = application.form_failed_at
     return (
         application.user_id == LOCAL_USER_ID
@@ -391,7 +396,7 @@ class FillFailed(BaseModel):
 
 
 def _fill_waiting(application: Application, last_scan: datetime | None) -> bool:
-    """answers_checked with a plan, and not failed since the last scan finished."""
+    """answers_checked with a plan, and not failed since the last scan started."""
     failed = application.fill_failed_at
     return (
         application.user_id == LOCAL_USER_ID
