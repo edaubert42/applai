@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from applai.agents import AgentError, AgentResult, AgentRunner, FakeBackend, Usage
 from applai.app import create_app
 from applai.database import open_database
-from applai.drafting import DRAFTING_MODEL, DraftingError, draft_application
+from applai.drafting import DRAFTING_MODEL, DraftingError, draft_application, redraft_answer
 from applai.drafting_judge import JUDGE_MODEL
 from applai.models import AgentRun, Application, DraftAnswer, Offer, StateChange
 from applai.profile import Diffusion, Fact, FactStatus, Profile, load_profile
@@ -224,12 +224,111 @@ def test_an_answer_citing_a_fact_it_may_not_use_is_refused_and_nothing_is_stored
         assert session.scalars(select(AgentRun.outcome)).one() != "ok"
 
 
+PARAGRAPHS = [  # the body of a letter in 3 paragraphs, each sentence citing a validated fact
+    [{"text": "Votre suivi des prêts m'intéresse.", "facts": ["F1"]}],
+    [{"text": SENTENCE, "facts": ["F3"]},
+     {"text": "J'ai réduit le pipeline de nuit à 40 minutes (#F2).", "facts": ["F2"]}],
+    [{"text": "Je serais heureuse d'en parler avec vous.", "facts": ["F1"]}],
+]  # fmt: skip
+BODY = (
+    "Votre suivi des prêts m'intéresse.\n\n"
+    f"{SENTENCE} J'ai réduit le pipeline de nuit à 40 minutes.\n\n"
+    "Je serais heureuse d'en parler avec vous."
+)
+LETTER = _result({"answers": {}, "cover_letter": PARAGRAPHS})
+LETTER_JUDGED = _result({"verdicts": [{"supported": True, "reason": None}] * 4})
+SUPPORTED_3 = _result({"verdicts": [{"supported": True, "reason": None}] * 3})
+ENGLISH = "You will model our delivery data and build forecasts for the teams of the warehouses."
+
+
+def _words(count: int) -> list[list[dict[str, Any]]]:
+    """A letter body of count words in 3 paragraphs, each sentence citing F1."""
+    sizes = [count // 3, count // 3, count - 2 * (count // 3)]
+    return [[{"text": " ".join(["mot"] * size) + ".", "facts": ["F1"]}] for size in sizes]
+
+
+@pytest.mark.parametrize(
+    ("description", "greeting", "sign_off"),
+    [(None, "Madame, Monsieur,", "Cordialement,"), (ENGLISH, "Dear Hiring Team,", "Kind regards,")],
+    ids=["french", "english"],
+)  # fmt: skip
+def test_a_letter_is_stored_in_paragraphs_between_a_greeting_and_a_sign_off_in_the_offer_language(
+    engine: Engine, profile: Profile, description: str | None, greeting: str, sign_off: str
+):
+    application_id = _application(engine, [*IDENTITY, LETTER_FIELD])
+    if description:
+        with Session(engine) as session, session.begin():
+            offer_id = session.get_one(Application, application_id).offer_id
+            session.get_one(Offer, offer_id).description = description
+    backend = FakeBackend([LETTER, LETTER_JUDGED])
+
+    draft_application(AgentRunner(backend), engine, application_id, profile)
+
+    [answer] = _answers(engine)
+    assert answer.text == f"{greeting}\n\n{BODY}\n\n{sign_off}\nJeanne Dupont"
+    # Every sentence of every paragraph is kept with its citations, and judged.
+    assert [s["facts"] for s in answer.sentences] == [["F1"], ["F3"], ["F2"], ["F1"]]
+    assert answer.judge_issues == []
+    assert _get(engine, application_id).state == "drafted"
+
+
+def test_a_letter_over_300_words_is_refused_and_the_application_stays_form_captured(
+    engine: Engine, profile: Profile
+):
+    longest, too_long = _application(engine, [LETTER_FIELD]), _application(engine, [LETTER_FIELD])
+    runner = AgentRunner(FakeBackend([
+        _result({"answers": {}, "cover_letter": _words(300)}), SUPPORTED_3,
+        _result({"answers": {}, "cover_letter": _words(301)}),
+    ]))  # fmt: skip
+
+    draft_application(runner, engine, longest, profile)
+    with pytest.raises(DraftingError, match="301 words"):
+        draft_application(runner, engine, too_long, profile)
+
+    application = _get(engine, too_long)
+    assert (application.state, application.draft_error) == (
+        "form_captured", "Drafting refused: the cover letter has 301 words, more than 300.",
+    )  # fmt: skip
+    assert _get(engine, longest).state == "drafted"
+    assert [a.application_id for a in _answers(engine)] == [longest]
+    with Session(engine) as session:
+        query = select(AgentRun.outcome).where(AgentRun.application_id == too_long)
+        assert session.scalars(query).one() == "letter_too_long"
+
+
+def test_a_rejected_letter_is_drafted_again_in_paragraphs_and_refused_over_300_words(
+    engine: Engine, profile: Profile
+):
+    application_id = _application(engine, [LETTER_FIELD])
+    draft_application(AgentRunner(FakeBackend([LETTER, LETTER_JUDGED])), engine, application_id,
+                      profile)  # fmt: skip
+    [letter] = _answers(engine)
+    with Session(engine) as session, session.begin():
+        session.get_one(DraftAnswer, letter.id).status = "rejected"
+    runner = AgentRunner(FakeBackend([
+        _result({"answers": {}, "cover_letter": _words(301)}),
+        _result({"answers": {}, "cover_letter": PARAGRAPHS[::-1]}), LETTER_JUDGED,
+    ]))  # fmt: skip
+
+    with pytest.raises(DraftingError, match="301 words"):
+        redraft_answer(runner, engine, letter.id, "Plus court.", profile)
+    redraft_answer(runner, engine, letter.id, "Commence par la prévision.", profile)
+
+    [answer] = _answers(engine)
+    body = "\n\n".join(BODY.split("\n\n")[::-1])
+    assert answer.text == f"Madame, Monsieur,\n\n{body}\n\nCordialement,\nJeanne Dupont"
+    assert answer.status == "pending"
+    with Session(engine) as session:
+        outcomes = session.scalars(select(AgentRun.outcome).where(AgentRun.agent == "drafting"))
+        assert list(outcomes) == ["ok", "letter_too_long", "ok"]
+
+
 @pytest.mark.parametrize("slot", [EXTRA_DOCUMENTS, LETTER_FIELD], ids=["other-docs", "asked"])
 def test_a_form_with_a_slot_for_a_letter_gets_a_cover_letter(
     engine: Engine, profile: Profile, slot: dict[str, Any]
 ):
     application_id = _application(engine, [*IDENTITY, slot])
-    backend = FakeBackend([_result({"answers": {}, "cover_letter": _sentences("F1", "F3")})])
+    backend = FakeBackend([LETTER])
 
     draft_application(AgentRunner(backend), engine, application_id, profile)
 

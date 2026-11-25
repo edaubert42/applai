@@ -18,7 +18,9 @@ from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentResult, AgentRunner, FakeBackend, Usage
 from applai.app import create_app
+from applai.correct import AnswerDecision, AnswerRequest, check_answers, decide
 from applai.database import open_database
+from applai.drafting import draft_application
 from applai.filling import FILLING_MODEL, plan_fill
 from applai.models import AgentRun, Application, DraftAnswer, Offer, StateChange
 from applai.profile import ProfileError, load_profile
@@ -153,6 +155,32 @@ def test_identity_and_checked_answers_are_planned_by_code_and_only_choices_ask_s
         run, _ = session.scalars(select(AgentRun).where(AgentRun.agent == "filling"))
         offer_id = session.get_one(Application, ambiguous).offer_id
     assert (run.model, run.offer_id, run.application_id) == (FILLING_MODEL, offer_id, ambiguous)
+
+
+def test_a_drafted_letter_is_planned_for_its_textarea_with_its_blank_lines(
+    data_dir: Path, engine: Engine
+):
+    profile = load_profile(data_dir)
+    application_id = _application(engine, [_field("Lettre de motivation", "textarea")],
+                                  state="form_captured")  # fmt: skip
+    paragraphs = [[{"text": LETTER, "facts": ["F1"]}], [{"text": ANSWER, "facts": ["F3"]}],
+                  [{"text": "Je serais heureuse d'en parler.", "facts": ["F1"]}]]  # fmt: skip
+    judged = AgentResult(output={"verdicts": [{"supported": True, "reason": None}] * 3},
+                         usage=Usage(model="claude-haiku-5-5"))  # fmt: skip
+    drafted = AgentResult(output={"answers": {}, "cover_letter": paragraphs},
+                          usage=Usage(model="claude-opus-5-5"))  # fmt: skip
+    draft_application(AgentRunner(FakeBackend([drafted, judged])), engine, application_id, profile)
+    with Session(engine) as session, session.begin():
+        [answer] = session.scalars(select(DraftAnswer))
+        decide(session, 1, application_id, answer.id, AnswerRequest(decision=AnswerDecision.ACCEPT))
+        check_answers(session, 1, application_id)
+
+    plan_fill(AgentRunner(FakeBackend([])), engine, data_dir, application_id, profile)
+
+    body = f"{LETTER}\n\n{ANSWER}\n\nJe serais heureuse d'en parler."
+    assert _planned(engine, application_id) == {
+        0: ("fill", f"Madame, Monsieur,\n\n{body}\n\nCordialement,\nJeanne Dupont"),
+    }
 
 
 def test_a_name_field_drafting_leaves_to_identity_is_filled_with_the_name(

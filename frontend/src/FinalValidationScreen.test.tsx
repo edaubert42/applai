@@ -28,6 +28,16 @@ async function openValidation(routes: Record<string, unknown> = {}, language: "f
 }
 
 describe("FinalValidationScreen", () => {
+  it("shows each paragraph of a filled cover letter as its own block", async () => {
+    const letter = "Madame, Monsieur,\n\nVotre quai m’intéresse.\n\nCordialement,\nJeanne Dupont";
+    const field = aReviewedField({ label: "Lettre de motivation", type: "textarea", value: letter });
+    await openValidation({}, "fr", aFormReview({ fields: [field] }));
+
+    for (const paragraph of ["Madame, Monsieur,", "Votre quai m’intéresse.", "Cordialement, Jeanne Dupont"]) {
+      expect(screen.getByText(paragraph).tagName).toBe("P");
+    }
+  });
+
   it("shows Check only for reviewed, form_checked and validated rows, and Back reloads the board", async () => {
     const calls = fakeApi({
       ...reviewRoutes(),

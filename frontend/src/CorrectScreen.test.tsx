@@ -131,6 +131,40 @@ describe("the Correct screen", () => {
   });
 });
 
+describe("a cover letter in paragraphs", () => {
+  const body = ["Votre quai m’intéresse.", "J’ai organisé les quais de Silo Nord.", "Parlons-en."];
+  const signed = "Cordialement,\nJeanne Dupont";
+  const text = ["Madame, Monsieur,", ...body, signed].join("\n\n");
+  const sentences = body.map((sentence) => ({ text: sentence, facts: [{ id: "#F9", text: "Quai visité." }] }));
+  const letter = { ...second, sentences, text };
+
+  it("shows each paragraph of the letter as its own block", async () => {
+    await openCorrect({}, "fr", aDraft([letter]));
+    const card = answerNamed("Lettre de motivation");
+
+    for (const paragraph of ["Madame, Monsieur,", ...body, "Cordialement, Jeanne Dupont"]) {
+      expect(card.getByText(paragraph).tagName).toBe("P");
+    }
+  });
+
+  it("keeps the blank lines of the letter when it is edited", async () => {
+    const changed = text.replace("Parlons-en.", "Je serais heureuse d’en parler.");
+    const edited = { ...letter, status: "edited" as const, edited_text: changed };
+    const { calls, words } = await openCorrect({ [decision(2)]: edited }, "fr", aDraft([letter]));
+    const card = answerNamed("Lettre de motivation");
+
+    fireEvent.click(card.getByRole("button", { name: words["correct.edit"] }));
+    const box = card.getByLabelText(words["correct.edit_text"]) as HTMLTextAreaElement;
+    expect(box.value).toBe(text);
+    fireEvent.change(box, { target: { value: changed } });
+    fireEvent.click(card.getByRole("button", { name: words["correct.save"] }));
+
+    expect((await card.findByText("Je serais heureuse d’en parler.")).tagName).toBe("P");
+    expect(card.getByText("J’ai organisé les quais de Silo Nord.").tagName).toBe("P");
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ decision: "edit", text: changed });
+  });
+});
+
 describe("deciding on an answer", () => {
   it("accepts an answer: posts accept and shows it accepted", async () => {
     const accepted: Answer = anAnswer({ status: "accepted" });

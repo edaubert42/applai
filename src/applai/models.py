@@ -218,8 +218,10 @@ class CvChange(Base):
 class DraftAnswer(Base):
     """One answer, or the cover letter, the Drafting agent wrote for a field of a form.
 
-    sentences are the agent's, each {text, facts} citing validated facts (ADR 0008); text
-    is them joined without the facts' ids. status is pending until the candidate's label
+    sentences are the agent's, each {text, facts} citing validated facts (ADR 0008), and a
+    letter's also {paragraph}, its index; text is them joined without the facts' ids, a
+    letter's paragraphs by blank lines between its greeting and sign-off (applai.drafting).
+    status is pending until the candidate's label
     (applai.correct); edited_text is the candidate's, when they edited it.
     """
 
