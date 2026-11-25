@@ -18,6 +18,7 @@ The validated mockup, written down. The tokens live in `frontend/src/theme.ts`; 
 | `plus` on `plus-bg`, `plus-border` | `#7EE2A0` on `#1D2E24`, `#2E7D46` | `#1E6B3A` on `#E3F5EA`, `#7EC99A` | a point in the offer's favour |
 | `minus` on `minus-bg`, `minus-border` | `#FF9A92` on `#33201F`, `#A3403B` | `#A8322C` on `#FCE9E7`, `#E8A39D` | a point against |
 | `unknown` on `unknown-bg`, `unknown-border` | `#FFC857` on `#1C1D22`, `#9A6B12` | `#7A5200` on `#FFF6E0`, `#E0B24F` | a doubt |
+| `status-green`, `status-orange`, `status-red` | `#4ADE80`, `#FFC857`, `#FF6B61` | `#22A55A`, `#F29D12`, `#E0443C` | a service's light in Réglages, never text |
 
 The light theme keeps the dark theme's hues. Every text token reaches 4.5:1 on each background it is drawn on, in both themes; `frontend/src/theme.test.ts` checks it.
 
@@ -28,7 +29,7 @@ The light theme keeps the dark theme's hues. Every text token reaches 4.5:1 on e
 ## Layout
 
 - **Header** on `surface`: the ApplAI mark (an A in a `primary` rounded square) and its name; in the middle, the pill navigation on a `raised` track, the current page's pill in `primary`.
-- **Réglages**, one column of 860 px: an Apparence block (a sun for Jour, a moon for Nuit) and a separate Langue block, each a pill pair with the current one in `primary`; then one `surface` list per category, a row per service with its logo, name (an agent's model under it), state as a dot and words, and, when not green, what to do.
+- **Réglages**, one column of 860 px: an Apparence block (a sun for Jour, a moon for Nuit) and a separate Langue block, each a pill pair with the current one in `primary`; then, per category, one block per service, like those two: its logo (40 px), its name (under it, on one line, an agent's model and, when not green, what to do), and on the right its state as a coloured light with a halo, the words as its accessible name and tooltip.
 - **Pages**: À revoir / To review, Candidatures / Applications, Contrôle / Control. Each has its title and, for now, an empty card.
 - **Settings**: dark and French by default; the candidate's choice is kept in `localStorage`.
 - **Strings**: all in `frontend/src/locales/{fr,en}.json`; the lint fails on a literal string in JSX.

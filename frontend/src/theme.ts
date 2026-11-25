@@ -23,6 +23,9 @@ const dark = {
   unknown: "#FFC857",
   "unknown-bg": "#1C1D22",
   "unknown-border": "#9A6B12",
+  "status-green": "#4ADE80",
+  "status-orange": "#FFC857",
+  "status-red": "#FF6B61",
 };
 
 export type Token = keyof typeof dark;
@@ -49,6 +52,9 @@ const light: Record<Token, string> = {
   unknown: "#7A5200",
   "unknown-bg": "#FFF6E0",
   "unknown-border": "#E0B24F",
+  "status-green": "#22A55A",
+  "status-orange": "#F29D12",
+  "status-red": "#E0443C",
 };
 
 export const themes: Record<ThemeName, Record<Token, string>> = { dark, light };

@@ -23,6 +23,9 @@
   --color-unknown: var(--ui-unknown);
   --color-unknown-bg: var(--ui-unknown-bg);
   --color-unknown-border: var(--ui-unknown-border);
+  --color-status-green: var(--ui-status-green);
+  --color-status-orange: var(--ui-status-orange);
+  --color-status-red: var(--ui-status-red);
 
   --font-sans: "Figtree Variable", ui-sans-serif, system-ui, sans-serif;
 
