@@ -91,6 +91,20 @@ def test_a_tab_matches_on_origin_path_and_query_only(data_dir: Path, app: FastAP
     assert shown == {form: True, other_query: False, other_host: False}
 
 
+def test_a_tab_matches_whatever_the_host_case_or_default_port(data_dir: Path, app: FastAPI):
+    form = _application(
+        data_dir, "chef-de-quai", "filled", LEVER.replace("jobs.lever", "Jobs.Lever")
+    )
+    ported = _application(data_dir, "magasinier", "filled", LEVER.replace(".co/", ".co:443/"))
+    other_port = _application(data_dir, "cariste", "filled", LEVER.replace(".co/", ".co:8443/"))
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        client.post(TABS, json={"urls": [LEVER]}, headers=EXTENSION)
+        shown = _tab_open(client)
+
+    assert shown == {form: True, ported: True, other_port: False}
+
+
 def test_an_application_with_no_tab_to_wait_for_has_no_answer(data_dir: Path, app: FastAPI):
     drafted = _application(data_dir, "chef-de-quai", "drafted", LEVER)
     sent = _application(data_dir, "magasinier", "sent", LEVER)

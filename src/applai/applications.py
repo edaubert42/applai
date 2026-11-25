@@ -58,19 +58,20 @@ class Board(BaseModel):
     dropped: list[Row]
 
 
+def _form_key(url: str) -> tuple[str, str, int | None, str, str]:
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    port = parts.port or {"http": 80, "https": 443}.get(scheme)
+    return (scheme, (parts.hostname or "").lower(), port, parts.path.rstrip("/"), parts.query)
+
+
 def same_form_url(a: str, b: str) -> bool:
     """Whether two URLs are the same form: same origin, path and query, as the extension's
-    sendForms (extension/background.js) matches a tab."""
+    sendForms (extension/background.js) matches a tab; host case and default port do not matter."""
     try:
-        one, other = urlsplit(a), urlsplit(b)
+        return _form_key(a) == _form_key(b)
     except ValueError:
         return a == b
-    return (one.scheme, one.netloc, one.path.rstrip("/"), one.query) == (
-        other.scheme,
-        other.netloc,
-        other.path.rstrip("/"),
-        other.query,
-    )
 
 
 def _tab_open(application: Application, open_tabs: list[str] | None) -> bool | None:
