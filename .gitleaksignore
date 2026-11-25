@@ -1,0 +1,4 @@
+# False positives: a type annotation "linkedin_progress: LinkedInProgress" (16 letters after a
+# colon) looks like a LinkedIn client secret to the default rule. Renamed since; the commit stays.
+e92496060c97eeb4dc05954dcb44bf8dc5ac761f:src/applai/scan.py:linkedin-client-secret:198
+e92496060c97eeb4dc05954dcb44bf8dc5ac761f:src/applai/scan.py:linkedin-client-secret:221
