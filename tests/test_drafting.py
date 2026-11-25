@@ -329,7 +329,7 @@ def test_after_a_draft_ends_failed_or_drafted_a_new_one_starts(data_dir: Path, e
         failed = client.post(url)
         error = _get(engine, application_id).draft_error
         retried = client.post(url)
-        runner.claim("drafting", application_id=application_id).release()  # nothing holds it
+        runner.lock("drafting", application_id=application_id).release()  # nothing holds it
 
     assert (failed.status_code, retried.status_code) == (202, 202)
     assert error is not None and error.startswith("Drafting refused")

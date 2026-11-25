@@ -5,8 +5,8 @@ field it does not know, and the ClaudeCLI backend always passes --tools "" and
 --strict-mcp-config with no --mcp-config. Giving agents tools from ApplAI's own MCP
 server will be a change to this module, never something a spec can ask for.
 
-The same agent never runs twice at once on one offer or application: a run claims it with
-AgentRunner.claim() and the claim is released when the run ends, however it ends. Claims
+The same agent never runs twice at once on one offer or application: a run locks it with
+AgentRunner.lock() and the lock is released when the run ends, however it ends. Locks
 live in this process, the only one ApplAI runs.
 
 An agent's input may hold the candidate's data. It reaches the CLI on stdin, not on the
@@ -58,37 +58,37 @@ class AlreadyRunning(Exception):
         super().__init__(f"agent {agent} is already running on {on}")
 
 
-class Claim:
+class RunLock:
     """One agent marked running on one offer or application, until release().
 
     As a context manager it is released on leaving the block, whatever ends it. Releasing it
-    again does nothing: it never frees a later claim of the same agent on the same subject.
+    again does nothing: it never frees a later lock of the same agent on the same subject.
     """
 
     def __init__(
-        self, agent: str, on: str, claimed: set[tuple[str, str]], lock: threading.Lock
+        self, agent: str, on: str, locked: set[tuple[str, str]], guard: threading.Lock
     ) -> None:
         self.agent, self.on = agent, on
-        self._claimed, self._lock = claimed, lock
+        self._locked, self._guard = locked, guard
         self._released = False
 
     def release(self) -> None:
-        with self._lock:
+        with self._guard:
             if not self._released:
                 self._released = True
-                self._claimed.discard((self.agent, self.on))
+                self._locked.discard((self.agent, self.on))
 
-    def __enter__(self) -> "Claim":
+    def __enter__(self) -> "RunLock":
         return self
 
     def __exit__(self, *_: object) -> None:
         self.release()
 
 
-def claimed_subject(*, offer_id: int | None = None, application_id: int | None = None) -> str:
-    """What a claim is on: one offer or one application."""
+def locked_subject(*, offer_id: int | None = None, application_id: int | None = None) -> str:
+    """What a lock is on: one offer or one application."""
     if (offer_id is None) == (application_id is None):
-        raise ValueError("a claim is on an offer_id or an application_id, one of them")
+        raise ValueError("a lock is on an offer_id or an application_id, one of them")
     return f"offer {offer_id}" if application_id is None else f"application {application_id}"
 
 
@@ -140,19 +140,19 @@ class AgentRunner:
         self.backend = backend
         self.max_parallel_agents = max_parallel_agents
         self._slots = threading.BoundedSemaphore(max_parallel_agents)
-        self._claimed: set[tuple[str, str]] = set()
-        self._claims_lock = threading.Lock()
+        self._locked: set[tuple[str, str]] = set()
+        self._guard = threading.Lock()
 
-    def claim(
+    def lock(
         self, agent: str, *, offer_id: int | None = None, application_id: int | None = None
-    ) -> Claim:
+    ) -> RunLock:
         """Mark the agent running on the offer or the application, or raise AlreadyRunning."""
-        on = claimed_subject(offer_id=offer_id, application_id=application_id)
-        with self._claims_lock:
-            if (agent, on) in self._claimed:
+        on = locked_subject(offer_id=offer_id, application_id=application_id)
+        with self._guard:
+            if (agent, on) in self._locked:
                 raise AlreadyRunning(agent, on)
-            self._claimed.add((agent, on))
-        return Claim(agent, on, self._claimed, self._claims_lock)
+            self._locked.add((agent, on))
+        return RunLock(agent, on, self._locked, self._guard)
 
     def run_agent(
         self,

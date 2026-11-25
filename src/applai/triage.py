@@ -223,7 +223,7 @@ def triage_offer(runner: AgentRunner, database: Engine, offer_id: int, profile: 
     While Triage runs on the offer, another triage_offer() of it raises AlreadyRunning
     without calling the agent.
     """
-    with runner.claim(AGENT, offer_id=offer_id):
+    with runner.lock(AGENT, offer_id=offer_id):
         return _triage_offer(runner, database, offer_id, profile)
 
 

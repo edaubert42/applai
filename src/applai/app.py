@@ -219,7 +219,7 @@ def paste_form_url(application_id: int, body: FormUrl, session: _Session) -> For
 def draft(application_id: int, session: _Session, request: Request, later: BackgroundTasks) -> None:
     """Draft a form_captured application again, after a failure, in the background.
 
-    Refused while Drafting runs on it: its claim is taken here and released by the
+    Refused while Drafting runs on it: its lock is taken here and released by the
     background task, however it ends."""
     application = session.get(Application, application_id)
     if application is None or application.user_id != LOCAL_USER_ID:
@@ -230,19 +230,17 @@ def draft(application_id: int, session: _Session, request: Request, later: Backg
     if watch is None:
         raise HTTPException(503, "The watch is off: ApplAI was started without it.")
     try:
-        claim = watch.runner.claim(DRAFTING, application_id=application_id)
+        lock = watch.runner.lock(DRAFTING, application_id=application_id)
     except AlreadyRunning:
         raise HTTPException(409, f"Application {application_id} is being drafted.") from None
     try:
         application.draft_error = None
         session.commit()
-        s = request.app.state
-        later.add_task(
-            draft_in_background, s.engine, s.data_dir, watch.runner, application_id, claim
-        )
-    except BaseException:
-        claim.release()
+    except BaseException:  # the commit failed: no background task will release the lock
+        lock.release()
         raise
+    s = request.app.state
+    later.add_task(draft_in_background, s.engine, s.data_dir, watch.runner, application_id, lock)
 
 
 def _profile(request: Request) -> Profile:
