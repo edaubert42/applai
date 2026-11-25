@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { CATEGORIES, api, type Service, type Services } from "./api";
+import { CATEGORIES, api, type Category, type Service, type Services } from "./api";
+import { ServiceLogo } from "./ServiceLogo";
 import { STATE_DOT, serviceName } from "./service-state";
 import { useSettings } from "./settings";
 
@@ -36,7 +37,7 @@ export default function SettingsScreen() {
             </h2>
             <ul className="space-y-3">
               {services[category].map((service) => (
-                <ServiceRow key={service.id} service={service} />
+                <ServiceRow key={service.id} service={service} category={category} />
               ))}
             </ul>
           </section>
@@ -45,17 +46,19 @@ export default function SettingsScreen() {
   );
 }
 
-function ServiceRow({ service }: { service: Service }) {
+function ServiceRow({ service, category }: { service: Service; category: Category }) {
   const { t, lookup } = useSettings();
   const name = serviceName(service.id, lookup);
 
   return (
     <li className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-block bg-surface p-4">
-      <h3 className="min-w-0 flex-1 basis-60 font-semibold [overflow-wrap:anywhere]">{name}</h3>
-      <span className="inline-flex items-center gap-2 rounded-pill bg-raised px-3 py-1 text-sm">
-        <span aria-hidden="true" className={`size-2.5 rounded-full ${STATE_DOT[service.state]}`} />
-        {t(`settings.state.${service.state}`)}
-      </span>
+      <ServiceLogo id={service.id} category={category} name={name} />
+      <h3 className="min-w-0 flex-1 basis-48 font-semibold [overflow-wrap:anywhere]">{name}</h3>
+      <span
+        role="img"
+        aria-label={t(`settings.state.${service.state}`)}
+        className={`size-3 shrink-0 rounded-full ${STATE_DOT[service.state]}`}
+      />
       {service.state !== "green" && service.hint && (
         <p className="basis-full text-sm text-muted [overflow-wrap:anywhere]">{service.hint}</p>
       )}

@@ -2,3 +2,13 @@
 # Add a file here only once it is checked to hold fictional data (demo GIF, fake forms).
 src/applai/geo/idf_communes.csv
 demo/candidate/cv/photo.jpg
+frontend/src/service-logos/chrome.png
+frontend/src/service-logos/claude.png
+frontend/src/service-logos/google.png
+frontend/src/service-logos/hellowork.ico
+frontend/src/service-logos/jobteaser.png
+frontend/src/service-logos/lesjeudis.png
+frontend/src/service-logos/linkedin.png
+frontend/src/service-logos/notion.png
+frontend/src/service-logos/outlook.jpg
+frontend/src/service-logos/wttj.png
