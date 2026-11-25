@@ -183,7 +183,7 @@ class LastScan(BaseModel):
     errors: list[str]
 
 
-class LinkedInProgress(BaseModel):
+class LinkedInReadProgress(BaseModel):
     read: int  # the LinkedIn offers the running scan went through, read or failed
     total: int  # the new LinkedIn offers it had to read
 
@@ -195,7 +195,7 @@ class ScanStatus(BaseModel):
     manual_scan_in_s: int | None  # seconds before a scan by hand is allowed; none: now
     linkedin_reads_today: int
     linkedin_reads_per_day: int
-    linkedin_progress: LinkedInProgress | None  # none: no scan is reading LinkedIn
+    linkedin_progress: LinkedInReadProgress | None  # none: no scan is reading LinkedIn
 
 
 class Scanner:
@@ -218,7 +218,7 @@ class Scanner:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._schedule: threading.Thread | None = None
-        self._linkedin: LinkedInProgress | None = None  # replaced whole: read by other threads
+        self._linkedin: LinkedInReadProgress | None = None  # replaced whole: read by other threads
 
     def start(self, by_hand: bool = True) -> int:
         """Start a scan in the background and return its id, or raise ScanRefused."""
@@ -334,7 +334,7 @@ class Scanner:
             self._running.release()
 
     def _report_linkedin(self, read: int, total: int) -> None:
-        self._linkedin = LinkedInProgress(read=read, total=total)
+        self._linkedin = LinkedInReadProgress(read=read, total=total)
 
 
 def _cooldown_left(last: Scan | None, now: datetime) -> int | None:
