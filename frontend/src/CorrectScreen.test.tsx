@@ -402,9 +402,18 @@ describe("the answers gate", () => {
     const { words } = await openCorrect();
 
     const names = screen.getAllByRole("button").map((button) => button.textContent);
-    const allowed = ["nav.review", "nav.applications", "nav.control", "nav.settings", "correct.back", "correct.accept", "correct.edit", "correct.reject", "correct.validate"].map(
-      (key) => words[key as keyof typeof words],
-    );
+    const allowed = [
+      "nav.review",
+      "nav.applications",
+      "nav.control",
+      "nav.settings",
+      "correct.back",
+      "correct.accept",
+      "correct.edit",
+      "correct.reject",
+      "correct.short",
+      "correct.validate",
+    ].map((key) => words[key as keyof typeof words]);
     expect(names.filter((name) => !allowed.includes(name ?? ""))).toEqual([]);
     expect(screen.queryByRole("button", { name: /fill|send|submit|rempli|envoy|soumett/i })).toBeNull();
   });
