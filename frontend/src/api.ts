@@ -170,6 +170,8 @@ export interface ScanStatus {
   manual_scan_in_s: number | null;
   linkedin_reads_today: number;
   linkedin_reads_per_day: number;
+  /** The LinkedIn offers the running scan went through, out of the new ones; null when no scan reads LinkedIn. */
+  linkedin_progress: { read: number; total: number } | null;
 }
 
 export type ServiceState = "green" | "orange" | "red";

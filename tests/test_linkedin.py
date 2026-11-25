@@ -81,9 +81,30 @@ def _offer(engine: Engine, job_id: str) -> int:
         return offer.id
 
 
-def _run(engine: Engine, now: datetime = NOON) -> list[str]:
+class Clock:
+    """A UTC time without a time zone, moved by sleep instead of waiting."""
+
+    def __init__(self, now: datetime = NOON) -> None:
+        self.now = now
+        self.slept: list[float] = []
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += timedelta(seconds=seconds)
+
+
+def _run(engine: Engine, clock: Clock | None = None) -> list[str]:
+    clock = clock or Clock()
     with Session(engine) as session:
-        return describe_linkedin_offers(session, now=now).errors
+        return describe_linkedin_offers(session, clock, clock.sleep).errors
+
+
+def _read_times(engine: Engine) -> list[datetime]:
+    with Session(engine) as session:
+        return list(session.scalars(select(LinkedInRead.read_at).order_by(LinkedInRead.id)))
 
 
 def _get(engine: Engine, offer_id: int) -> Offer:
@@ -156,41 +177,59 @@ def test_text_with_a_section_error_is_kept(engine: Engine, server: FictionalServ
     )
 
 
-def test_the_31st_read_of_the_day_waits_for_the_next_day(engine: Engine, server: FictionalServer):
-    server.serve({"4000000001": _job(POSTING)})
-    offer_id = _offer(engine, "4000000001")
-    with Session(engine) as session:
-        session.add_all(
-            LinkedInRead(user_id=1, offer_id=offer_id, read_at=NOON - timedelta(minutes=3 * i))
-            for i in range(1, MAX_READS_PER_DAY + 1)
-        )
-        session.commit()
-
-    assert _run(engine) == []
-    assert server.calls() == []
-    assert (_get(engine, offer_id).state, _get(engine, offer_id).detail_error) == ("new", None)
-
-    assert _run(engine, now=datetime(2026, 11, 21, 0, 0)) == []
-    assert _get(engine, offer_id).state == "described"
-    assert len(server.calls()) == 1
-
-
-def test_a_run_reads_one_offer_and_the_next_read_waits_two_minutes(
+def test_reads_stop_at_the_daily_limit_and_the_next_day_goes_on(
     engine: Engine, server: FictionalServer
 ):
     server.serve({"4000000001": _job(POSTING), "4000000002": _job(POSTING)})
     first, second = _offer(engine, "4000000001"), _offer(engine, "4000000002")
+    with Session(engine) as session:
+        session.add_all(
+            LinkedInRead(user_id=1, offer_id=first, read_at=NOON - timedelta(minutes=3 * i))
+            for i in range(1, MAX_READS_PER_DAY)
+        )  # one read left today
+        session.commit()
 
-    _run(engine)
+    assert _run(engine) == []
     assert (_get(engine, first).state, _get(engine, second).state) == ("described", "new")
+    assert _get(engine, second).detail_error is None
 
-    _run(engine, now=NOON + timedelta(minutes=1, seconds=59))
-    assert _get(engine, second).state == "new"
-    assert len(server.calls()) == 1
-
-    _run(engine, now=NOON + timedelta(minutes=2))
+    assert _run(engine, Clock(datetime(2026, 11, 21, 0, 0))) == []
     assert _get(engine, second).state == "described"
     assert len(server.calls()) == 2
+
+
+def test_a_run_waits_out_the_interval_since_the_last_read_then_reads_each_offer_10_s_apart(
+    engine: Engine, server: FictionalServer
+):
+    server.serve({"4000000001": _job(POSTING), "4000000002": _job(POSTING)})
+    first, second = _offer(engine, "4000000001"), _offer(engine, "4000000002")
+    with Session(engine) as session:  # a read 4 seconds ago, by an earlier run
+        session.add(LinkedInRead(user_id=1, offer_id=first, read_at=NOON - timedelta(seconds=4)))
+        session.commit()
+    clock = Clock()
+
+    assert _run(engine, clock) == []
+
+    assert clock.slept == [6.0, 10.0]
+    assert _read_times(engine)[1:] == [NOON + timedelta(seconds=6), NOON + timedelta(seconds=16)]
+    assert (_get(engine, first).state, _get(engine, second).state) == ("described", "described")
+
+
+def test_only_failed_calls_in_a_row_stop_the_reads(engine: Engine, server: FictionalServer):
+    server.serve({"4000000003": _job(POSTING)})  # the others fail
+    for job_id in ("4000000001", "4000000002"):
+        _offer(engine, job_id)
+    with Session(engine) as session:  # a URL without a job id: no call, so no failed call
+        session.add(Offer(user_id=1, url="https://www.linkedin.com/jobs/", title="Data engineer",
+                          company="Pivoine Analytics"))  # fmt: skip
+        session.commit()
+    for job_id in ("4000000003", "4000000004", "4000000005"):
+        _offer(engine, job_id)
+
+    errors = _run(engine)
+
+    assert len(server.calls()) == 5  # fail, fail, (no call), read, fail, fail: never 3 in a row
+    assert len(errors) == 5
 
 
 def test_the_client_refuses_any_tool_but_get_job_details(server: FictionalServer):

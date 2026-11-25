@@ -703,7 +703,7 @@ def create_app(
         app.state.watch, app.state.clock, app.state.extension_asked_at = watch, clock, None
         if watch is not None:
             app.state.scanner = Scanner(
-                engine, partial(run_scan, engine, data_dir, watch, clock=clock), clock
+                engine, partial(run_scan, engine, data_dir, watch, LOCAL_USER_ID, clock), clock
             )
             app.state.scanner.start_schedule()
         try:
