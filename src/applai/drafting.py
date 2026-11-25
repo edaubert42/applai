@@ -28,7 +28,7 @@ from applai.agents import AgentError, AgentRunner, AgentSpec, RunLock, locked_su
 from applai.cv import offer_language
 from applai.cv_tailoring import store, tailor_cv
 from applai.drafting_judge import judge_answers
-from applai.models import AgentRun, Application, DraftAnswer, Offer
+from applai.models import AgentRun, Application, DraftAnswer, Label, Offer
 from applai.orchestrator import Actor, ApplicationState, move
 from applai.profile import Diffusion, FactStatus, Profile, ProfileError, load_profile
 from applai.text import fold
@@ -40,6 +40,7 @@ QUESTION, COVER_LETTER = "question", "cover_letter"  # draft_answers.kind
 INVALID_CITATION = "invalid_citation"  # the outcome of a run whose citations code refused
 LETTER_TOO_LONG = "letter_too_long"  # the outcome of a run whose letter code refused
 LETTER_WORDS = 300  # at most, in the letter's body
+SHORT_LETTER_WORDS = 200  # at most, in a short cover letter's body
 # The greeting and the sign-off code adds to a letter, in the offer's language.
 _LETTER_ENDS = {"fr": ("Madame, Monsieur,", "Cordialement,"),
                 "en": ("Dear Hiring Team,", "Kind regards,")}  # fmt: skip
@@ -87,6 +88,8 @@ the candidate's targets, base answers, and the facts about the candidate you may
   are added for you.
 - rejected, when given: the candidate rejected your earlier text for that field, for the
   reason they give. Write it again, following their reason.
+- short, when given: write the cover_letter again as a shorter version, 150 to 200 words in
+  all, keeping 3 to 4 paragraphs, cited sentences, and no address, greeting or sign-off.
 
 Each sentence is {"text": ..., "facts": [...]}: facts lists the ids ("F3") of the facts the
 sentence relies on, at least one. A sentence no fact backs is not written. Never write a
@@ -129,6 +132,7 @@ def drafting_spec(
     letter: int | None,
     profile: Profile,
     rejected: dict[str, Any] | None = None,
+    short: dict[str, Any] | None = None,
 ) -> AgentSpec:
     """What the Drafting agent is sent: the offer, the fields to draft, the profile's parts,
     and the text the candidate rejected, with their reason, when one field is drafted again."""
@@ -145,6 +149,8 @@ def drafting_spec(
         output["cover_letter"] = _PARAGRAPHS
     if rejected is not None:
         sent["rejected"] = rejected
+    if short is not None:
+        sent["short"] = short
     return AgentSpec(name=AGENT, model=DRAFTING_MODEL, system_prompt=SYSTEM_PROMPT,
                      json_schema=_object(output),
                      input=json.dumps(sent, ensure_ascii=False, indent=2))  # fmt: skip
@@ -276,10 +282,12 @@ def _check_citations(
             _refuse(database, run_id, INVALID_CITATION, problem)
 
 
-def _check_length(database: Engine, run_id: int, letter: list[dict[str, Any]]) -> None:
-    """Refuse the run if its letter's body is over LETTER_WORDS words."""
-    if (words := len(rendered(letter).split())) > LETTER_WORDS:
-        problem = f"the cover letter has {words} words, more than {LETTER_WORDS}"
+def _check_length(
+    database: Engine, run_id: int, letter: list[dict[str, Any]], max_words: int = LETTER_WORDS
+) -> None:
+    """Refuse the run if its letter's body is over max_words words."""
+    if (words := len(rendered(letter).split())) > max_words:
+        problem = f"the cover letter has {words} words, more than {max_words}"
         _refuse(database, run_id, LETTER_TOO_LONG, problem)
 
 
@@ -364,6 +372,56 @@ def redraft_answer(
         answer.text = _text(answer.kind, sentences, sent, profile)
         answer.status, answer.edited_text = AnswerStatus.PENDING, None
         answer.judge_issues = judged.judge_issues
+    return answer
+
+
+def redraft_short_letter(
+    runner: AgentRunner, database: Engine, answer_id: int, profile: Profile
+) -> DraftAnswer:
+    """Draft a cover letter again in 150 to 200 words, and replace it, pending.
+
+    Refuses a short letter over SHORT_LETTER_WORDS words or with invalid citations; on any
+    failure the earlier letter, its status and its edited_text stay unchanged and no label is
+    recorded. Only the drafted text is sent to the agent (ADR 0008).
+    """
+    with Session(database) as session:
+        answer = session.get_one(DraftAnswer, answer_id)
+        application = session.get_one(Application, answer.application_id)
+        if application.state != ApplicationState.DRAFTED:
+            raise DraftingError(
+                f"Application {application.id} is {application.state}, not drafted."
+            )
+        if answer.kind != COVER_LETTER:
+            raise DraftingError(f"Answer {answer_id} is not a cover letter.")
+        offer = session.get_one(Offer, application.offer_id)
+        sent = {"title": offer.title, "company": offer.company, "description": offer.description}
+        fields, index = application.form_fields or [], answer.field_index
+        short = {"field": index, "text": answer.text}
+        offer_id, application_id = offer.id, application.id
+    spec = drafting_spec(sent, fields, [], index, profile, short=short)
+    result = runner.run_agent(
+        spec, database=database, offer_id=offer_id, application_id=application_id
+    )
+    run_id = _run_id(result.run_id)
+    sentences = paragraphed(result.output["cover_letter"])
+    _check_citations(database, run_id, [sentences], profile)
+    _check_length(database, run_id, sentences, SHORT_LETTER_WORDS)
+    judged = DraftAnswer(sentences=sentences)
+    judge_answers(runner, database, offer_id, application_id, [judged], profile)
+    with Session(database, expire_on_commit=False) as session, session.begin():
+        answer = session.get_one(DraftAnswer, answer_id)
+        application = session.get_one(Application, answer.application_id)
+        if application.state != ApplicationState.DRAFTED or answer.kind != COVER_LETTER:
+            raise DraftingError(f"Answer {answer_id} was changed while it was drafted again.")
+        answer.agent_run_id, answer.sentences = run_id, sentences
+        answer.text = _text(answer.kind, sentences, sent, profile)
+        answer.status, answer.edited_text = AnswerStatus.PENDING, None
+        answer.judge_issues = judged.judge_issues
+        session.add(
+            Label(user_id=application.user_id, offer_id=application.offer_id,
+                  application_id=application.id, level="answers", decision=AnswerStatus.REJECTED,
+                  reasons=[], note="short", correction=True)
+        )  # fmt: skip
     return answer
 
 

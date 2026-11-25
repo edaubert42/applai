@@ -117,6 +117,7 @@ function AnswerCard({
   const [text, setText] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [shortening, setShortening] = useState(false);
   const [failed, setFailed] = useState(false);
   const shown = answer.edited_text ?? answer.text;
   const titleId = `answer-${answer.id}`;
@@ -139,6 +140,24 @@ function AnswerCard({
       },
       () => {
         setBusy(false);
+        setFailed(true);
+      },
+    );
+  }
+
+  function shorten() {
+    setBusy(true);
+    setShortening(true);
+    setFailed(false);
+    api.shortCoverLetter(applicationId, answer.id).then(
+      (shortened) => {
+        setBusy(false);
+        setShortening(false);
+        onChange(shortened);
+      },
+      () => {
+        setBusy(false);
+        setShortening(false);
         setFailed(true);
       },
     );
@@ -180,6 +199,11 @@ function AnswerCard({
           <button type="button" disabled={busy} onClick={() => open("reject")} className={button}>
             {t("correct.reject")}
           </button>
+          {answer.kind === "cover_letter" && (
+            <button type="button" disabled={busy} onClick={shorten} className={button}>
+              {shortening ? t("correct.rewriting") : t("correct.short")}
+            </button>
+          )}
         </div>
       )}
 

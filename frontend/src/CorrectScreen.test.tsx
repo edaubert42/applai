@@ -270,6 +270,42 @@ describe("deciding on an answer", () => {
     const accept = answerNamed("Pourquoi ce poste ?").getByRole("button", { name: words["correct.accept"] });
     expect((accept as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("asks for a short cover letter on the cover letter card only and shows it is being rewritten", async () => {
+    const shortLetter: Answer = {
+      ...second,
+      status: "pending",
+      text: "Madame, Monsieur,\n\nVersion courte.\n\nCordialement,\nJeanne Dupont",
+      sentences: [{ text: "Version courte.", facts: [{ id: "#F9", text: "Quai de Brindille visité en 2025." }] }],
+    };
+    let release: () => void = () => {};
+    const { calls, words } = await openCorrect(
+      {
+        "POST /api/applications/1/draft/2/short": () =>
+          new Promise<Answer>((resolve) => (release = () => resolve(shortLetter))),
+      },
+      "fr",
+      aDraft([anAnswer(), { ...second, status: "accepted" }]),
+    );
+
+    expect(answerNamed("Pourquoi ce poste ?").queryByRole("button", { name: words["correct.short"] })).toBeNull();
+    const letter = answerNamed("Lettre de motivation");
+    const shortButton = letter.getByRole("button", { name: words["correct.short"] }) as HTMLButtonElement;
+    fireEvent.click(shortButton);
+
+    await waitFor(() =>
+      expect((letter.getByRole("button", { name: words["correct.rewriting"] }) as HTMLButtonElement).disabled).toBe(
+        true,
+      ),
+    );
+    expect(calls.filter((c) => c.method === "POST")).toEqual([
+      { method: "POST", path: "/api/applications/1/draft/2/short", body: undefined },
+    ]);
+
+    release();
+    expect(await letter.findByText("Version courte.")).toBeTruthy();
+    expect(letter.getByText(words["correct.status.pending"])).toBeTruthy();
+  });
 });
 
 describe("the answers gate", () => {
@@ -366,9 +402,18 @@ describe("the answers gate", () => {
     const { words } = await openCorrect();
 
     const names = screen.getAllByRole("button").map((button) => button.textContent);
-    const allowed = ["nav.review", "nav.applications", "nav.control", "nav.settings", "correct.back", "correct.accept", "correct.edit", "correct.reject", "correct.validate"].map(
-      (key) => words[key as keyof typeof words],
-    );
+    const allowed = [
+      "nav.review",
+      "nav.applications",
+      "nav.control",
+      "nav.settings",
+      "correct.back",
+      "correct.accept",
+      "correct.edit",
+      "correct.reject",
+      "correct.short",
+      "correct.validate",
+    ].map((key) => words[key as keyof typeof words]);
     expect(names.filter((name) => !allowed.includes(name ?? ""))).toEqual([]);
     expect(screen.queryByRole("button", { name: /fill|send|submit|rempli|envoy|soumett/i })).toBeNull();
   });

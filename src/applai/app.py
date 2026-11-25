@@ -35,9 +35,23 @@ from applai.capture import find_form
 from applai.database import open_database
 from applai.details import IMAGE_TYPES, LOGOS_DIR
 from applai.drafting import AGENT as DRAFTING
-from applai.drafting import DraftingError, draft_in_background, redraft_answer
+from applai.drafting import (
+    COVER_LETTER,
+    DraftingError,
+    draft_in_background,
+    redraft_answer,
+    redraft_short_letter,
+)
 from applai.filling import Slot, file_path, plan_in_background
-from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Triage
+from applai.models import (
+    LOCAL_USER_ID,
+    Application,
+    DraftAnswer,
+    Offer,
+    OfferOrigin,
+    OfferState,
+    Triage,
+)
 from applai.orchestrator import ApplicationState, TransitionError
 from applai.profile import Profile, ProfileError, load_profile
 from applai.reread import RereadRefused
@@ -346,6 +360,41 @@ def decide_answer(
     except (AgentError, DraftingError) as error:  # these messages hold no candidate data
         raise HTTPException(502, str(error)) from None
     return correct.answer_view(answer, profile)
+
+
+@api.post("/applications/{application_id}/draft/{answer_id}/short")
+def short_cover_letter(
+    application_id: int,
+    answer_id: int,
+    session: _Session,
+    profile: _Profile,
+    request: Request,
+) -> correct.Answer:
+    """Draft a cover letter again in 150 to 200 words, while the candidate waits.
+
+    Refuses non-cover-letter answers and applications not in drafted (409). On Drafting failure
+    (502), including a letter over 200 words, the earlier letter stays unchanged.
+    """
+    watch: Watch | None = request.app.state.watch
+    if watch is None:
+        raise HTTPException(503, "The watch is off: ApplAI was started without it.")
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    answer = session.get(DraftAnswer, answer_id)
+    if answer is None or answer.application_id != application.id:
+        raise HTTPException(404, "no such answer")
+    if application.state != ApplicationState.DRAFTED:
+        raise HTTPException(
+            409, f"Application {application_id} is {application.state}, not drafted."
+        )
+    if answer.kind != COVER_LETTER:
+        raise HTTPException(409, f"Answer {answer_id} is not a cover letter.")
+    try:
+        updated = redraft_short_letter(watch.runner, request.app.state.engine, answer_id, profile)
+    except (AgentError, DraftingError) as error:  # these messages hold no candidate data
+        raise HTTPException(502, str(error)) from None
+    return correct.answer_view(updated, profile)
 
 
 @api.post("/applications/{application_id}/cv/changes/{change_id}")
