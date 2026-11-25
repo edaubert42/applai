@@ -135,8 +135,9 @@ def cards(session: Session, user_id: int, view: View, min_score: int) -> list[Ca
             )
             return [_card(offer, triage) for offer, triage in session.execute(query)]
         case View.SCREENED_OUT:
-            by_rule = session.scalars(
-                select(Offer)
+            by_rule = session.execute(
+                select(Offer, Triage)
+                .outerjoin(Triage, Triage.offer_id == Offer.id)
                 .where(*mine, Offer.state == OfferState.SCREENED_OUT)
                 .order_by(Offer.created_at.desc(), Offer.id.desc())
             )
@@ -146,7 +147,7 @@ def cards(session: Session, user_id: int, view: View, min_score: int) -> list[Ca
                 .where(*mine, Offer.state == OfferState.TRIAGED, Triage.score < min_score)
                 .order_by(Triage.score.desc(), Offer.id)
             )
-            return [_card(offer, None) for offer in by_rule] + [
+            return [_card(offer, triage) for offer, triage in by_rule] + [
                 _card(offer, triage) for offer, triage in below
             ]
 
