@@ -28,7 +28,8 @@ export function Logo({ card, className }: { card: Pick<Card, "company" | "logo">
         src={`/api/logos/${encodeURIComponent(card.logo)}`}
         alt={card.company}
         onError={() => setBroken(true)}
-        className={`${className} bg-white object-contain`}
+        // logos are drawn for white, in either theme; the theme has no white token
+        className={`${className} bg-[#fff] object-contain`}
       />
     );
   }
