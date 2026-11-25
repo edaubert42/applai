@@ -172,9 +172,8 @@ def _scanner(client: TestClient) -> Scanner:
 
 
 @pytest.fixture
-def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def data_dir(tmp_path: Path) -> Path:
     shutil.copy(DEMO_DIR / "profile.yaml", tmp_path)
-    monkeypatch.delenv("APPLAI_MS_CLIENT_ID", raising=False)
     return tmp_path
 
 
