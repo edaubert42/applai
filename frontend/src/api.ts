@@ -236,6 +236,8 @@ export const api = {
   draft: (id: number) => request<Draft>("GET", `/api/applications/${id}/draft`),
   decideAnswer: (id: number, answer: number, decision: AnswerDecision) =>
     request<Answer>("POST", `/api/applications/${id}/draft/${answer}`, decision),
+  shortCoverLetter: (id: number, answer: number) =>
+    request<Answer>("POST", `/api/applications/${id}/draft/${answer}/short`),
   decideCvChange: (id: number, change: number, decision: AnswerDecision) =>
     request<CvChange>("POST", `/api/applications/${id}/cv/changes/${change}`, decision),
   editCvHeadline: (id: number, text: string) =>

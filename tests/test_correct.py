@@ -299,3 +299,106 @@ def test_answers_checked_moves_drafted_once_every_answer_is_accepted_or_edited(
     )  # fmt: skip
     assert client.post(f"/api/applications/{empty}/answers-checked").status_code == 204
     assert client.post(f"{url}/answers-checked").status_code == 409  # no longer drafted
+
+
+LETTER_FIELDS: list[dict[str, Any]] = [
+    {"label": WHY, "type": "textarea", "required": True, "options": []},
+    {"label": "Lettre de motivation", "type": "textarea", "required": False, "options": []},
+]
+
+
+def _letter_result(paragraphs: list[list[dict[str, Any]]]) -> AgentResult:
+    usage = Usage(model=DRAFTING_MODEL, duration_ms=9000, input_tokens=4000, output_tokens=600)
+    return AgentResult(output={"answers": {}, "cover_letter": paragraphs}, usage=usage)
+
+
+def _drafted_with_letter(engine: Engine) -> tuple[int, int, int]:
+    with Session(engine) as session, session.begin():
+        offer = Offer(user_id=1, url=f"https://jobs.example.org/pivoine/{uuid4()}",
+                      title="Data engineer", company="Pivoine Analytics",
+                      description="Poste en français chez Pivoine Analytics.",
+                      state="accepted")  # fmt: skip
+        session.add(offer)
+        session.flush()
+        application = Application(user_id=1, offer_id=offer.id, state="form_captured",
+                                  form_fields=LETTER_FIELDS)  # fmt: skip
+        session.add(application)
+        session.flush()
+        application_id = application.id
+    initial = AgentResult(
+        output={
+            "answers": {"0": [{"text": SIX_YEARS, "facts": ["F1"]}]},
+            "cover_letter": [
+                [{"text": SIX_YEARS, "facts": ["F1"]}],
+                [{"text": FORECAST, "facts": ["F3"]}],
+                [{"text": REDRAFTED, "facts": ["F3"]}],
+            ],
+        },
+        usage=Usage(model=DRAFTING_MODEL, duration_ms=9000, input_tokens=4000, output_tokens=600),
+    )
+    rows = draft_application(
+        AgentRunner(FakeBackend([initial])), engine, application_id, load_profile(DEMO_DIR)
+    )
+    return application_id, rows[0].id, rows[1].id
+
+
+def test_short_route_replaces_cover_letter_within_200_words_and_keeps_greeting_and_sign_off(
+    data_dir: Path, engine: Engine
+):
+    short_paragraphs = [
+        [{"text": "Votre équipe m'intéresse.", "facts": ["F1"]}],
+        [{"text": FORECAST, "facts": ["F3"]}],
+        [{"text": "Rencontrons-nous.", "facts": ["F1"]}],
+    ]
+    backend = FakeBackend([_letter_result(short_paragraphs)])
+    watch = Watch(http=httpx2.Client(), runner=AgentRunner(backend), ms_client_id=None)
+    app = create_app(data_dir, frontend_dir=data_dir / "none", watch=watch)
+    application_id, question_id, letter_id = _drafted_with_letter(engine)
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        assert (
+            client.post(
+                f"/api/applications/{application_id}/draft/{letter_id}", json={"decision": "accept"}
+            ).status_code
+            == 200
+        )
+        res = client.post(f"/api/applications/{application_id}/draft/{letter_id}/short")
+        not_letter = client.post(f"/api/applications/{application_id}/draft/{question_id}/short")
+
+    assert res.status_code == 200
+    assert not_letter.status_code == 409
+    body = res.json()
+    assert body["status"] == "pending"
+    assert body["edited_text"] is None
+    assert body["text"].startswith("Madame, Monsieur,\n\n")
+    assert "\n\nCordialement,\n" in body["text"]
+    assert "Votre équipe m'intéresse." in body["text"]
+    assert '"short"' in backend.specs[0].input
+    saved = _answer(engine, letter_id)
+    assert saved.status == "pending" and saved.text == body["text"]
+    label = _labels(engine)[-1]
+    assert (label.level, label.decision, label.correction, label.note) == (
+        "answers", "rejected", True, "short",
+    )  # fmt: skip
+
+
+def test_short_letter_over_200_words_is_refused_and_earlier_letter_stays(
+    data_dir: Path, engine: Engine
+):
+    too_long = " ".join(["mot"] * 67)  # 67 * 3 = 201 words
+    long_paragraphs = [[{"text": too_long, "facts": ["F1"]}] for _ in range(3)]
+    backend = FakeBackend([_letter_result(long_paragraphs)])
+    watch = Watch(http=httpx2.Client(), runner=AgentRunner(backend), ms_client_id=None)
+    app = create_app(data_dir, frontend_dir=data_dir / "none", watch=watch)
+    application_id, _, letter_id = _drafted_with_letter(engine)
+    before = _answer(engine, letter_id)
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        res = client.post(f"/api/applications/{application_id}/draft/{letter_id}/short")
+
+    assert res.status_code == 502
+    assert "200" in res.json()["detail"]
+    after = _answer(engine, letter_id)
+    assert (after.text, after.status, after.edited_text) == (
+        before.text, before.status, before.edited_text,
+    )  # fmt: skip
+    assert _labels(engine) == []

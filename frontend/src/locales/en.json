@@ -150,6 +150,8 @@
   "correct.accept": "Accept",
   "correct.edit": "Edit",
   "correct.reject": "Reject & regenerate",
+  "correct.short": "Short version",
+  "correct.rewriting": "Rewriting…",
   "correct.edit_text": "Answer text",
   "correct.reason": "Reason (optional)",
   "correct.reject_reason": "Reason for rejecting",
