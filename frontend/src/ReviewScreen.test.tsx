@@ -193,13 +193,20 @@ describe("the list of offers", () => {
     expect(row.getByText("Acme Robotics")).toBeTruthy();
   });
 
-  it("shows the offer's age next to the contract type on the title line without a dot", async () => {
+  it("shows the site logo next to the offer's age on the title line and the contract type next to the company", async () => {
     vi.spyOn(Date, "now").mockReturnValue(new Date("2026-11-25T11:00:00Z").getTime());
     await openScreen(
       reviewRoutes({
         to_review: [
-          aCard({ seen_at: "2026-11-22T09:00:00Z" }),
-          aCard({ id: 2, title: "Développeuse web", company: "Globex Studio", contract_type: null, seen_at: "2026-11-25T09:00:00Z" }),
+          aCard({ source: "alert_wttj", seen_at: "2026-11-22T09:00:00Z" }),
+          aCard({
+            id: 2,
+            title: "Développeuse web",
+            company: "Globex Studio",
+            source: null,
+            contract_type: null,
+            seen_at: "2026-11-25T09:00:00Z",
+          }),
         ],
       }),
       false,
@@ -207,12 +214,15 @@ describe("the list of offers", () => {
 
     const first = rowOf(/Ingénieur logiciel/);
     const titleLine = within(first).getByText("Ingénieur logiciel").parentElement!;
-    expect(within(titleLine).getByText("CDI")).toBeTruthy();
+    const companyLine = within(first).getByText("Acme Robotics").parentElement!;
+    expect(titleLine.querySelector('[data-logo="alert_wttj"]')).toBeTruthy();
     expect(within(titleLine).getByText("il y a 3 j")).toBeTruthy();
     expect(titleLine.textContent).not.toContain("·");
+    expect(within(companyLine).getByText("CDI")).toBeTruthy();
 
     const second = rowOf(/Développeuse web/);
     const secondTitleLine = within(second).getByText("Développeuse web").parentElement!;
+    expect(secondTitleLine.querySelector("[data-logo]")).toBeNull();
     expect(within(secondTitleLine).getByText("il y a 2 h")).toBeTruthy();
     expect(secondTitleLine.textContent).not.toContain("·");
   });
