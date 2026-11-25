@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from applai.agents import AgentRunner, FakeBackend
 from applai.app import create_app
+from applai.capture import find_form
 from applai.database import open_database
 from applai.models import Application, Offer, Scan
 from applai.scan import Watch
@@ -136,6 +137,62 @@ def test_an_offer_not_read_over_http_asks_to_paste_the_form_s_url_without_a_requ
     assert application.form_url is None
     assert application.form_url_error and PASTE in application.form_url_error
     assert asked == []
+
+
+def _offer_and_application(engine: Engine, url: str) -> int:
+    """An accepted offer at url, without the form finder: return its application's id."""
+    with Session(engine) as session, session.begin():
+        offer = Offer(user_id=1, url=url, title="Data engineer", company="Pivoine Analytics",
+                      state="interested")  # fmt: skip
+        session.add(offer)
+        session.flush()
+        application = Application(user_id=1, offer_id=offer.id, state="created")
+        session.add(application)
+        session.flush()
+        return application.id
+
+
+def _finding_with(engine: Engine, failure: Exception, application_id: int, meanwhile: str | None):
+    """Run find_form on a network that fails with failure, after the candidate pasted meanwhile."""
+
+    def fail(request: httpx2.Request) -> httpx2.Response:
+        if meanwhile is not None:
+            with Session(engine) as session, session.begin():
+                session.get_one(Application, application_id).form_url = meanwhile
+        raise failure
+
+    find_form(engine, application_id, httpx2.Client(transport=httpx2.MockTransport(fail)))
+
+
+@pytest.mark.parametrize(
+    ("failure", "named"),
+    [
+        (httpx2.ConnectTimeout("timed out"), "ConnectTimeout"),
+        (ValueError("not a page"), "ValueError"),
+    ],
+)
+def test_a_page_that_fails_to_be_read_leaves_the_failure_and_the_paste_hint(
+    engine: Engine, failure: Exception, named: str
+):
+    application_id = _offer_and_application(engine, BOARD)
+
+    _finding_with(engine, failure, application_id, meanwhile=None)
+
+    application = _application(engine, application_id)
+    assert application.form_url is None
+    assert application.form_url_error
+    assert named in application.form_url_error
+    assert "not a page" not in application.form_url_error  # a message may hold a secret
+    assert application.form_url_error.endswith(f"{PASTE}.")
+
+
+def test_a_url_pasted_while_the_page_failed_to_be_read_is_kept(engine: Engine):
+    application_id = _offer_and_application(engine, BOARD)
+
+    _finding_with(engine, ValueError("not a page"), application_id, meanwhile=LEVER)
+
+    application = _application(engine, application_id)
+    assert (application.form_url, application.form_url_error) == (LEVER, None)
 
 
 def _row(client: TestClient) -> dict[str, Any]:

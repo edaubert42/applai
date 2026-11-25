@@ -149,6 +149,10 @@ def find_form(engine: Engine, application_id: int, http: httpx2.Client) -> None:
             found, error = form_url(offer, http), None
         except FormNotFound as not_found:
             found, error = None, str(not_found)
+        except Exception as unexpected:  # nothing escapes: the row says what to do
+            # Only the type: a message may hold the URL, which may hold a token.
+            found = None
+            error = f"The offer's page could not be read: {type(unexpected).__name__}. {PASTE}."
         session.refresh(application)
         if application.form_url is None:
             application.form_url, application.form_url_error = found, error
