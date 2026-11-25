@@ -167,20 +167,33 @@ describe("FinalValidationScreen", () => {
   });
 
   it.each(["fr", "en"] as const)("shows the CV warning of the application in %s", async (language) => {
-    const review = aFormReview({ cv_warning: "The photo is unknown for this offer: the CV has no photo." });
+    const review = aFormReview({ cv_warning: "cv_no_photo_file:cv/photo.jpg" });
     const { words } = await openValidation({}, language, review);
 
-    const prefix = words["validation.cv_warning"].replace("{warning}", "");
-    expect(screen.getByRole("alert").textContent).toBe(`${prefix}The photo is unknown for this offer: the CV has no photo.`);
+    const warning = words["message.cv_no_photo_file"].replace("{detail}", "cv/photo.jpg");
+    expect(screen.getByRole("alert").textContent).toBe(words["validation.cv_warning"].replace("{warning}", warning));
+  });
+
+  it.each(["fr", "en"] as const)("words the code's own problem and shows free text as it is, in %s", async (language) => {
+    const review = aFormReview({
+      review_error: "agent review failed: timeout",
+      problems: [{ severity: "blocking", field: "CV", message: "required_empty" }],
+    });
+    const { words } = await openValidation({}, language, review);
+
+    expect(screen.getByText(words["message.required_empty"])).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toBe(
+      words["validation.review_error"].replace("{error}", "agent review failed: timeout"),
+    );
   });
 
   it.each(["fr", "en"] as const)("shows send_error alert and authorizes ApplAI to send in %s", async (language) => {
-    const review = aFormReview({ state: "validated", send_error: "No open tab matches the form URL." });
+    const review = aFormReview({ state: "validated", send_error: "send_no_tab" });
     const { calls, words } = await openValidation({
       "POST /api/applications/1/authorize-send": new Response(null, { status: 204 }),
     }, language, review);
 
-    expect(screen.getByRole("alert").textContent).toContain("No open tab matches the form URL.");
+    expect(screen.getByRole("alert").textContent).toContain(words["message.send_no_tab"]);
     const authorizeBtn = screen.getByRole("button", { name: words["validation.authorize_send"] }) as HTMLButtonElement;
     expect(authorizeBtn.disabled).toBe(false);
 

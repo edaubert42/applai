@@ -566,7 +566,7 @@ describe("not interested", () => {
     const note = screen.getByLabelText(fr["decline.note"]);
     fireEvent.change(note, { target: { value: "Salaire non indiqué" } });
 
-    expect(fr["decline.needReason"]).toBe("Choisis au moins une raison");
+    expect(fr["decline.needReason"]).toBe("Choisissez au moins une raison");
     expect(screen.getByText(fr["decline.needReason"])).toBeTruthy();
     expect(save().disabled).toBe(true);
     fireEvent.click(save());

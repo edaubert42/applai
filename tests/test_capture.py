@@ -22,7 +22,6 @@ from applai.scan import Watch
 NOON = datetime(2026, 11, 20, 12, 0, tzinfo=ZoneInfo("Europe/Paris"))
 BOARD = "https://jobs.example.org/pivoine-analytics/data-engineer"
 LEVER = "https://jobs.lever.co/pivoine-analytics/4f2a-data-engineer"
-PASTE = "paste the form's URL"
 
 
 @pytest.fixture
@@ -118,7 +117,7 @@ def test_a_page_s_apply_link_is_the_form_and_a_page_without_one_is_an_error(
     assert with_link.form_url == "https://jobs.example.org/pivoine-analytics/candidature?id=12"
     assert with_link.form_url_error is None
     assert without.form_url is None
-    assert without.form_url_error and PASTE in without.form_url_error
+    assert without.form_url_error == "page_no_form"
 
 
 @pytest.mark.parametrize(
@@ -135,7 +134,7 @@ def test_an_offer_not_read_over_http_asks_to_paste_the_form_s_url_without_a_requ
     application = _application(engine, _accept(engine, client, url, source))
 
     assert application.form_url is None
-    assert application.form_url_error and PASTE in application.form_url_error
+    assert application.form_url_error == "page_not_ours"
     assert asked == []
 
 
@@ -180,10 +179,8 @@ def test_a_page_that_fails_to_be_read_leaves_the_failure_and_the_paste_hint(
 
     application = _application(engine, application_id)
     assert application.form_url is None
-    assert application.form_url_error
-    assert named in application.form_url_error
-    assert "not a page" not in application.form_url_error  # a message may hold a secret
-    assert application.form_url_error.endswith(f"{PASTE}.")
+    # only the type: a message may hold a secret
+    assert application.form_url_error == f"page_not_read:{named}"
 
 
 def test_a_url_pasted_while_the_page_failed_to_be_read_is_kept(engine: Engine):

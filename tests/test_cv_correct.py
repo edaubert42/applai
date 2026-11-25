@@ -146,8 +146,7 @@ def test_a_cv_over_one_page_with_the_candidates_choices_fails_filling_and_says_s
     with Session(engine) as session:
         application = session.get_one(Application, application_id)
         assert application.state == "answers_checked" and application.fill_plan is None
-        assert "one page" in (application.fill_error or "")
-        assert "Filling failed" in (application.fill_error or "")
+        assert application.fill_error == "cv_over_one_page"
 
 
 def test_each_decision_is_a_label_and_a_reject_needs_its_reason(engine: Engine, data_dir: Path):

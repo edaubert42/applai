@@ -87,8 +87,8 @@ describe("the Applications dashboard", () => {
     ["fr", fr],
     ["en", en],
   ] as const)("shows why the form was not found and sends a pasted URL, in %s", async (language, words) => {
-    const error = "The offer's page links to no form: paste the form's URL.";
-    const created = aRow({ id: 7, offer_id: 7, state: "created", form_url_error: error });
+    const error = words["message.page_http"].replace("{detail}", "403");
+    const created = aRow({ id: 7, offer_id: 7, state: "created", form_url_error: "page_http:403" });
     const lever = "https://jobs.lever.co/brindille-logistique/chef-de-quai";
     const calls = fakeApi({
       ...reviewRoutes(),
@@ -209,5 +209,16 @@ describe("the Applications dashboard", () => {
       words["applications.fill.extension_disconnected"],
     );
     expect(within(rows[1] as HTMLElement).getByRole("alert").textContent).toContain("form not loaded");
+  });
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("words why the extension could not fill a form, in %s", async (language, words) => {
+    const errored = aRow({ id: 9, offer_id: 9, state: "answers_checked", fill_error: "fill_not_loaded" });
+    await openScreen(applicationsRoutes({ in_progress: [errored] }), language);
+
+    const alert = await screen.findByText(fill(words["applications.fill.error"], { error: words["message.fill_not_loaded"] }));
+    expect(alert.getAttribute("role")).toBe("alert");
   });
 });

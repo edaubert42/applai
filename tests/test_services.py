@@ -1,6 +1,9 @@
 """Service health API (/api/services): real SQLite, real migrations, real FastAPI app."""
 
+import importlib
 import json
+import pkgutil
+import re
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,7 +16,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+import applai
 from applai.app import create_app
+from applai.browser import FillFailed, FormFailed, SendReason
+from applai.correct import NOT_JUDGED
+from applai.cv_tailoring import NO_PHOTO, NO_PHOTO_FILE, OVER_ONE_PAGE, UNTAILORED
 from applai.database import open_database
 from applai.details import PageError, describe_offer, page_answered
 from applai.drafting import INVALID_CITATION
@@ -194,8 +201,50 @@ def test_drafting_refused_for_its_citations_is_not_told_to_check_the_claude_logi
     assert triage["hint"] == "claude_login"
 
 
+def _messages(language: str) -> dict[str, str]:
+    locales = Path(__file__).parents[1] / "frontend" / "src" / "locales"
+    return json.loads((locales / f"{language}.json").read_text(encoding="utf-8"))
+
+
 @pytest.mark.parametrize("language", ["fr", "en"])
 def test_every_hint_the_api_can_send_has_a_sentence_in_the_page(language: str):
-    locales = Path(__file__).parents[1] / "frontend" / "src" / "locales"
-    messages = json.loads((locales / f"{language}.json").read_text(encoding="utf-8"))
+    messages = _messages(language)
     assert [h for h in get_args(Hint) if f"settings.hint.{h}" not in messages] == []
+
+
+@pytest.mark.parametrize("language", ["fr", "en"])
+def test_every_agent_has_a_name_in_the_page(language: str):
+    """A new agent's id would show as it is: each AGENT, *_AGENT or JUDGE constant needs a name."""
+    names = [m.name for m in pkgutil.iter_modules(applai.__path__) if m.name != "__main__"]
+    modules = [importlib.import_module(f"applai.{name}") for name in names]
+    agents = {
+        value
+        for module in modules
+        for key, value in vars(module).items()
+        if re.fullmatch(r"(\w+_)?AGENT|JUDGE", key) and re.fullmatch(r"[a-z_]+", str(value))
+    }
+    assert "drafting_judge" in agents
+    messages = _messages(language)
+    assert sorted(a for a in agents if f"settings.service.{a}" not in messages) == []
+
+
+@pytest.mark.parametrize("language", ["fr", "en"])
+def test_every_code_the_server_records_has_a_sentence_in_the_page(language: str):
+    def reasons(model: type[FormFailed | FillFailed]) -> tuple[str, ...]:
+        return get_args(model.model_fields["reason"].annotation)
+
+    codes = [f"form_{r}" for r in (*reasons(FormFailed), "no_field")]
+    codes += [f"fill_{r}" for r in reasons(FillFailed)]
+    codes += [f"send_{r}" for r in get_args(SendReason.__value__)]
+    codes += ["page_not_ours", "page_http", "page_not_read", "page_no_form", "required_empty"]
+    codes += [UNTAILORED, OVER_ONE_PAGE, NO_PHOTO, NO_PHOTO_FILE.split(":")[0]]
+    codes += [NOT_JUDGED, "judge_sentence", "judge_unsupported"]
+    messages = _messages(language)
+    assert [c for c in codes if f"message.{c}" not in messages] == []
+
+
+def test_the_french_sentences_say_vous_and_the_glossary_s_words():
+    """A setting's technical name stays only in parentheses, after plain words."""
+    words, bare = r"\b(Choisis|scans?|workflow)\b", r"(?<![(\w])(APPLAI_\w+|extension_id)"
+    wrong = re.compile(f"{words}|{bare}", re.IGNORECASE)
+    assert [k for k, v in _messages("fr").items() if wrong.search(v)] == []

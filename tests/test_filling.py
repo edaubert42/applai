@@ -226,7 +226,7 @@ def test_a_failed_replan_drops_the_old_plan_so_the_extension_is_not_offered_it(
         plan_fill(AgentRunner(FakeBackend([invented])), engine, data_dir, application_id, profile)
 
     failed = _get(engine, application_id)
-    assert (failed.fill_plan, "Filling failed" in (failed.fill_error or "")) == (None, True)
+    assert (failed.fill_plan, failed.fill_error) == (None, "agent filling failed: schema_mismatch")
 
 
 def _pdf_text(pdf: bytes) -> str:
@@ -349,7 +349,7 @@ def test_a_failed_fill_is_kept_on_the_application_and_shown_on_the_dashboard(
     assert (failed.status_code, listed.json()) == (204, [])
     assert _get(engine, application_id).state == "answers_checked"
     [row] = [row for row in board["in_progress"] if row["id"] == application_id]
-    assert "did not load" in row["fill_error"] and "extension" in row["fill_error"]
+    assert row["fill_error"] == "fill_not_loaded"
 
 
 def test_a_failed_plan_is_kept_and_retried_by_hand(data_dir: Path, engine: Engine):
@@ -362,7 +362,7 @@ def test_a_failed_plan_is_kept_and_retried_by_hand(data_dir: Path, engine: Engin
         retried = client.post(f"/api/applications/{application_id}/fill")
 
     assert (failed.fill_plan, failed.fill_error) == (
-        None, "Filling failed: agent filling failed: schema_mismatch",
+        None, "agent filling failed: schema_mismatch",
     )  # fmt: skip
     assert retried.status_code == 202
     assert _get(engine, application_id).fill_error is None

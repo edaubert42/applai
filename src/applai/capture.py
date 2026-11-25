@@ -35,7 +35,6 @@ ATS_HOSTS = ("ashbyhq.com", "lever.co", "greenhouse.io", "workable.com", "teamta
 # The alert boards (applai.alerts) whose apply link opens a form on the board itself.
 BOARD_HOSTS = ("hellowork.com", "lesjeudis.com")
 GOOGLE = "alert_google"  # the source of offers from Google's alerts (applai.alerts)
-PASTE = "paste the form's URL"
 _APPLY = re.compile(r"\b(postuler|candidater|apply)\b", re.IGNORECASE)
 
 
@@ -133,7 +132,7 @@ def read_fields(
 
 
 class FormNotFound(Exception):
-    """An offer whose form's URL was not found; its message ends with PASTE."""
+    """An offer whose form's URL was not found; its message is a code the page words."""
 
 
 def find_form(engine: Engine, application_id: int, http: httpx2.Client) -> None:
@@ -152,7 +151,7 @@ def find_form(engine: Engine, application_id: int, http: httpx2.Client) -> None:
         except Exception as unexpected:  # nothing escapes: the row says what to do
             # Only the type: a message may hold the URL, which may hold a token.
             found = None
-            error = f"The offer's page could not be read: {type(unexpected).__name__}. {PASTE}."
+            error = f"page_not_read:{type(unexpected).__name__}"
         session.refresh(application)
         if application.form_url is None:
             application.form_url, application.form_url_error = found, error
@@ -164,16 +163,14 @@ def form_url(offer: Offer, http: httpx2.Client) -> str:
     if on_ats(offer.url):
         return offer.url
     if on_linkedin(offer.url) or read_by_extension(offer.url) or offer.source == GOOGLE:
-        raise FormNotFound(f"ApplAI does not read this offer's page: {PASTE}.")
+        raise FormNotFound("page_not_ours")
     try:
         response = http.get(offer.url)
         response.raise_for_status()
     except httpx2.HTTPStatusError as error:
-        why = f"answered HTTP {error.response.status_code}"
-        raise FormNotFound(f"The offer's page {why}: {PASTE}.") from None
+        raise FormNotFound(f"page_http:{error.response.status_code}") from None
     except httpx2.HTTPError as error:  # a message may hold the URL, which may hold a token
-        why = f"was not read ({type(error).__name__})"
-        raise FormNotFound(f"The offer's page {why}: {PASTE}.") from None
+        raise FormNotFound(f"page_not_read:{type(error).__name__}") from None
     page = str(response.url)  # after redirects, which may end on the ATS
     links = [(urljoin(page, href), text) for href, text in _Links.of(response.text)]
     links = [(url, text) for url, text in links if urlsplit(url).scheme in ("http", "https")]
@@ -183,7 +180,7 @@ def form_url(offer: Offer, http: httpx2.Client) -> str:
         + [url for url, text in links if _APPLY.search(text)]
     )
     if not found:
-        raise FormNotFound(f"The offer's page links to no form: {PASTE}.")
+        raise FormNotFound("page_no_form")
     return found[0]
 
 

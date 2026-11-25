@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type FormReview, type Row } from "./api";
 import Paragraphs from "./Paragraphs";
+import { serverMessage } from "./server-message";
 import { useSettings } from "./settings";
 import { button } from "./styles";
 
@@ -64,13 +65,13 @@ export default function FinalValidationScreen({
           </header>
 
           {review.review_error && (
-            <p role="alert" className="text-sm text-minus">{t("validation.review_error", { error: review.review_error })}</p>
+            <p role="alert" className="text-sm text-minus">{t("validation.review_error", { error: serverMessage(review.review_error, lookup) })}</p>
           )}
           {review.send_error && (
-            <p role="alert" className="text-sm text-minus">{t("validation.send_error", { error: review.send_error })}</p>
+            <p role="alert" className="text-sm text-minus">{t("validation.send_error", { error: serverMessage(review.send_error, lookup) })}</p>
           )}
           {review.cv_warning && (
-            <p role="alert" className="text-sm text-minus">{t("validation.cv_warning", { warning: review.cv_warning })}</p>
+            <p role="alert" className="text-sm text-minus">{t("validation.cv_warning", { warning: serverMessage(review.cv_warning, lookup) })}</p>
           )}
 
           <section aria-labelledby="validation-problems" className="space-y-3">
@@ -88,7 +89,7 @@ export default function FinalValidationScreen({
                   >
                     <span className="font-semibold">{t(`validation.severity.${p.severity}`)}</span>
                     <strong>{p.field}</strong>
-                    <span className="[overflow-wrap:anywhere]">{p.message}</span>
+                    <span className="[overflow-wrap:anywhere]">{serverMessage(p.message, lookup)}</span>
                   </li>
                 ))}
               </ul>
