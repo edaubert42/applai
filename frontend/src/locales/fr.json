@@ -50,6 +50,7 @@
   "scan.stopping": "Arrêt…",
   "scan.active_services": "Services utilisés",
   "card.score": "Score {n}",
+  "card.collapse": "Réduire l’offre",
   "card.seen": "Vue dans {source}",
   "time.ago.now": "il y a moins d’1 min",
   "time.ago.minutes": "il y a {n} min",

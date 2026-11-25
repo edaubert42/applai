@@ -294,7 +294,6 @@ describe("the list of offers", () => {
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Data engineer" })).toBeTruthy());
   });
-
   it("opens the full card from a row, with the place and the work mode in its header", async () => {
     await openScreen(reviewRoutes({ to_review: [aCard(), bob] }), false);
 
@@ -332,6 +331,36 @@ describe("the list of offers", () => {
     expect(screen.queryByRole("article")).toBeNull();
     expect(rows()).toHaveLength(2);
     expect(document.activeElement).toBe(rowOf(/Développeuse web/));
+  });
+
+  it("collapses an open card when clicking its framed header or collapse button, without intercepting the original link", async () => {
+    await openScreen(reviewRoutes({ to_review: [aCard(), bob] }), false);
+
+    fireEvent.click(rowOf(/Ingénieur logiciel/));
+    const article = screen.getByRole("article", { name: /Ingénieur logiciel/ });
+    const link = within(article).getByRole("link", { name: fr["card.original"] });
+    fireEvent.click(link);
+    expect(screen.getByRole("article")).toBeTruthy();
+
+    fireEvent.click(within(article).getByText("Acme Robotics"));
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(rows()).toHaveLength(2);
+    expect(document.activeElement).toBe(rowOf(/Ingénieur logiciel/));
+
+    fireEvent.click(rowOf(/Développeuse web/));
+    fireEvent.click(screen.getByRole("button", { name: fr["card.collapse"] }));
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(document.activeElement).toBe(rowOf(/Développeuse web/));
+  });
+
+  it("does not show a collapse button or collapse on header click in the Later view", async () => {
+    const parked = [aCard({ id: 3, title: "Plombier", state: "later" })];
+    await openScreen(reviewRoutes({ to_review: [aCard()], later: parked }), false);
+    fireEvent.click(screen.getByRole("tab", { name: fill(fr["review.tab.later"], { n: 1 }) }));
+
+    expect(screen.queryByRole("button", { name: fr["card.collapse"] })).toBeNull();
+    fireEvent.click(screen.getByRole("heading", { name: "Plombier" }));
+    expect(screen.getByRole("article", { name: /Plombier/ })).toBeTruthy();
   });
 
   it("removes the row of a decision and opens the next one", async () => {

@@ -11,6 +11,7 @@ returned into an issue labeled `lesson`, unless code can tell the lesson is not 
 Whether CLAUDE.md or a check already covers a mistake is the agent's judgment.
 
 Usage:
+  python3 tools/lesson.py has-findings PR
   python3 tools/lesson.py history [--limit N]
   python3 tools/lesson.py open LESSONS_JSON [--dry-run]
 
@@ -234,6 +235,8 @@ def main(
 ) -> int:
     parser = argparse.ArgumentParser(description="The learner agent's history and lessons.")
     commands = parser.add_subparsers(dest="command", required=True)
+    checker = commands.add_parser("has-findings", help="exit 0 when a PR has at least one finding")
+    checker.add_argument("pr", type=int)
     reader = commands.add_parser("history", help="what went wrong on recent merged PRs")
     reader.add_argument("--limit", type=int, default=LIMIT)
     opener = commands.add_parser("open", help="open the lessons that code finds backed")
@@ -244,6 +247,8 @@ def main(
     if not owner:
         parser.error("set GITHUB_REPOSITORY_OWNER: only the owner's @claude comments count")
 
+    if args.command == "has-findings":
+        return 0 if findings(run, owner, args.pr) else 1
     if args.command == "history":
         print(history(run, owner, args.limit), end="")
         return 0

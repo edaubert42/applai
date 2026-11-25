@@ -206,6 +206,7 @@ export default function ReviewScreen({ onOpenSettings }: { onOpenSettings: () =>
             onNotInterested={() => setDeclining(card.id)}
             onLater={() => void decide(card, { decision: "later" })}
             onReread={() => void reread(card)}
+            onClose={asRows ? () => closeCard(card) : undefined}
           />
         )}
       </article>

@@ -80,11 +80,23 @@ function Block({ title, tone, children }: { title: ReactNode; tone: string; chil
 }
 
 /** The framed header of a card: the logo, the title, the company, the score, the tags. */
-export function Header({ card, compact = false }: { card: Card; compact?: boolean }) {
+export function Header({ card, compact = false, onClose }: { card: Card; compact?: boolean; onClose?: () => void }) {
   const { t } = useSettings();
   const sourceName = useSourceName();
   return (
-    <header className="rounded-[22px] border border-border bg-raised p-5">
+    <header
+      onClick={
+        onClose
+          ? (event) => {
+              if ((event.target as HTMLElement).closest("a, button") || window.getSelection()?.toString()) return;
+              onClose();
+            }
+          : undefined
+      }
+      className={`rounded-[22px] border border-border bg-raised p-5 ${
+        onClose ? "group cursor-pointer transition hover:border-outline" : ""
+      }`}
+    >
       <div className="flex items-center gap-4">
         <Logo card={card} className={`${compact ? "size-10" : "size-14"} shrink-0 rounded-2xl`} />
         <div className="min-w-0 flex-1">
@@ -96,11 +108,36 @@ export function Header({ card, compact = false }: { card: Card; compact?: boolea
           </h2>
           <p className="text-link [overflow-wrap:anywhere]">{card.company}</p>
         </div>
-        {card.score !== null && (
-          <span className="rounded-pill bg-primary px-4 py-1 font-semibold text-on-primary">
-            {t("card.score", { n: card.score })}
-          </span>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {card.score !== null && (
+            <span className="rounded-pill bg-primary px-4 py-1 font-semibold text-on-primary">
+              {t("card.score", { n: card.score })}
+            </span>
+          )}
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t("card.collapse")}
+              aria-expanded="true"
+              title={t("card.collapse")}
+              className={`flex size-11 cursor-pointer items-center justify-center rounded-pill border border-border bg-background text-muted transition hover:border-outline hover:text-text group-hover:border-outline group-hover:text-text ${focus}`}
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <path d="M5 12.5 10 7.5l5 5" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
       {!compact && card.tags && (
         <ul className="mt-4 flex flex-wrap gap-2">
@@ -185,17 +222,19 @@ export function ReviewCard({
   onNotInterested,
   onLater,
   onReread,
+  onClose,
 }: {
   card: Card;
   onInterested: () => void;
   onNotInterested: () => void;
   onLater: () => void;
   onReread: () => void;
+  onClose?: () => void;
 }) {
   const { t } = useSettings();
   return (
     <>
-      <Header card={card} />
+      <Header card={card} onClose={onClose} />
       {(card.can_reread || card.rereading || card.reread_error) && (
         <div className="flex flex-wrap items-center gap-3 text-sm">
           {card.can_reread && (

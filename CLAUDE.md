@@ -13,6 +13,7 @@ Read before working:
 - **Fictional candidate only.** Code, tests, fixtures, commits, PR text and screenshots use invented people and companies. The real candidate's data lives in a private repository, is reached only through `APPLAI_DATA_DIR`, and is never copied here.
 - **Sending is never an agent tool.** No agent gets a tool that submits an application (ADR 0003).
 - **One issue, one branch, one PR**, about 400 lines at most, tests first. PR title: `Area: outcome sentence`. Fill in `.github/pull_request_template.md`: at most 150 words, CI checks it. To change a description, rewrite it; never append to it. Push only to your branch; the owner reviews and merges.
+- **Smallest complete change.** Reuse existing helpers and patterns; skip speculative abstractions, wrappers, or unrequested options. Never cut validation, error handling, tests, or security.
 
 ## Tests
 
@@ -49,11 +50,11 @@ The owner questions a `hard` issue (numbered questions, a recommended answer eac
 | Agent | Normal | `hard` |
 |---|---|---|
 | Coder | Sonnet 5.5, effort high | Opus 5.5, effort high |
-| Answerer (coder's questions) | Sonnet 5.5, effort high | Opus 5.5, effort high |
+| Answerer (coder's questions) | Sonnet 5.5, effort medium | Opus 5.5, effort high |
 | Reviewer | Sonnet 5.5, effort medium | Opus 5.5, effort high |
-| Fixer (`@claude`) | Sonnet 5.5, effort high | Opus 5.5, effort high |
-| Fixer (red CI) | Sonnet 5.5, effort high | Sonnet 5.5, effort high |
-| Fixer (review) | 1st failed review: Sonnet 5.5, high | 2nd: Opus 5.5, high, and the PR becomes `hard` |
-| Learner (each merged PR) | Sonnet 5.5, effort high | Sonnet 5.5, effort high |
+| Fixer (`@claude`) | Sonnet 5.5, effort medium | Opus 5.5, effort high |
+| Fixer (red CI) | Sonnet 5.5, effort medium | Sonnet 5.5, effort medium |
+| Fixer (review) | 1st failed review: Sonnet 5.5, medium | 2nd: Opus 5.5, high, and the PR becomes `hard` |
+| Learner (merged PR with findings) | Sonnet 5.5, effort medium | Sonnet 5.5, effort medium |
 
 `gh pr edit` fails on this repository; edit a PR's title or description with `python3 tools/edit_pr.py <n> --title <title> --body-file <file>`. Agents never close or merge a PR: say what blocks you in a PR comment instead.
