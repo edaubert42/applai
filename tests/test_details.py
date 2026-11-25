@@ -277,3 +277,55 @@ def test_a_telecommute_posting_gives_remote(engine: Engine, tmp_path: Path, site
 
     offer = _get(engine, offer_id)
     assert (offer.work_mode, offer.years_required, offer.salary) == ("remote", None, None)
+
+
+MISSIONS = "Vous construirez les pipelines de Pivoine Analytics."
+
+
+def _page_with_posting(main: str) -> str:
+    """A page whose JSON-LD description holds only the missions, and whose body shows main."""
+    posting = POSTING | {"description": f"<p>{MISSIONS}</p>"}
+    return (
+        f'<html><head><script type="application/ld+json">{json.dumps(posting)}</script></head>'
+        f"<body><main>{main}</main></body></html>"
+    )
+
+
+def test_the_page_text_holding_the_posting_description_and_more_is_the_description(
+    engine: Engine, tmp_path: Path, site: Site
+):
+    main = (
+        f"<h1>Data engineer</h1><p>{MISSIONS}</p><h2>Profil recherché</h2>"
+        "<p>5 ans en Python</p><ul><li>Hybride</li><li>CDI</li></ul>"
+    )
+    offer_id = _offer(engine, site.page("/jobs/9", _page_with_posting(main)))
+
+    assert _describe(engine, tmp_path) == []
+
+    description = _get(engine, offer_id).description or ""
+    assert MISSIONS in description
+    assert all(text in description for text in ("Profil recherché", "5 ans", "Hybride"))
+
+
+def test_the_posting_still_gives_the_location_and_contract_when_the_page_text_is_used(
+    engine: Engine, tmp_path: Path, site: Site
+):
+    main = f"<p>{MISSIONS}</p><h2>Profil recherché</h2><p>Contrat : stage</p><p>Lieu : Lyon</p>"
+    offer_id = _offer(engine, site.page("/jobs/10", _page_with_posting(main)), company="")
+
+    _describe(engine, tmp_path)
+
+    offer = _get(engine, offer_id)
+    assert "Profil recherché" in (offer.description or "")
+    assert (offer.location, offer.contract) == ("Paris 75011", "CDI")
+
+
+def test_a_page_text_without_the_posting_description_keeps_the_posting_description(
+    engine: Engine, tmp_path: Path, site: Site
+):
+    main = "<p>Chargement de l'offre…</p>"  # a page drawn by script
+    offer_id = _offer(engine, site.page("/jobs/11", _page_with_posting(main)))
+
+    _describe(engine, tmp_path)
+
+    assert _get(engine, offer_id).description == MISSIONS
