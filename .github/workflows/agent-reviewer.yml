@@ -57,4 +57,6 @@ jobs:
             Then post one summary comment with `gh pr comment` that starts with `Verdict: ready to merge` or
             `Verdict: changes needed` (only if a finding blocks), followed by at most 5 lines: the blocking findings,
             most severe first, one line each, and at most one last line marked `non-blocking` for minor points.
+            A bug blocks, even a rare one: anything a test could show behaving wrongly (a crash, a lost write,
+            a wrong state). `non-blocking` is only for naming, style, or a missing test of code that works.
             Say nothing about what is fine. Report only findings you can point to in the code.
