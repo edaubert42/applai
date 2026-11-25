@@ -97,12 +97,14 @@ def describe_linkedin_offers(
     user_id: int = LOCAL_USER_ID,
     progress: Progress | None = None,
     stop: Callable[[], bool] | None = None,
+    described: Callable[[int], None] | None = None,
 ) -> Describing:
     """Describe the new LinkedIn offers ApplAI found, as far as the limits allow; commits each.
 
     clock gives UTC times without a time zone; sleep waits a number of seconds. progress,
     when given, hears how many offers the run went through, after each one. stop, when given,
     is checked before each offer and around waits so a running scan can stop cleanly.
+    described, when given, hears the id of each offer this run described, once committed.
     """
     describing = Describing()
     offers = [offer for offer in _new_offers(session, user_id) if _is_linkedin(offer.url)]
@@ -132,6 +134,8 @@ def describe_linkedin_offers(
                 read = _describe(session, offer, command, match.group(1), now, describing)
                 failures = 0 if read else failures + 1
         session.commit()
+        if described and offer.state == OfferState.DESCRIBED:
+            described(offer.id)
         if progress:
             progress(done, len(offers))
         if failures == FAILURES_IN_A_ROW:
