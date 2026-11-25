@@ -31,7 +31,8 @@ ATS_DOMAINS = frozenset({
 })  # fmt: skip
 _ALIASES = {"francetravail": ("francetravail", "poleemploi"), "wttj": ("welcometothejungle",)}
 _SLDS = frozenset({"co", "com", "org", "net", "gov", "gouv", "ac", "edu"})
-_SKIP = frozenset({"head", "script", "style", "noscript", "template", "svg"})
+# No "template": Google keeps each offer's details and apply links in one.
+_SKIP = frozenset({"head", "script", "style", "noscript", "svg"})
 _VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
                    "source", "wbr"})  # fmt: skip
 _APPLY = re.compile(r"^(?:postuler(?:\s+directement)?\s+sur|apply(?:\s+directly)?\s+on)\s+.+", re.I)
