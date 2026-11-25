@@ -127,7 +127,8 @@ function faked(log, { groups = [], inGroup = new Map() } = {}) {
 }
 
 function plain(log) {
-  return Object.assign(log.filter(([kind]) => !MARKS.includes(kind)), { log });
+  const calls = log.filter(([kind]) => !MARKS.includes(kind));
+  return Object.defineProperty(calls, "log", { value: log }); // not enumerable: deepEqual ignores it
 }
 
 // Chrome's tabs and scripting, mocked: a tab with this status, a form with these fields and text.

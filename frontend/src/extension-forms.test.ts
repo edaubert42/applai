@@ -133,8 +133,9 @@ test("the overlay is a 4 px green frame and a label that catch no click, and one
   showOverlay(document); // asked again: still one frame
 
   const host = document.getElementById("applai-overlay") as HTMLElement;
-  const shadow = attach.mock.results[1].value as ShadowRoot;
-  const [frame, label] = [...shadow.children] as HTMLElement[];
+  const shadow = attach.mock.results.at(-1)?.value as ShadowRoot;
+  const frame = shadow.children[0] as HTMLElement;
+  const label = shadow.children[1] as HTMLElement;
   expect(document.querySelectorAll("#applai-overlay")).toHaveLength(1);
   expect(host.style.position).toBe("fixed");
   expect(host.style.pointerEvents).toBe("none");
