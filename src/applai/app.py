@@ -679,6 +679,13 @@ def start_scan(scanner: _Scanner) -> ScanStarted:
         raise HTTPException(429, str(refused), headers=retry) from None
 
 
+@api.post("/scan/stop", status_code=204)
+def stop_scan(scanner: _Scanner) -> None:
+    """Ask the running scan to stop cleanly after its current item; 409 when none runs."""
+    if not scanner.request_stop():
+        raise HTTPException(409, "No scan is running.")
+
+
 # The names applai serve is reached by, on any port: the bind address already limits who connects.
 # Any other Host is a page that renamed itself to the app (DNS rebinding), refused with a 400.
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]

@@ -160,6 +160,9 @@ export interface FormReview {
 
 export interface ScanStatus {
   running: boolean;
+  stopping: boolean;
+  active_service: string | null;
+  services_used: string[];
   last_scan: {
     started_at: string;
     finished_at: string | null;
@@ -256,4 +259,5 @@ export const api = {
   scanStatus: () => request<ScanStatus>("GET", "/api/scan"),
   services: () => request<Services>("GET", "/api/services"),
   startScan: () => request<unknown>("POST", "/api/scan"),
+  stopScan: () => requestEmpty("POST", "/api/scan/stop"),
 };

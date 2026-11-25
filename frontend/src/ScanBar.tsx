@@ -1,16 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type ScanStatus, type Services } from "./api";
+import { api, type Category, type ScanStatus, type Services } from "./api";
+import { ServiceLogo } from "./ServiceLogo";
 import { STATE_DOT, serviceName, worstState } from "./service-state";
 import { useSettings } from "./settings";
 
 const POLL_MS = 3000;
 const SERVICES_MS = 60_000;
 
-/** Where the last scan stands, the worst state of the services, and the button that starts a scan by hand. */
+function categoryOf(serviceId: string): Category {
+  if (serviceId === "mailbox") return "mailbox";
+  if (serviceId === "triage") return "agents";
+  return "sites";
+}
+
+/** Where the last scan stands, the worst state of the services, and the button that starts or stops a scan. */
 export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () => void; onOpenSettings: () => void }) {
-  const { t, formatTime } = useSettings();
+  const { t, lookup, formatTime } = useSettings();
   const [status, setStatus] = useState<ScanStatus | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [services, setServices] = useState<Services | null>(null);
   const wasRunning = useRef(false);
   const [asked, setAsked] = useState(0); // each change asks the API for the status again
@@ -26,6 +34,7 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
         if (!current) return;
         setStatus(next);
         setUnavailable(false);
+        if (!next.running) setStopping(false);
         if (wasRunning.current && !next.running) {
           onScanned();
           askServices();
@@ -74,14 +83,26 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
     refresh();
   }
 
+  async function stop() {
+    setStopping(true);
+    try {
+      await api.stopScan();
+      refresh();
+    } catch {
+      setStopping(false);
+    }
+  }
+
   const last = status?.last_scan ?? null;
   const wait = status?.manual_scan_in_s ?? null;
+  const isStopping = stopping || Boolean(status?.stopping);
   const disabled = unavailable || !status || status.running || wait !== null;
   const label = status?.running
     ? t("scan.running")
     : wait !== null
       ? t("scan.wait", { n: Math.ceil(wait / 60) })
       : t("scan.button");
+  const used = status?.running ? status.services_used : [];
 
   return (
     <section
@@ -118,6 +139,23 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
                   })}
                 </span>
               )}
+              {used.length > 0 && (
+                <span aria-label={t("scan.active_services")} className="inline-flex items-center gap-1.5">
+                  {used.map((id) => {
+                    const name = serviceName(id, lookup);
+                    const active = status.active_service === id;
+                    return (
+                      <span
+                        key={id}
+                        title={name}
+                        className={`inline-flex rounded p-0.5 ${active ? "ring-2 ring-link animate-pulse" : "opacity-75"}`}
+                      >
+                        <ServiceLogo id={id} category={categoryOf(id)} name={name} size="sm" />
+                      </span>
+                    );
+                  })}
+                </span>
+              )}
             </p>
             {last.errors.length > 0 && (
               <ul className="mt-2 list-disc pl-5 text-minus [overflow-wrap:anywhere]">
@@ -129,18 +167,34 @@ export default function ScanBar({ onScanned, onOpenSettings }: { onScanned: () =
           </>
         )}
       </div>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => void start()}
-        className={`min-h-11 rounded-pill px-5 font-semibold focus-visible:outline-2 focus-visible:outline-link ${
-          disabled
-            ? "cursor-not-allowed border border-outline text-muted"
-            : "cursor-pointer bg-primary text-on-primary hover:brightness-90"
-        }`}
-      >
-        {label}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        {status?.running && (
+          <button
+            type="button"
+            disabled={isStopping}
+            onClick={() => void stop()}
+            className={`min-h-11 rounded-pill border px-5 font-semibold focus-visible:outline-2 focus-visible:outline-link ${
+              isStopping
+                ? "cursor-not-allowed border-outline text-muted"
+                : "cursor-pointer border-minus text-minus hover:bg-minus/10"
+            }`}
+          >
+            {isStopping ? t("scan.stopping") : t("scan.stop")}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => void start()}
+          className={`min-h-11 rounded-pill px-5 font-semibold focus-visible:outline-2 focus-visible:outline-link ${
+            disabled
+              ? "cursor-not-allowed border border-outline text-muted"
+              : "cursor-pointer bg-primary text-on-primary hover:brightness-90"
+          }`}
+        >
+          {label}
+        </button>
+      </div>
     </section>
   );
 }

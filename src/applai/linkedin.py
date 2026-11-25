@@ -96,11 +96,13 @@ def describe_linkedin_offers(
     sleep: Callable[[float], None] = time.sleep,
     user_id: int = LOCAL_USER_ID,
     progress: Progress | None = None,
+    stop: Callable[[], bool] | None = None,
 ) -> Describing:
     """Describe the new LinkedIn offers ApplAI found, as far as the limits allow; commits each.
 
     clock gives UTC times without a time zone; sleep waits a number of seconds. progress,
-    when given, hears how many offers the run went through, after each one.
+    when given, hears how many offers the run went through, after each one. stop, when given,
+    is checked before each offer and around waits so a running scan can stop cleanly.
     """
     describing = Describing()
     offers = [offer for offer in _new_offers(session, user_id) if _is_linkedin(offer.url)]
@@ -117,13 +119,15 @@ def describe_linkedin_offers(
     if progress and offers:
         progress(0, len(offers))  # the first call may take a while: the server opens a browser
     for done, offer in enumerate(offers, start=1):
+        if stop and stop():
+            break
         match = _JOB_ID.search(urlsplit(offer.url).path)
         if match is None:
             _fail(describing, offer, "the LinkedIn URL has no job id", clock())
         else:
-            now = _wait_turn(session, user_id, clock, sleep)
+            now = _wait_turn(session, user_id, clock, sleep, stop)
             if now is None:
-                break  # the daily limit: the offers left wait for the next day
+                break  # the daily limit or stopped: the offers left wait for a later run
             if offer.state == OfferState.NEW:  # reloaded: another part of ApplAI may have moved it
                 read = _describe(session, offer, command, match.group(1), now, describing)
                 failures = 0 if read else failures + 1
@@ -153,11 +157,17 @@ def read_linkedin_offer(session: Session, offer: Offer, url: str, now: datetime)
 
 
 def _wait_turn(
-    session: Session, user_id: int, clock: Callable[[], datetime], sleep: Callable[[float], None]
+    session: Session,
+    user_id: int,
+    clock: Callable[[], datetime],
+    sleep: Callable[[float], None],
+    stop: Callable[[], bool] | None = None,
 ) -> datetime | None:
     """Wait until a read is MIN_INTERVAL after the last one; return its time, or None at the
-    daily limit. No transaction stays open while waiting: the rest of ApplAI may write."""
+    daily limit or when stopped. No transaction stays open while waiting."""
     while True:
+        if stop and stop():
+            return None
         now = clock()
         if reads_today(session, now, user_id) >= MAX_READS_PER_DAY:
             return None

@@ -78,6 +78,62 @@ describe("the scan bar while a scan reads LinkedIn", () => {
     await scanBar().findByText(fill(fr["scan.new"], { n: "4" }));
     expect(scanBar().queryByText(/LinkedIn : \d+ \/ \d+/)).toBeNull();
   });
+
+  it("shows the active services with small logos and a Stop button while running", async () => {
+    let stopping = false;
+    const calls = fakeApi({
+      ...reviewRoutes(),
+      "GET /api/scan": () =>
+        aScan({
+          running: true,
+          stopping,
+          active_service: "alert_linkedin",
+          services_used: ["mailbox", "alert_hellowork", "alert_linkedin", "triage"],
+        }),
+      "POST /api/scan/stop": () => {
+        stopping = true;
+        return new Response(null, { status: 204 });
+      },
+      ...servicesRoutes(),
+    });
+    render(<App />);
+
+    const bar = scanBar();
+    const stop = (await bar.findByRole("button", { name: fr["scan.stop"] })) as HTMLButtonElement;
+    const region = screen.getByRole("region", { name: fr["scan.label"] });
+    const logos = [...region.querySelectorAll("[data-logo]")].map((el) => el.getAttribute("data-logo"));
+    expect(logos).toEqual(["mailbox", "alert_hellowork", "alert_linkedin", "claude"]);
+
+    fireEvent.click(stop);
+
+    expect(await bar.findByRole("button", { name: fr["scan.stopping"] })).toBeTruthy();
+    expect(calls.filter((c) => c.method === "POST" && c.path === "/api/scan/stop")).toHaveLength(1);
+  });
+
+  it("hides the Stop button and service logos when no scan is running", async () => {
+    fakeApi({ ...reviewRoutes(), ...servicesRoutes() });
+    render(<App />);
+
+    await scanBar().findByText(fill(fr["scan.new"], { n: "4" }));
+    expect(scanBar().queryByRole("button", { name: fr["scan.stop"] })).toBeNull();
+    const region = screen.getByRole("region", { name: fr["scan.label"] });
+    expect(region.querySelectorAll("[data-logo]")).toHaveLength(0);
+  });
+
+  it("keeps Stop usable if stopping fails", async () => {
+    fakeApi({
+      ...reviewRoutes({}, aScan({ running: true, services_used: ["mailbox"], active_service: "mailbox" })),
+      "POST /api/scan/stop": new Response("error", { status: 500 }),
+      ...servicesRoutes(),
+    });
+    render(<App />);
+
+    const stop = (await scanBar().findByRole("button", { name: fr["scan.stop"] })) as HTMLButtonElement;
+    fireEvent.click(stop);
+
+    await act(() => Promise.resolve());
+    expect((await scanBar().findByRole("button", { name: fr["scan.stop"] }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });
 
 describe("the scan bar's dot stays fresh", () => {

@@ -22,7 +22,7 @@ from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
 import httpx2
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
@@ -43,6 +43,7 @@ CHECK_EVERY_S = 300.0  # after the machine slept, a missed slot runs this late a
 _PLAIN = (MailError, PageError, TriageError, AgentError, TransitionError)
 
 type Clock = Callable[[], datetime]  # the time now, aware, in the candidate's time zone
+type ServiceReport = Callable[[str], None]  # service id currently used by a running scan
 
 
 def local_now() -> datetime:
@@ -74,19 +75,30 @@ def run_scan(
     user_id: int = LOCAL_USER_ID,
     clock: Clock = local_now,
     progress: Progress | None = None,
+    on_service: ServiceReport | None = None,
+    cancel: threading.Event | None = None,
 ) -> Found:
     """Find the new offers, and take each as far as Triage; return what the scan found.
 
-    progress hears how far the LinkedIn reads went, after each offer.
+    progress hears how far the LinkedIn reads went, after each offer; on_service hears each
+    service id the scan uses as it reaches it; cancel, when set, stops cleanly after the
+    current item.
     """
+    report: ServiceReport = on_service or _ignore_service
+    stopped = cancel.is_set if cancel is not None else _never_stop
     found = Found()
+    report("mailbox")
     found.new_offers = _read_mail(engine, data_dir, watch, user_id, found.errors)
+    if stopped():
+        return found
     try:
         profile = load_profile(data_dir)
     except ProfileError as error:
         found.errors.append(f"No offer was screened: {error}")
         return found
     for offer_id in _offers(engine, OfferState.NEW, user_id):
+        if stopped():
+            return found
         with Session(engine) as session:
             offer = session.get_one(Offer, offer_id)
             try:
@@ -94,6 +106,8 @@ def run_scan(
                 if screen_offer(session, offer, profile) is None and not (
                     on_linkedin(url) or read_by_extension(url)
                 ):
+                    if offer.source:
+                        report(offer.source)
                     describe_offer(session, offer, data_dir, watch.http)
             except PageError as error:  # recorded on the offer too: committed below
                 found.errors.append(f"Offer {offer_id}: its page was not read: {error}.")
@@ -101,8 +115,16 @@ def run_scan(
                 session.rollback()
                 found.errors.append(f"Offer {offer_id} was not screened nor read: {_plain(error)}.")
             session.commit()
-    _read_linkedin(engine, user_id, clock, watch.sleep, progress, found.errors)
+    if stopped():
+        return found
+    sleep = _cancellable_sleep(watch.sleep, cancel)
+    _read_linkedin(engine, user_id, clock, sleep, progress, report, stopped, found.errors)
+    if stopped():
+        return found
     for offer_id in _offers(engine, OfferState.DESCRIBED, user_id):
+        if stopped():
+            return found
+        report("triage")
         try:
             triage_offer(watch.runner, engine, offer_id, profile)
         except AlreadyRunning:  # its page's Triage runs (applai.browser) and keeps the card
@@ -110,6 +132,28 @@ def run_scan(
         except Exception as error:
             found.errors.append(f"Offer {offer_id} was not triaged: {_plain(error)}.")
     return found
+
+
+def _ignore_service(_service: str) -> None:
+    pass
+
+
+def _never_stop() -> bool:
+    return False
+
+
+def _cancellable_sleep(
+    sleep: Callable[[float], None], cancel: threading.Event | None
+) -> Callable[[float], None]:
+    """Wake a real sleep immediately when cancel is set; keep a test clock's sleep untouched."""
+    if cancel is not None and sleep is time_module.sleep:
+        event = cancel
+
+        def _wait(seconds: float) -> None:
+            event.wait(seconds)
+
+        return _wait
+    return sleep
 
 
 def _read_mail(
@@ -141,13 +185,21 @@ def _read_linkedin(
     clock: Clock,
     sleep: Callable[[float], None],
     progress: Progress | None,
+    report: ServiceReport,
+    stop: Callable[[], bool],
     errors: list[str],
 ) -> None:
     """Read the screened LinkedIn offers, as far as the reader's pacing allows."""
+
+    def on_progress(done: int, total: int) -> None:
+        report("alert_linkedin")
+        if progress:
+            progress(done, total)
+
     try:
         with Session(engine) as session:
             describing = describe_linkedin_offers(
-                session, lambda: _utc(clock()), sleep, user_id, progress
+                session, lambda: _utc(clock()), sleep, user_id, on_progress, stop
             )
     except Exception as error:
         errors.append(f"LinkedIn: the reads stopped: {_plain(error)}.")  # the read ones stay
@@ -190,6 +242,9 @@ class LinkedInReadProgress(BaseModel):
 
 class ScanStatus(BaseModel):
     running: bool
+    stopping: bool = False
+    active_service: str | None = None
+    services_used: list[str] = Field(default_factory=list)
     last_scan: LastScan | None
     next_slot: datetime | None
     manual_scan_in_s: int | None  # seconds before a scan by hand is allowed; none: now
@@ -201,13 +256,13 @@ class ScanStatus(BaseModel):
 class Scanner:
     """Runs scan, one at a time, at the slots of scan_times and by hand; records each in scans.
 
-    scan is given where to report how far its LinkedIn reads went, for status().
+    scan is given callbacks for LinkedIn progress and active services, plus a cancel event.
     """
 
     def __init__(
         self,
         engine: Engine,
-        scan: Callable[[Progress], Found],
+        scan: Callable[[Progress, ServiceReport, threading.Event], Found],
         clock: Clock = local_now,
         scan_times: Sequence[str] = SCAN_TIMES,
         user_id: int = LOCAL_USER_ID,
@@ -217,8 +272,11 @@ class Scanner:
         self._running = threading.Lock()  # held from a scan's start to its end
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._cancel = threading.Event()
         self._schedule: threading.Thread | None = None
         self._linkedin: LinkedInReadProgress | None = None  # replaced whole: read by other threads
+        self._active_service: str | None = None
+        self._services_used: tuple[str, ...] = ()
 
     def start(self, by_hand: bool = True) -> int:
         """Start a scan in the background and return its id, or raise ScanRefused."""
@@ -236,9 +294,19 @@ class Scanner:
         except BaseException:
             self._running.release()
             raise
+        self._cancel.clear()
+        self._active_service = None
+        self._services_used = ()
         self._thread = threading.Thread(target=self._run, args=(scan_id,), daemon=True)
         self._thread.start()
         return scan_id
+
+    def request_stop(self) -> bool:
+        """Ask the running scan to stop cleanly; return False when no scan is running."""
+        if not self._running.locked():
+            return False
+        self._cancel.set()
+        return True
 
     def tick(self) -> int | None:
         """Start the scan of the last slot if it has none; return its id."""
@@ -269,16 +337,21 @@ class Scanner:
         self._schedule.start()
 
     def stop_schedule(self) -> None:
-        """Stop the schedule. A scan running goes on; if ApplAI stops, it stays unfinished."""
+        """Stop the schedule and wake any sleeping scan."""
         self._stop.set()
+        self._cancel.set()
         if self._schedule:
             self._schedule.join()
 
     def status(self) -> ScanStatus:
         with Session(self._engine) as session:
             last = self._last(session)
+            running = self._running.locked()
             return ScanStatus(
-                running=self._running.locked(),
+                running=running,
+                stopping=running and self._cancel.is_set(),
+                active_service=self._active_service if running else None,
+                services_used=list(self._services_used) if running else [],
                 last_scan=None if last is None else LastScan(
                     started_at=last.started_at.replace(tzinfo=UTC),
                     finished_at=last.finished_at.replace(tzinfo=UTC) if last.finished_at else None,
@@ -321,7 +394,7 @@ class Scanner:
     def _run(self, scan_id: int) -> None:
         try:
             try:
-                found = self._scan(self._report_linkedin)
+                found = self._scan(self._report_linkedin, self._report_service, self._cancel)
             except Exception as error:
                 found = Found(errors=[f"The scan stopped: {_plain(error)}."])
             with Session(self._engine) as session:
@@ -331,10 +404,18 @@ class Scanner:
                 session.commit()
         finally:
             self._linkedin = None
+            self._active_service = None
+            self._services_used = ()
+            self._cancel.clear()
             self._running.release()
 
     def _report_linkedin(self, read: int, total: int) -> None:
         self._linkedin = LinkedInReadProgress(read=read, total=total)
+
+    def _report_service(self, service: str) -> None:
+        self._active_service = service
+        if service not in self._services_used:
+            self._services_used = (*self._services_used, service)
 
 
 def _cooldown_left(last: Scan | None, now: datetime) -> int | None:
