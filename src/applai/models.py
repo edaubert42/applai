@@ -174,6 +174,7 @@ class Application(Base):
     filled_fields: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     fill_error: Mapped[str | None]  # why the last plan or fill failed, until a fill succeeds
     fill_failed_at: Mapped[datetime | None]  # the last fill the extension failed
+    fill_again_at: Mapped[datetime | None]  # the candidate's ask to fill again, until it ends
     # Review (applai.review_form): problems found on the filled form, and the run that checked it.
     review_problems: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     review_agent_run_id: Mapped[int | None] = mapped_column(

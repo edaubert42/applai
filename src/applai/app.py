@@ -487,6 +487,24 @@ def plan_again(
     later.add_task(plan_in_background, s.engine, s.data_dir, watch.runner, application_id)
 
 
+@api.post("/applications/{application_id}/fill-again", status_code=204)
+def fill_again(application_id: int, session: _Session, request: Request) -> None:
+    """Ask the extension to fill a form filled once again, in a new tab, with the same plan
+    (applai.browser); the state stays, and a send authorization is cleared (ADR 0003)."""
+    application = session.get(Application, application_id)
+    if application is None or application.user_id != LOCAL_USER_ID:
+        raise HTTPException(404, "no such application")
+    if (
+        application.state not in browser.FILL_AGAIN_STATES
+        or application.fill_plan is None
+        or application.form_url is None
+    ):
+        raise HTTPException(409, f"Application {application_id} has no filled form to fill again.")
+    application.fill_again_at = browser.utc(request.app.state.clock())
+    application.fill_error, application.send_authorized_at = None, None
+    session.commit()
+
+
 @api.get("/applications/{application_id}/review")
 def read_review(application_id: int, session: _Session, request: Request) -> review_form.FormReview:
     """Filled fields and Review problems for an application."""
@@ -592,6 +610,8 @@ def authorize_send(application_id: int, session: _Session, request: Request) -> 
         raise HTTPException(404, "no such application")
     if application.state != ApplicationState.VALIDATED:
         raise HTTPException(409, f"Application {application_id} is not validated.")
+    if application.fill_again_at is not None:  # authorized on the new tab, once it is filled
+        raise HTTPException(409, f"Application {application_id} is being filled again.")
     application.send_authorized_at = browser.utc(request.app.state.clock())
     application.send_error = None
     session.commit()
