@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { CATEGORIES, api, type Category, type Service, type ServiceState, type Services } from "./api";
 import { ServiceLogo } from "./ServiceLogo";
-import { STATE_DOT, serviceName } from "./service-state";
+import { serviceName } from "./service-state";
 import { useSettings } from "./settings";
 
 /**
- * The Réglages page: the theme and the language, each in its own block, then the state of every service, by category, as /api/services computes it.
+ * The Réglages page: the theme and the language, each in its own block, then every service in its own block, by category, its state as a light, as /api/services computes it.
  * The services are only shown: the sentence of one that is not green says what to do, and nothing here signs in or sends.
  * (settings.tsx is the theme and language context, not this page.)
  */
@@ -35,7 +35,7 @@ export default function SettingsScreen() {
             <h2 id={`category-${category}`} className="text-xl font-semibold">
               {t(`settings.category.${category}`)}
             </h2>
-            <ul className="divide-y divide-border rounded-block border border-border bg-surface">
+            <ul className="space-y-3">
               {services[category].map((service) => (
                 <ServiceRow key={service.id} service={service} category={category} />
               ))}
@@ -46,7 +46,12 @@ export default function SettingsScreen() {
   );
 }
 
-const STATE_TEXT: Record<ServiceState, string> = { red: "text-minus", orange: "text-unknown", green: "text-plus" };
+// A state's light and its halo.
+const LIGHT: Record<ServiceState, string> = {
+  red: "bg-status-red ring-status-red/22",
+  orange: "bg-status-orange ring-status-orange/22",
+  green: "bg-status-green ring-status-green/22",
+};
 
 /** "claude-haiku-5-5" as "Haiku 5.5"; a name of another shape stays as it is. */
 function modelName(model: string): string {
@@ -59,24 +64,19 @@ function modelName(model: string): string {
 function ServiceRow({ service, category }: { service: Service; category: Category }) {
   const { t, lookup } = useSettings();
   const name = serviceName(service.id, lookup);
+  const state = t(`settings.state.${service.state}`);
+  // A hint that is no code (a settings file's own error) is shown as the API sent it.
+  const hint = service.state !== "green" && service.hint ? (lookup(`settings.hint.${service.hint}`) ?? service.hint) : null;
+  const sub = [service.model && modelName(service.model), hint].filter(Boolean).join(" · ");
 
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3">
-      <ServiceLogo id={service.id} category={category} name={name} />
-      <div className="min-w-0 flex-1 basis-32 [overflow-wrap:anywhere]">
-        <h3 className="font-semibold">{name}</h3>
-        {service.model && <p className="text-sm text-muted">{modelName(service.model)}</p>}
+    <li className="flex min-h-21.5 items-center gap-4 rounded-block border border-border bg-surface px-5 py-4">
+      <ServiceLogo id={service.id} category={category} name={name} size="lg" />
+      <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+        <h3 className="text-[17px] font-semibold">{name}</h3>
+        {sub && <p className="text-sm text-muted">{sub}</p>}
       </div>
-      <span className={`flex items-center gap-2 text-sm font-semibold ${STATE_TEXT[service.state]}`}>
-        <span aria-hidden="true" className={`size-2.5 shrink-0 rounded-full ${STATE_DOT[service.state]}`} />
-        {t(`settings.state.${service.state}`)}
-      </span>
-      {service.state !== "green" && service.hint && (
-        // A hint that is no code (a settings file's own error) is shown as the API sent it.
-        <p className="basis-full text-sm text-muted [overflow-wrap:anywhere]">
-          {lookup(`settings.hint.${service.hint}`) ?? service.hint}
-        </p>
-      )}
+      <span role="img" aria-label={state} title={state} className={`mr-1.5 size-4 shrink-0 rounded-full ring-5 ${LIGHT[service.state]}`} />
     </li>
   );
 }

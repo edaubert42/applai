@@ -26,7 +26,7 @@ async function openPage(language: "fr" | "en" = "fr", routes = servicesRoutes(se
 
 describe("the Settings page", () => {
   it.each(["fr", "en"] as const)(
-    "shows the four categories in order, each row with its state in words and, when not green, its sentence, in %s",
+    "shows the four categories in order, each service with its state as a light and, when not green, its sentence, in %s",
     async (language) => {
       const { words } = await openPage(language);
 
@@ -38,26 +38,33 @@ describe("the Settings page", () => {
         words["settings.category.applai"],
       ]);
       const rowOf = (category: string) => within(within(screen.getByRole("region", { name: category })).getByRole("listitem"));
+      // The state is a light named by its words, in the state's color; the words are nowhere on screen.
+      const light = (row: ReturnType<typeof rowOf>, state: "green" | "orange" | "red") => {
+        const said = words[`settings.state.${state}`];
+        const image = row.getByRole("img", { name: said });
+        expect(image.getAttribute("title")).toBe(said);
+        expect(image.className).toContain(`bg-status-${state}`);
+        expect(row.queryByText(said)).toBeNull();
+      };
 
       const site = rowOf(words["settings.category.sites"]);
       expect(site.getByText(words["settings.service.alert_wttj"])).toBeTruthy();
-      expect(site.getByText(words["settings.state.green"])).toBeTruthy();
+      light(site, "green");
       expect(site.queryByText(/\./)).toBeNull();
 
       const agent = rowOf(words["settings.category.agents"]);
       expect(agent.getByText(words["settings.service.triage"])).toBeTruthy();
-      expect(agent.getByText(words["settings.state.orange"])).toBeTruthy();
-      expect(agent.getByText(words["settings.hint.claude_login"])).toBeTruthy();
-      expect(agent.getByText("Haiku 5.5")).toBeTruthy();
+      light(agent, "orange");
+      expect(agent.getByText(`Haiku 5.5 · ${words["settings.hint.claude_login"]}`)).toBeTruthy();
 
       const mail = rowOf(words["settings.category.mailbox"]);
       expect(mail.getByText(words["settings.service.mailbox"])).toBeTruthy();
-      expect(mail.getByText(words["settings.state.red"])).toBeTruthy();
+      light(mail, "red");
       expect(mail.getByText(words["settings.hint.mail_login"])).toBeTruthy();
 
       const applai = rowOf(words["settings.category.applai"]);
       expect(applai.getByText(words["settings.service.scan"])).toBeTruthy();
-      expect(applai.getByText(words["settings.state.green"])).toBeTruthy();
+      light(applai, "green");
     },
   );
 
@@ -68,6 +75,15 @@ describe("the Settings page", () => {
     const rows = within(screen.getByRole("region", { name: fr["settings.category.sites"] })).getAllByRole("listitem");
 
     expect(rows.map((row) => row.querySelector("h3")?.textContent)).toEqual([fr["settings.service.extension"], "alert_custom"]);
+  });
+
+  it("gives each service its own block", async () => {
+    const sites = [aService({ id: "extension" }), aService({ id: "alert_wttj" })];
+    await openPage("fr", servicesRoutes({ ...services, sites }));
+
+    const region = within(screen.getByRole("region", { name: fr["settings.category.sites"] }));
+    for (const row of region.getAllByRole("listitem")) expect(row.className).toMatch(/rounded-block border .*bg-surface/);
+    expect(region.getByRole("list").className).not.toContain("border");
   });
 
   it("puts a logo before every service's name, its own for each service", async () => {

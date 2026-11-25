@@ -48,7 +48,7 @@ const DRAWINGS: Record<string, ReactNode> = {
   ),
 };
 
-const SIZES = { sm: "size-5 shrink-0 rounded", md: "size-8 shrink-0 rounded-lg" } as const;
+const SIZES = { sm: "size-5 shrink-0 rounded", md: "size-8 shrink-0 rounded-lg", lg: "size-10 shrink-0 rounded-[10px]" } as const;
 const paper = "bg-[#fff]"; // logos are drawn for white, in either theme; the theme has no white token
 
 /**
@@ -64,7 +64,7 @@ export function ServiceLogo({
   id: string;
   category: Category;
   name: string;
-  size?: "sm" | "md";
+  size?: keyof typeof SIZES;
 }) {
   const box = SIZES[size];
   const key = category === "agents" ? "claude" : id;
