@@ -170,7 +170,7 @@ def test_offer_the_site_removed_leaves_its_site_and_the_extension_green(
     sites = {row["id"]: row for row in _services(data_dir, gone)["sites"]}
     assert sites["alert_jobteaser"]["state"] == "green"
     assert sites["alert_jobteaser"]["hint"] is None
-    assert sites["extension"]["last_error"] != page_answered(status)
+    assert sites["extension"]["last_error"] is None
 
 
 def test_drafting_refused_for_its_citations_is_not_told_to_check_the_claude_login(data_dir: Path):
