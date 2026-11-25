@@ -260,3 +260,52 @@ def test_the_route_refuses_a_pending_read_and_an_extension_that_is_not_connected
     assert unasked.status_code == 409
     assert (first.status_code, second.status_code) == (202, 409)
     assert client.post(f"/api/offers/{other}/reread").status_code == 409
+
+
+ASKED_AT = datetime(2026, 11, 20, 11, 0)  # NOON, as UTC
+UNANSWERED = "The extension did not send the page."
+
+
+def test_an_ask_older_than_10_minutes_ends_when_the_offers_are_listed(env: Env, client: TestClient):
+    offer_id = env.offer(reread_requested_at=ASKED_AT - timedelta(minutes=11))
+
+    card = _card_of(client, offer_id)
+
+    assert (card["rereading"], card["reread_error"], card["can_reread"]) == (
+        False, UNANSWERED, True)  # fmt: skip
+    assert client.get("/api/browser/pages", headers=EXT).json() == []
+    assert env.stored(offer_id)[0].reread_requested_at is None
+
+
+def test_an_ask_older_than_10_minutes_is_not_asked_of_the_extension(env: Env, client: TestClient):
+    offer_id = env.offer(reread_requested_at=ASKED_AT - timedelta(minutes=11))
+
+    listed = client.get("/api/browser/pages", headers=EXT).json()
+
+    assert listed == []
+    assert _card_of(client, offer_id)["reread_error"] == UNANSWERED
+
+
+def test_an_ask_of_5_minutes_is_still_pending(env: Env, client: TestClient):
+    offer_id = env.offer(reread_requested_at=ASKED_AT - timedelta(minutes=5))
+
+    card = _card_of(client, offer_id)
+    listed = client.get("/api/browser/pages", headers=EXT).json()
+
+    assert (card["rereading"], card["reread_error"]) == (True, None)
+    assert listed == [{"offer_id": offer_id, "url": GOOGLE}]
+
+
+def test_an_offer_whose_ask_ended_unanswered_can_be_asked_again(env: Env, client: TestClient):
+    ended = env.offer(reread_requested_at=ASKED_AT - timedelta(minutes=11))
+    unseen = env.offer(url="https://www.google.com/search?q=b",
+                       reread_requested_at=ASKED_AT - timedelta(minutes=11))  # fmt: skip
+    _card_of(client, ended)  # the offers are listed: its ask ends
+
+    again = client.post(f"/api/offers/{ended}/reread")
+    repeated = client.post(f"/api/offers/{unseen}/reread")  # no listing between
+
+    assert (again.status_code, repeated.status_code) == (202, 202)
+    assert _card_of(client, ended)["reread_error"] is None
+    assert env.stored(ended)[0].reread_requested_at == ASKED_AT
+    assert env.stored(unseen)[0].reread_requested_at == ASKED_AT
