@@ -39,16 +39,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Labels are read live, so after labeling `big-ok` the owner only re-runs this job.
+      # HEAD is the PR merged into today's main; HEAD^1 is that main. The event's base sha
+      # is not updated when main moves, so it would count PRs merged since.
       - name: Size of the PR, unless the owner labeled it big-ok
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           if gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels -q '.labels[].name' | grep -qx big-ok; then
             echo "Labeled big-ok: size not checked."
           else
-            python3 tools/pr_size.py "$BASE"
+            python3 tools/pr_size.py HEAD^1
           fi
 
   privacy:
