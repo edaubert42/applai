@@ -87,6 +87,7 @@ export function aRow(overrides: Partial<Row> = {}): Row {
     form_url_error: null,
     fill_error: null,
     reasons: [],
+    tab_open: null,
     ...overrides,
   };
 }

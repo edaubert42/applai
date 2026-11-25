@@ -214,6 +214,31 @@ describe("the Applications dashboard", () => {
   it.each([
     ["fr", fr],
     ["en", en],
+  ] as const)("shows whether a filled form's tab is open, closed, or says nothing when unknown, in %s", async (language, words) => {
+    const open = aRow({ id: 1, offer_id: 1, title: "Chef de quai", state: "filled", tab_open: true });
+    const closed = aRow({ id: 2, offer_id: 2, title: "Magasinier", state: "reviewed", tab_open: false });
+    const unknown = aRow({ id: 3, offer_id: 3, title: "Cariste", state: "validated", tab_open: null });
+    await openScreen(applicationsRoutes({ in_progress: [open], waiting: [closed, unknown] }), language);
+
+    const [inProgress, waiting] = [
+      groupNamed(fill(words["applications.group.in_progress"], { n: 1 })),
+      groupNamed(fill(words["applications.group.waiting"], { n: 2 })),
+    ];
+    expect(inProgress.getByText(words["applications.tab.open"])).toBeTruthy();
+    expect(waiting.getByText(words["applications.tab.closed"])).toBeTruthy();
+    expect(waiting.queryByText(words["applications.tab.open"])).toBeNull();
+    const rows = waiting.getAllByRole("listitem");
+    expect(within(rows[1] as HTMLElement).queryByText(/^(Tab|Onglet) /)).toBeNull();
+  });
+
+  it("says the tabs in French as the issue words them", () => {
+    expect([fr["applications.tab.open"], fr["applications.tab.closed"]]).toEqual(["Onglet ouvert", "Onglet fermé"]);
+    expect([en["applications.tab.open"], en["applications.tab.closed"]]).toEqual(["Tab open", "Tab closed"]);
+  });
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
   ] as const)("words why the extension could not fill a form, in %s", async (language, words) => {
     const errored = aRow({ id: 9, offer_id: 9, state: "answers_checked", fill_error: "fill_not_loaded" });
     await openScreen(applicationsRoutes({ in_progress: [errored] }), language);

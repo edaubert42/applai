@@ -70,6 +70,8 @@ export interface Row {
   fill_error: string | null;
   /** Why the candidate dropped it; empty for any other application. */
   reasons: DropReason[];
+  /** Whether the filled form's tab is open; null: unknown, or no tab to wait for. */
+  tab_open: boolean | null;
 }
 
 export interface BrowserStatus {

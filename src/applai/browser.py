@@ -26,6 +26,10 @@ Filling: an answers_checked application with a fill plan (applai.filling) is lis
 actions; the extension fetches the files they attach, fills the form without sending it,
 then sends back each field's state and a screenshot, and the application moves to filled. A
 fill that fails is kept as its fill_error, and asked for again only after the next scan.
+
+Tabs: each minute the extension posts the URLs of the tabs of its ApplAI group, no other tab;
+Applications shows whether each filled form's tab is open (applai.applications). Without a
+post within CONNECTED_FOR the answer is unknown, not closed.
 """
 
 import base64
@@ -60,6 +64,8 @@ from applai.triage import retriage_offer, triage_offer
 CONNECTED_FOR = timedelta(minutes=5)  # after the extension's last ask
 MAX_FORM_FAILURES = 2
 MAX_TEXT = 20_000  # characters of a form page's text, as extension/forms.js keeps them
+MAX_URL = 4096  # characters of a tab's URL
+MAX_TABS = 500  # tabs posted at once
 # Why a form was not read, as the extension reports it, in the error the dashboard shows.
 MAX_SCREENSHOT = 20_000_000  # characters of base64: a full page's PNG
 # Why a form was not filled, as the extension reports it, in the error the dashboard shows.
@@ -548,6 +554,26 @@ def send_failed(application_id: int, body: SendFailed, request: Request) -> None
         app = _waiting_send(session, application_id)
         app.send_authorized_at = None
         app.send_error = f"send_{body.reason}"
+
+
+class TabsOpen(BaseModel):
+    urls: list[Annotated[str, Field(max_length=MAX_URL)]] = Field(max_length=MAX_TABS)
+
+
+@router.post("/tabs", status_code=204)
+def tabs_open(body: TabsOpen, request: Request) -> None:
+    """Keep the URLs of the tabs of the extension's group, and when they were posted. A post
+    refused keeps the previous ones, which expire CONNECTED_FOR after their own post."""
+    request.app.state.tabs_posted = (request.app.state.clock(), body.urls)
+
+
+def open_tabs(request: Request) -> list[str] | None:
+    """The URLs of the tabs of the extension's group, none when it has not posted them within
+    CONNECTED_FOR."""
+    posted: tuple[datetime, list[str]] | None = request.app.state.tabs_posted
+    if posted is None or request.app.state.clock() - posted[0] > CONNECTED_FOR:
+        return None
+    return posted[1]
 
 
 @router.get("/status")

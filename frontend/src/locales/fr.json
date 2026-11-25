@@ -112,6 +112,8 @@
   "applications.none": "Aucune candidature ici.",
   "applications.offer": "Voir l’offre",
   "applications.form": "Voir le formulaire",
+  "applications.tab.open": "Onglet ouvert",
+  "applications.tab.closed": "Onglet fermé",
   "applications.form_url.label": "URL du formulaire",
   "applications.form_url.save": "Enregistrer",
   "applications.form_url.failed": "URL non enregistrée : elle commence par http:// ou https://.",
