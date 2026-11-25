@@ -183,3 +183,17 @@ def test_a_failed_fill_again_is_shown_keeps_the_state_and_a_second_ask_lists_it_
                        headers=EXTENSION).status_code == 204  # fmt: skip
     assert client.get("/api/browser/fills", headers=EXTENSION).json() == []
     assert _get(engine, app_id).state == "reviewed"
+
+
+def test_a_fill_again_posted_without_a_screenshot_drops_the_old_one(
+    data_dir: Path, engine: Engine, client: TestClient
+):
+    app_id = _app(engine, data_dir, "validated")
+    assert client.post(f"/api/applications/{app_id}/fill-again").status_code == 204
+
+    refilled = {"fields": [{"field": 0, "value": "Jeanne D."}]}
+    posted = client.post(f"/api/browser/fills/{app_id}", json=refilled, headers=EXTENSION)
+
+    assert posted.status_code == 204
+    assert not (data_dir / "applications" / str(app_id) / "filled.png").exists()
+    assert _get(engine, app_id).filled_fields[0]["value"] == "Jeanne D."

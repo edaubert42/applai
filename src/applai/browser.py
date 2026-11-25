@@ -491,6 +491,10 @@ def fill_sent(
             directory = state.data_dir / "applications" / str(application_id)
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "filled.png").write_bytes(screenshot)
+        elif again:  # the old tab's image would sit beside the new fields
+            (state.data_dir / "applications" / str(application_id) / "filled.png").unlink(
+                missing_ok=True
+            )
         session.commit()
     if not again and state.watch is not None:
         later.add_task(

@@ -7,6 +7,8 @@ import { useSettings } from "./settings";
 import { button } from "./styles";
 
 /** Final validation: review problems, filled fields, attached PDFs, screenshot, and gates. */
+const FILL_AGAIN_POLL_MS = 3000;
+
 export default function FinalValidationScreen({
   row, onBack, onDone,
 }: { row: Row; onBack: () => void; onDone: () => void }) {
@@ -28,6 +30,15 @@ export default function FinalValidationScreen({
     );
     return () => { current = false; };
   }, [id]);
+
+  const waiting = review?.fill_again === true;
+  useEffect(() => {
+    if (id === null || !waiting) return;
+    const timer = setInterval(() => {
+      api.formReview(id).then((loaded) => setReview(loaded), () => {});
+    }, FILL_AGAIN_POLL_MS);
+    return () => clearInterval(timer);
+  }, [id, waiting]);
 
   const toggle = (field: number) =>
     setCorrected((old) => (old.includes(field) ? old.filter((i) => i !== field) : [...old, field]));

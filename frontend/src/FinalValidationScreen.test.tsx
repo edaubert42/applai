@@ -213,6 +213,26 @@ describe("FinalValidationScreen", () => {
     ]);
   });
 
+  it("loads the review again while a fill again waits and shows its failure", async () => {
+    const asked = aFormReview({ state: "validated" });
+    const failed = aFormReview({ state: "validated", fill_error: "fill_again_not_loaded" });
+    let reloads = 0;
+    const { words } = await openValidation({
+      "POST /api/applications/1/fill-again": new Response(null, { status: 204 }),
+      "GET /api/applications/1/review": () => (reloads++ === 0 ? asked : failed),
+    }, "en", asked);
+
+    fireEvent.click(screen.getByRole("button", { name: words["validation.fill_again"] }));
+    await screen.findByRole("button", { name: words["validation.fill_again_asked"] });
+
+    const alert = await screen.findByRole("alert", {}, { timeout: 5000 });
+    expect(alert.textContent).toBe(
+      words["validation.fill_error"].replace("{error}", words["message.fill_again_not_loaded"]),
+    );
+    const again = screen.getByRole("button", { name: words["validation.fill_again"] }) as HTMLButtonElement;
+    expect(again.disabled).toBe(false);
+  }, 10000);
+
   it("offers to fill again in every state the screen shows", async () => {
     for (const state of ["reviewed", "form_checked", "validated"]) {
       const { words } = await openValidation({}, "fr", aFormReview({ state }));
