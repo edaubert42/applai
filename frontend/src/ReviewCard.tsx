@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { Card, Point } from "./api";
+import { ServiceLogo } from "./ServiceLogo";
+import { serviceName } from "./service-state";
 import { useSettings } from "./settings";
 
 const MARKS = {
@@ -128,9 +130,9 @@ export function Header({ card, compact = false }: { card: Card; compact?: boolea
   );
 }
 
-/** An offer as a compact row: the logo, the title, the company, the contract type and the score. */
+/** An offer as a compact row: the logo, the title with its source logo and age, the company with its contract type, and the score. */
 export function OfferRow({ card, onOpen }: { card: Card; onOpen: () => void }) {
-  const { t, lookup } = useSettings();
+  const { t, lookup, formatAgo } = useSettings();
   const contract = card.contract_type && lookup(`contract.${card.contract_type}`);
   return (
     <button
@@ -147,12 +149,24 @@ export function OfferRow({ card, onOpen }: { card: Card; onOpen: () => void }) {
     >
       <Logo card={card} className="size-10 shrink-0 rounded-xl" />
       <span className="min-w-0 flex-1 basis-60">
-        <span className="block font-semibold [overflow-wrap:anywhere]">{card.title}</span>
-        <span className="block text-sm text-link [overflow-wrap:anywhere]">{card.company}</span>
+        <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          <span className="font-semibold [overflow-wrap:anywhere]">{card.title}</span>
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted">
+            {card.source && (
+              <ServiceLogo id={card.source} category="sites" name={serviceName(card.source, lookup)} size="sm" />
+            )}
+            <span>{formatAgo(card.seen_at)}</span>
+          </span>
+        </span>
+        <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm text-link [overflow-wrap:anywhere]">{card.company}</span>
+          {contract && (
+            <span className="rounded-pill border border-border bg-background px-2.5 py-0.5 text-xs font-medium">
+              {contract}
+            </span>
+          )}
+        </span>
       </span>
-      {contract && (
-        <span className="rounded-pill border border-border bg-background px-3 py-1 text-sm">{contract}</span>
-      )}
       {card.score !== null && (
         <span className="rounded-pill bg-primary px-4 py-1 font-semibold text-on-primary">
           {t("card.score", { n: card.score })}

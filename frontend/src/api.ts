@@ -43,6 +43,7 @@ export interface Card {
   rereading: boolean; // the extension was asked and has not answered
   reread_error: string | null; // one line: why the last read again failed
   contract_type: "permanent" | "fixed_term" | "internship" | "apprenticeship" | null;
+  seen_at: string;
 }
 
 export const GROUPS = ["in_progress", "waiting", "sent", "dropped"] as const;
