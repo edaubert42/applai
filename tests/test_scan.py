@@ -553,4 +553,55 @@ def test_without_a_watch_the_app_does_not_scan(tmp_path: Path):
     app = create_app(tmp_path, frontend_dir=tmp_path / "none")
     with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.post("/api/scan").status_code == 503
+        assert client.post("/api/scan/stop").status_code == 503
         assert client.get("/api/scan").status_code == 503
+
+
+def test_stop_scan_stops_a_running_scan_and_reports_active_services(
+    data_dir: Path, network: Network, app: FastAPI
+):
+    page = f'<script type="application/ld+json">{json.dumps(POSTING)}</script>'
+    network.pages[f"{SITE}/first"] = (200, page)
+    network.pages[f"{SITE}/second"] = (200, page)
+    network.held.add(f"{SITE}/first")
+    first_offer = _offer("first")
+    first_offer.source = "alert_hellowork"
+    second_offer = _offer("second")
+    second_offer.source = "alert_lesjeudis"
+    first_id, second_id = _seed(data_dir, first_offer, second_offer)
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        assert network.reached.wait(10)
+        while_running = client.get("/api/scan").json()
+        stopped = client.post("/api/scan/stop")
+        stopped_again = client.post("/api/scan/stop")
+        while_stopping = client.get("/api/scan").json()
+        network.release.set()
+        _scanner(client).wait()
+        after = client.get("/api/scan").json()
+
+    assert while_running["running"] is True
+    assert while_running["stopping"] is False
+    assert while_running["active_service"] == "alert_hellowork"
+    assert while_running["services_used"] == ["mailbox", "alert_hellowork"]
+    assert (stopped.status_code, stopped_again.status_code) == (204, 204)
+    assert while_stopping["stopping"] is True
+    assert after["running"] is False
+    assert after["stopping"] is False
+    assert after["active_service"] is None
+    assert after["services_used"] == []
+    assert after["last_scan"]["finished_at"] is not None
+    # The first offer finished being described; the second was never read and triage did not run.
+    assert _states(data_dir) == {first_id: "described", second_id: "new"}
+
+
+def test_stop_scan_when_no_scan_runs_returns_409(data_dir: Path, app: FastAPI):
+    _seed(data_dir, _scan(datetime(2026, 11, 20, 8, 31, tzinfo=PARIS)))
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        _scanner(client).wait()
+        refused = client.post("/api/scan/stop")
+        status = client.get("/api/scan").json()
+
+    assert refused.status_code == 409
+    assert status["running"] is False and status["stopping"] is False

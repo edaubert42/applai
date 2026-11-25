@@ -103,6 +103,9 @@ export function applicationsRoutes(groups: Partial<Applications> = {}) {
 export function aScan(overrides: Partial<ScanStatus> = {}): ScanStatus {
   return {
     running: false,
+    stopping: false,
+    active_service: null,
+    services_used: [],
     last_scan: {
       started_at: "2026-11-22T07:00:00+01:00",
       finished_at: "2026-11-22T07:02:00+01:00",

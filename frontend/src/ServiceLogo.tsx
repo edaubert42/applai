@@ -47,14 +47,25 @@ const DRAWINGS: Record<string, ReactNode> = {
   ),
 };
 
-const box = "size-8 shrink-0 rounded-lg";
+const SIZES = { sm: "size-5 shrink-0 rounded", md: "size-8 shrink-0 rounded-lg" } as const;
 const paper = "bg-[#fff]"; // logos are drawn for white, in either theme; the theme has no white token
 
 /**
  * A service's logo, decorative since its name follows: its site's, Claude's for every agent, a drawing for
  * ApplAI's own, the name's initials for a service this file does not know (a new source).
  */
-export function ServiceLogo({ id, category, name }: { id: string; category: Category; name: string }) {
+export function ServiceLogo({
+  id,
+  category,
+  name,
+  size = "md",
+}: {
+  id: string;
+  category: Category;
+  name: string;
+  size?: "sm" | "md";
+}) {
+  const box = SIZES[size];
   const key = category === "agents" ? "claude" : id;
   const picture = category === "agents" ? claude : PICTURES[id];
   if (picture) return <img data-logo={key} src={picture} alt="" className={`${box} ${paper} object-contain p-0.5`} />;
@@ -70,7 +81,7 @@ export function ServiceLogo({ id, category, name }: { id: string; category: Cate
         strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
-        className={`${box} bg-raised p-1.5 text-link`}
+        className={`${box} bg-raised p-1 text-link`}
       >
         {drawing}
       </svg>
