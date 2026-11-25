@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 from applai.alerts import SOURCES
 from applai.backup import BackupError, last_backup_at
 from applai.browser import CONNECTED_FOR
-from applai.details import on_linkedin, read_by_extension
+from applai.details import offer_removed, on_linkedin, read_by_extension
+from applai.drafting import INVALID_CITATION
 from applai.linkedin import COMMAND_VARIABLE as LINKEDIN_VAR
 from applai.mail import CLIENT_ID_VARIABLE as MAIL_VAR
 from applai.mail import TOKEN_FILE
@@ -102,6 +103,7 @@ def _site_health(
         return (o.page_failed_at or o.detail_failed_at) if ext else o.detail_failed_at
 
     read_at = max((reads[o.id] for o in offers if o.id in reads), default=None)
+    offers = [o for o in offers if not offer_removed(o.detail_error)]  # the site's, not ours
     fail_at = max((w for o in offers if (w := fail_of(o))), default=None)
     active = [(w or datetime.min, o.detail_error) for o in offers if o.detail_error]
     msg = max(active, key=lambda x: x[0])[1] if active else None
@@ -175,6 +177,10 @@ def _site_hint(st: State, is_ext: bool, is_li: bool, conn: bool | None) -> str |
     return "Check the failing offer pages or wait for the next scan."
 
 
+_AGENT_HINT = "Check Claude login, API key, or quota."
+_AGENT_HINTS = {INVALID_CITATION: "A draft cited facts wrongly and was refused: draft it again."}
+
+
 def _agents(s: Session, uid: int, now: datetime) -> list[dict[str, Any]]:
     q = select(AgentRun).where(AgentRun.user_id == uid)
     by_agent: dict[str, list[AgentRun]] = defaultdict(list)
@@ -190,8 +196,8 @@ def _agents(s: Session, uid: int, now: datetime) -> list[dict[str, Any]]:
         fail_at = fail.started_at if fail else None
         st = _state(now, last_ok, fail_at, lost=latest is not None and latest.outcome != OK)
         cost = sum(r.cost_usd or 0.0 for r in items if r.started_at >= day)
-        hint = "Check Claude login, API key, or quota." if st != "green" else None
         err = fail.outcome if fail else None
+        hint = None if st == "green" else _AGENT_HINTS.get(err or "", _AGENT_HINT)
         model = latest.model if latest else TRIAGE_MODEL
         rows.append(_row(name, st, last_ok, err, fail_at, hint, model=model, cost_today_usd=cost))
     return rows

@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 
 from applai.app import create_app
 from applai.database import open_database
-from applai.details import PageError, describe_offer
+from applai.details import PageError, describe_offer, page_answered
+from applai.drafting import INVALID_CITATION
 from applai.linkedin import COMMAND_VARIABLE
 from applai.models import AgentRun, Offer, OfferOrigin, OfferState, Scan, StateChange
 from applai.triage import TRIAGE_MODEL
@@ -147,3 +148,47 @@ def test_failed_triage_agent_run_is_red_and_sums_todays_cost(data_dir: Path):
     assert triage["id"] == "triage" and triage["model"] == TRIAGE_MODEL
     assert triage["state"] == "red" and triage["last_error"] == "exit"
     assert triage["cost_today_usd"] == pytest.approx(0.012) and triage["hint"]
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_offer_the_site_removed_leaves_its_site_and_the_extension_green(
+    data_dir: Path, status: int
+):
+    """A page that answers 404 or 410 says the offer was taken down: the reader works."""
+    gone_at = _utc(NOON - timedelta(hours=1))
+    url = "https://ecole.jobteaser.com/offers/2"
+    gone = _offer(
+        "jt-2",
+        "alert_jobteaser",
+        OfferState.TRIAGED,
+        url=url,
+        detail_error=page_answered(status),
+        page_failures=2,
+        page_failed_at=gone_at,
+        detail_failed_at=gone_at,
+    )
+    sites = {row["id"]: row for row in _services(data_dir, gone)["sites"]}
+    assert sites["alert_jobteaser"]["state"] == "green"
+    assert sites["alert_jobteaser"]["hint"] is None
+    assert sites["extension"]["last_error"] is None
+
+
+def test_drafting_refused_for_its_citations_is_not_told_to_check_the_claude_login(data_dir: Path):
+    engine = open_database(data_dir)
+    with Session(engine) as s:
+        offer = _offer("drafted-1", "alert_wttj", OfferState.ACCEPTED)
+        s.add(offer)
+        s.flush()
+        for agent, outcome in (("drafting", INVALID_CITATION), ("triage", "exit")):
+            at = _utc(NOON - timedelta(hours=1))
+            d: dict[str, object] = {"user_id": 1, "offer_id": offer.id, "agent": agent}
+            s.add(
+                AgentRun(**d, model=TRIAGE_MODEL, started_at=at, duration_ms=300, outcome=outcome)
+            )
+        s.commit()
+    engine.dispose()
+
+    agents = {row["id"]: row for row in _services(data_dir)["agents"]}
+    drafting, triage = agents["drafting"], agents["triage"]
+    assert drafting["state"] == "red" and drafting["hint"]
+    assert drafting["hint"] != triage["hint"]

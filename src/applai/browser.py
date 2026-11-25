@@ -172,7 +172,7 @@ def page_sent(offer_id: int, body: PageSent, request: Request, later: Background
 @router.post("/pages/{offer_id}/failure", status_code=204)
 def page_failed(offer_id: int, body: PageFailed, request: Request, later: BackgroundTasks) -> None:
     """Record a page the extension could not read."""
-    error = f"the page answered HTTP {body.status}" if body.status else "the page was not fetched"
+    error = details.page_answered(body.status) if body.status else "the page was not fetched"
     clock = request.app.state.clock
     if _asked_again(request, offer_id):
         with Session(request.app.state.engine) as session, session.begin():
