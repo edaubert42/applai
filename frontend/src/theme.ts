@@ -68,6 +68,9 @@ export const textPairs: [Token, Token][] = [
   ["plus", "plus-bg"],
   ["minus", "minus-bg"],
   ["unknown", "unknown-bg"],
+  ["plus", "surface"],
+  ["minus", "surface"],
+  ["unknown", "surface"],
 ];
 
 function luminance(hex: string): number {

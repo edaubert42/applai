@@ -9,8 +9,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 const services = {
   sites: [aService({ id: "alert_wttj" })],
-  agents: [aService({ id: "triage", state: "orange", hint: "Check Claude login, API key, or quota." })],
-  mailbox: [aService({ id: "mailbox", state: "red", last_error: "Outlook refused the token.", hint: "Run applai mail login." })],
+  agents: [aService({ id: "triage", state: "orange", hint: "claude_login", model: "claude-haiku-5-5" })],
+  mailbox: [aService({ id: "mailbox", state: "red", last_error: "Outlook refused the token.", hint: "mail_login" })],
   applai: [aService({ id: "scan" })],
 };
 
@@ -18,7 +18,7 @@ async function openPage(language: "fr" | "en" = "fr", routes = servicesRoutes(se
   const calls = fakeApi({ ...reviewRoutes(), ...routes });
   render(<App />);
   fireEvent.click(screen.getByRole("button", { name: fr["nav.settings"] }));
-  if (language === "en") fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
+  if (language === "en") fireEvent.click(screen.getByRole("button", { name: fr["language.en"] }));
   const words = language === "en" ? en : fr;
   await screen.findAllByRole("region");
   return { calls, words };
@@ -26,7 +26,7 @@ async function openPage(language: "fr" | "en" = "fr", routes = servicesRoutes(se
 
 describe("the Settings page", () => {
   it.each(["fr", "en"] as const)(
-    "shows the four categories in order, each row with its light, named only for screen readers, and, when not green, its sentence, in %s",
+    "shows the four categories in order, each row with its state in words and, when not green, its sentence, in %s",
     async (language) => {
       const { words } = await openPage(language);
 
@@ -41,23 +41,23 @@ describe("the Settings page", () => {
 
       const site = rowOf(words["settings.category.sites"]);
       expect(site.getByText(words["settings.service.alert_wttj"])).toBeTruthy();
-      expect(site.getByRole("img", { name: words["settings.state.green"] })).toBeTruthy();
+      expect(site.getByText(words["settings.state.green"])).toBeTruthy();
       expect(site.queryByText(/\./)).toBeNull();
-      expect(site.queryByText(words["settings.state.green"])).toBeNull();
 
       const agent = rowOf(words["settings.category.agents"]);
       expect(agent.getByText(words["settings.service.triage"])).toBeTruthy();
-      expect(agent.getByRole("img", { name: words["settings.state.orange"] })).toBeTruthy();
-      expect(agent.getByText("Check Claude login, API key, or quota.")).toBeTruthy();
+      expect(agent.getByText(words["settings.state.orange"])).toBeTruthy();
+      expect(agent.getByText(words["settings.hint.claude_login"])).toBeTruthy();
+      expect(agent.getByText("Haiku 5.5")).toBeTruthy();
 
       const mail = rowOf(words["settings.category.mailbox"]);
       expect(mail.getByText(words["settings.service.mailbox"])).toBeTruthy();
-      expect(mail.getByRole("img", { name: words["settings.state.red"] })).toBeTruthy();
-      expect(mail.getByText("Run applai mail login.")).toBeTruthy();
+      expect(mail.getByText(words["settings.state.red"])).toBeTruthy();
+      expect(mail.getByText(words["settings.hint.mail_login"])).toBeTruthy();
 
       const applai = rowOf(words["settings.category.applai"]);
       expect(applai.getByText(words["settings.service.scan"])).toBeTruthy();
-      expect(applai.getByRole("img", { name: words["settings.state.green"] })).toBeTruthy();
+      expect(applai.getByText(words["settings.state.green"])).toBeTruthy();
     },
   );
 
@@ -90,7 +90,7 @@ describe("the Settings page", () => {
 
     expect(logos.every(Boolean)).toBe(true);
     expect(new Set(logos).size).toBe(logos.length);
-    expect(logoOf(fr["settings.service.triage"])).toBe(logoOf("drafting"));
+    expect(logoOf(fr["settings.service.triage"])).toBe(logoOf(fr["settings.service.drafting"]));
     expect(logoOf("alert_custom")).toBeTruthy();
   });
 
@@ -108,15 +108,32 @@ describe("the Settings page", () => {
     expect(await screen.findAllByRole("region")).toHaveLength(4);
   });
 
-  it("has no button that signs in or sends anything, only the theme and the language", async () => {
-    const hint = "Set APPLAI_LINKEDIN_CMD to connect LinkedIn.";
-    const sites = [aService({ id: "alert_linkedin", state: "red", hint })];
+  it.each(["fr", "en"] as const)("names every agent of the pipeline in %s", async (language) => {
+    const ids = ["triage", "form_capture", "drafting", "cv_tailoring", "filling", "review"] as const;
+    const { words } = await openPage(language, servicesRoutes({ ...services, agents: ids.map((id) => aService({ id })) }));
+
+    const rows = within(screen.getByRole("region", { name: words["settings.category.agents"] })).getAllByRole("listitem");
+
+    expect(rows.map((row) => row.querySelector("h3")?.textContent)).toEqual(ids.map((id) => words[`settings.service.${id}`]));
+  });
+
+  it("has a sun and a moon for the theme, the language apart, and nothing that signs in or sends", async () => {
+    const hint = "extension_id must be 32 letters.";
+    const sites = [aService({ id: "extension", state: "red", hint })];
     const { calls } = await openPage("fr", servicesRoutes({ ...services, sites }));
     const main = within(screen.getByRole("main"));
+    const group = (name: string) => within(main.getByRole("group", { name })).getAllByRole("button");
+    const pressed = (button: HTMLElement) => button.getAttribute("aria-pressed");
 
-    expect(main.getByText(hint)).toBeTruthy();
-    const buttons = main.queryAllByRole("button").map((button) => button.getAttribute("aria-label"));
-    expect(buttons).toEqual([fr["theme.toLight"], fr["language.switch"]]);
+    expect(main.getByText(hint)).toBeTruthy(); // a sentence that is no code is shown as sent
+    const theme = group(fr["settings.appearance"]);
+    expect(theme.map((button) => button.textContent)).toEqual([fr["theme.light"], fr["theme.dark"]]);
+    expect(theme.map((button) => button.querySelector("svg")?.getAttribute("data-icon"))).toEqual(["sun", "moon"]);
+    expect(theme.map(pressed)).toEqual(["false", "true"]);
+    const language = group(fr["settings.language"]);
+    expect(language.map((button) => button.textContent)).toEqual([fr["language.fr"], fr["language.en"]]);
+    expect(language.map(pressed)).toEqual(["true", "false"]);
+    expect(main.getAllByRole("button")).toHaveLength(4);
     expect(main.queryAllByRole("link")).toEqual([]);
     expect(calls.filter((call) => call.method !== "GET")).toEqual([]);
   });

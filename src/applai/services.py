@@ -31,6 +31,23 @@ from applai.triage import AGENT as TRIAGE_AGENT
 from applai.triage import TRIAGE_MODEL
 
 State = Literal["green", "orange", "red"]
+# What to do about a service that is not green; the page words each one (settings.hint.<code>).
+Hint = Literal[
+    "set_extension_id",
+    "reload_extension",
+    "open_site",
+    "connect_linkedin",
+    "check_linkedin",
+    "check_offer_pages",
+    "claude_login",
+    "invalid_citation",
+    "mail_login",
+    "scan_errors",
+    "fix_profile",
+    "backup_dir",
+    "notion_token",
+    "notion_access",
+]
 _SITE_STATES = (OfferState.NEW, OfferState.DESCRIBED, OfferState.SCREENED_OUT, OfferState.TRIAGED)
 
 
@@ -136,11 +153,11 @@ def _sites(
     ehint = ext_err or (
         None
         if est == "green"
-        else "Set extension_id in settings.yaml."
+        else "set_extension_id"
         if not ext_id
-        else "Reload the ApplAI extension in Chrome."
+        else "reload_extension"
         if not conn
-        else "Open the site in your Chrome so the extension reads it."
+        else "open_site"
     )
     rows = [_row("extension", est, eread, ext_err or emsg, efail, ehint, connected=conn)]
     by_src: dict[str, list[Offer]] = defaultdict(list)
@@ -167,18 +184,18 @@ def _sites(
     return rows
 
 
-def _site_hint(st: State, is_ext: bool, is_li: bool, conn: bool | None) -> str | None:
+def _site_hint(st: State, is_ext: bool, is_li: bool, conn: bool | None) -> Hint | None:
     if st == "green":
         return None
     if is_li:
-        return f"Set {LINKEDIN_VAR} to connect LinkedIn." if not conn else "Check LinkedIn session."
+        return "connect_linkedin" if not conn else "check_linkedin"
     if is_ext:
-        return "Open the site in your Chrome so the extension reads it."
-    return "Check the failing offer pages or wait for the next scan."
+        return "open_site"
+    return "check_offer_pages"
 
 
-_AGENT_HINT = "Check Claude login, API key, or quota."
-_AGENT_HINTS = {INVALID_CITATION: "A draft cited facts wrongly and was refused: draft it again."}
+_AGENT_HINT: Hint = "claude_login"
+_AGENT_HINTS: dict[str, Hint] = {INVALID_CITATION: "invalid_citation"}
 
 
 def _agents(s: Session, uid: int, now: datetime) -> list[dict[str, Any]]:
@@ -223,7 +240,7 @@ def _mailbox(
     if done and not _mail_errs(done[0]) and done[0].finished_at:
         last_ok = max(t for t in (last_ok, done[0].finished_at) if t is not None)
     st = _state(now, last_ok, fail_at, conn=signed_in)
-    hint = None if signed_in and st == "green" else "Run applai mail login."
+    hint: Hint | None = None if signed_in and st == "green" else "mail_login"
     return _row("mailbox", st, last_read, msg, fail_at, hint, connected=signed_in)
 
 
@@ -253,15 +270,11 @@ def _applai(
     ws = last_write_status(data_dir)
     n_ok = max((t for t in (s.scalar(q_n), ws.last_ok_at) if t is not None), default=None)
     n_st = _state(now, n_ok, ws.last_error_at, conn=tok)
-    s_hint = "Review scan errors." if scan_st != "green" else None
-    p_hint = "Fix profile.yaml." if prof_err else None
-    b_hint = "Check APPLAI_BACKUP_DIR." if bak_msg else None
-    n_hint = (
-        f"Set {NOTION_VAR}."
-        if not tok
-        else "Check Notion token and database access."
-        if n_st != "green"
-        else None
+    s_hint: Hint | None = "scan_errors" if scan_st != "green" else None
+    p_hint: Hint | None = "fix_profile" if prof_err else None
+    b_hint: Hint | None = "backup_dir" if bak_msg else None
+    n_hint: Hint | None = (
+        "notion_token" if not tok else "notion_access" if n_st != "green" else None
     )
     return [
         _row("scan", scan_st, scan_at, scan_err, fail_at, s_hint, next_at=_iso(next_at)),

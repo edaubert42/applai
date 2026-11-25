@@ -52,7 +52,7 @@ describe("the shell", () => {
     expect(shownStrings().filter((s) => !isMessage(french, s))).toEqual([]);
 
     openSettings();
-    fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
+    fireEvent.click(screen.getByRole("button", { name: fr["language.en"] }));
 
     expect(document.documentElement.lang).toBe("en");
     for (const label of [en["nav.review"], en["nav.applications"], en["nav.control"], en["nav.settings"]]) {
@@ -70,13 +70,13 @@ describe("the shell", () => {
     render(<App />);
     const header = within(screen.getByRole("banner"));
 
-    for (const name of [fr["theme.toLight"], fr["language.switch"]]) {
+    for (const name of [fr["theme.light"], fr["language.en"]]) {
       expect(header.queryByRole("button", { name })).toBeNull();
     }
     openSettings();
     const main = within(screen.getByRole("main"));
-    expect(main.getByRole("button", { name: fr["theme.toLight"] })).toBeTruthy();
-    expect(main.getByRole("button", { name: fr["language.switch"] })).toBeTruthy();
+    expect(main.getByRole("button", { name: fr["theme.light"] })).toBeTruthy();
+    expect(main.getByRole("button", { name: fr["language.en"] })).toBeTruthy();
   });
 
   it("switches from the dark tokens to the light ones", () => {
@@ -85,7 +85,7 @@ describe("the shell", () => {
     expect(rootToken("background")).toBe(themes.dark.background);
 
     openSettings();
-    fireEvent.click(screen.getByRole("button", { name: fr["theme.toLight"] }));
+    fireEvent.click(screen.getByRole("button", { name: fr["theme.light"] }));
 
     expect(document.documentElement.dataset.theme).toBe("light");
     for (const [name, value] of Object.entries(themes.light)) {
@@ -97,8 +97,8 @@ describe("the shell", () => {
   it("keeps the chosen theme and language after a reload", () => {
     const { unmount } = render(<App />);
     openSettings();
-    fireEvent.click(screen.getByRole("button", { name: fr["theme.toLight"] }));
-    fireEvent.click(screen.getByRole("button", { name: fr["language.switch"] }));
+    fireEvent.click(screen.getByRole("button", { name: fr["theme.light"] }));
+    fireEvent.click(screen.getByRole("button", { name: fr["language.en"] }));
     unmount();
 
     render(<App />);

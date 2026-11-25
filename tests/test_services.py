@@ -1,8 +1,10 @@
 """Service health API (/api/services): real SQLite, real migrations, real FastAPI app."""
 
+import json
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import get_args
 from zoneinfo import ZoneInfo
 
 import httpx2
@@ -16,6 +18,7 @@ from applai.database import open_database
 from applai.details import PageError, describe_offer, page_answered
 from applai.drafting import INVALID_CITATION
 from applai.models import AgentRun, Offer, OfferOrigin, OfferState, Scan, StateChange
+from applai.services import Hint
 from applai.triage import TRIAGE_MODEL
 
 DEMO_DIR = Path(__file__).parents[1] / "demo" / "candidate"
@@ -111,10 +114,10 @@ def test_unconnected_mailbox_and_unset_linkedin_mcp_are_red_with_what_to_do(data
     data = _services(data_dir, old, Scan(user_id=1, by_hand=False, started_at=t0, finished_at=t1))
     assert list(data.keys()) == ["sites", "agents", "mailbox", "applai"]
     mb, sites = data["mailbox"][0], {row["id"]: row for row in data["sites"]}
-    assert mb["connected"] is False and mb["state"] == "red" and mb["hint"]
+    assert mb["connected"] is False and mb["state"] == "red" and mb["hint"] == "mail_login"
     li = sites["alert_linkedin"]
-    assert li["connected"] is False and li["state"] == "red" and li["hint"]
-    assert sites["extension"]["state"] == "red" and sites["extension"]["hint"]
+    assert li["connected"] is False and li["state"] == "red" and li["hint"] == "connect_linkedin"
+    assert sites["extension"]["state"] == "red" and sites["extension"]["hint"] == "set_extension_id"
     assert [r["state"] for r in data["applai"]] == ["green", "green", "green", "red"]
     assert data["applai"][-1]["connected"] is False and data["applai"][-1]["last_at"] is not None
 
@@ -144,7 +147,7 @@ def test_failed_triage_agent_run_is_red_and_sums_todays_cost(data_dir: Path):
     triage = _services(data_dir)["agents"][0]
     assert triage["id"] == "triage" and triage["model"] == TRIAGE_MODEL
     assert triage["state"] == "red" and triage["last_error"] == "exit"
-    assert triage["cost_today_usd"] == pytest.approx(0.012) and triage["hint"]
+    assert triage["cost_today_usd"] == pytest.approx(0.012) and triage["hint"] == "claude_login"
 
 
 @pytest.mark.parametrize("status", [404, 410])
@@ -187,5 +190,12 @@ def test_drafting_refused_for_its_citations_is_not_told_to_check_the_claude_logi
 
     agents = {row["id"]: row for row in _services(data_dir)["agents"]}
     drafting, triage = agents["drafting"], agents["triage"]
-    assert drafting["state"] == "red" and drafting["hint"]
-    assert drafting["hint"] != triage["hint"]
+    assert drafting["state"] == "red" and drafting["hint"] == "invalid_citation"
+    assert triage["hint"] == "claude_login"
+
+
+@pytest.mark.parametrize("language", ["fr", "en"])
+def test_every_hint_the_api_can_send_has_a_sentence_in_the_page(language: str):
+    locales = Path(__file__).parents[1] / "frontend" / "src" / "locales"
+    messages = json.loads((locales / f"{language}.json").read_text(encoding="utf-8"))
+    assert [h for h in get_args(Hint) if f"settings.hint.{h}" not in messages] == []
