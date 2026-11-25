@@ -611,12 +611,11 @@ def mark_sent(
 def drop_application(
     application_id: int,
     session: _Session,
-    body: validation.DropRequest | None = None,
+    body: validation.DropRequest,
 ) -> None:
-    """Drop a non-terminal application and record the candidate's decision as a label."""
-    req = body or validation.DropRequest()
+    """Drop a non-terminal application and record the candidate's reasons as a label."""
     _run_gate(
-        session, lambda: validation.drop_application(session, LOCAL_USER_ID, application_id, req)
+        session, lambda: validation.drop_application(session, LOCAL_USER_ID, application_id, body)
     )
 
 

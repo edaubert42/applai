@@ -204,30 +204,89 @@ def test_validate_and_sent_enforce_gate_order_and_record_application_labels(
         assert client.post(f"/api/applications/99999/{action}").status_code == 404
 
 
-def test_drop_moves_any_non_terminal_state_records_label_and_refuses_terminal_or_foreign_origin(
+def test_drop_moves_any_non_terminal_state_records_reasons_and_refuses_terminal_or_foreign_origin(
     engine: Engine, client: TestClient
 ):
     non_terminal = [s.value for s in ApplicationState if s not in ("sent", "dropped")]
     for i, origin in enumerate(non_terminal):
-        app_id, note = _app(engine, state=origin), ("Offre expirée" if i % 2 else None)
-        url = f"/api/applications/{app_id}/drop"
-        resp = client.post(url, json={"note": note}) if note else client.post(url)
-        assert resp.status_code == 204
+        app_id, note = _app(engine, state=origin), ("Trop loin" if i % 2 else None)
+        reasons = ["location", "salary"] if i % 2 else ["mission"]
+        body = {"reasons": reasons, "note": note} if note else {"reasons": reasons}
+        assert client.post(f"/api/applications/{app_id}/drop", json=body).status_code == 204
         state, [change], [label] = _state_and_labels(engine, app_id)
         assert (state, change.from_state, change.to_state, change.actor) == (
             "dropped", origin, "dropped", "candidate",
         )  # fmt: skip
         assert (label.level, label.decision, label.reasons, label.note, label.correction) == (
-            "application", "dropped", [], note, False,
+            "application", "dropped", reasons, note, True,
         )  # fmt: skip
 
     for terminal in ("sent", "dropped"):
         done = _app(engine, state=terminal)
-        assert client.post(f"/api/applications/{done}/drop").status_code == 409
+        resp = client.post(f"/api/applications/{done}/drop", json={"reasons": ["other"]})
+        assert resp.status_code == 409
         assert _state_and_labels(engine, done) == (terminal, [], [])
     foreign = _app(engine, state="reviewed", user_id=2)
-    assert client.post(f"/api/applications/{foreign}/drop").status_code == 404
-    assert client.post("/api/applications/99999/drop").status_code == 404
+    drop = {"reasons": ["company"]}
+    assert client.post(f"/api/applications/{foreign}/drop", json=drop).status_code == 404
+    assert client.post("/api/applications/99999/drop", json=drop).status_code == 404
+
+
+def test_an_offer_closed_drop_is_not_a_correction_and_other_reasons_with_it_still_are(
+    engine: Engine, client: TestClient
+):
+    closed, closed_and_salary = _app(engine, state="drafted"), _app(engine, state="filled")
+
+    for app_id, reasons in (
+        (closed, ["offer_closed"]),
+        (closed_and_salary, ["salary", "offer_closed"]),
+    ):
+        resp = client.post(f"/api/applications/{app_id}/drop", json={"reasons": reasons})
+        assert resp.status_code == 204
+
+    assert [(lbl.reasons, lbl.correction) for lbl in _state_and_labels(engine, closed)[2]] == [
+        (["offer_closed"], False)
+    ]
+    assert [lbl.correction for lbl in _state_and_labels(engine, closed_and_salary)[2]] == [True]
+
+
+def test_a_drop_without_a_known_reason_is_refused_and_keeps_its_state_then_a_retry_drops_once(
+    engine: Engine, client: TestClient
+):
+    app_id = _app(engine, state="validated")
+    url = f"/api/applications/{app_id}/drop"
+
+    bodies: list[dict[str, Any] | None] = [
+        None, {}, {"reasons": []}, {"note": "Offre expirée"}, {"reasons": ["typo"]},
+    ]  # fmt: skip
+    for body in bodies:
+        resp = client.post(url, json=body) if body is not None else client.post(url)
+        assert resp.status_code == 422
+        assert _state_and_labels(engine, app_id) == ("validated", [], [])
+        assert [r["id"] for r in client.get("/api/applications").json()["waiting"]] == [app_id]
+
+    assert client.post(url, json={"reasons": ["offer_closed"]}).status_code == 204
+    assert client.post(url, json={"reasons": ["offer_closed"]}).status_code == 409
+    state, changes, labels = _state_and_labels(engine, app_id)
+    assert (state, len(changes), [lbl.reasons for lbl in labels]) == (
+        "dropped", 1, [["offer_closed"]],
+    )  # fmt: skip
+
+
+def test_a_dropped_application_lists_under_dropped_with_its_reasons(
+    engine: Engine, client: TestClient
+):
+    dropped, kept = _app(engine, state="answers_checked"), _app(engine, state="filled")
+    body = {"reasons": ["company", "offer_closed"], "note": "Retirée du site"}
+    assert client.post(f"/api/applications/{dropped}/drop", json=body).status_code == 204
+
+    board = client.get("/api/applications").json()
+
+    assert [r["id"] for r in board["in_progress"]] == [kept]
+    assert [(r["id"], r["reasons"]) for r in board["dropped"]] == [
+        (dropped, ["company", "offer_closed"])
+    ]
+    assert board["in_progress"][0]["reasons"] == []
     guarded, evil = _app(engine, state="reviewed"), {"Origin": "https://evil.example"}
     for action in ("form-checked", "validate", "sent", "drop"):
         assert client.post(f"/api/applications/{guarded}/{action}", headers=evil).status_code == 403
