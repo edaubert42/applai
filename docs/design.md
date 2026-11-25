@@ -27,7 +27,8 @@ The light theme keeps the dark theme's hues. Every text token reaches 4.5:1 on e
 
 ## Layout
 
-- **Header** on `surface`: the ApplAI mark (an A in a `primary` rounded square) and its name; in the middle, the pill navigation on a `raised` track, the current page's pill in `primary`; on the right, the theme switch and the language switch.
+- **Header** on `surface`: the ApplAI mark (an A in a `primary` rounded square) and its name; in the middle, the pill navigation on a `raised` track, the current page's pill in `primary`.
+- **Réglages**, one column of 860 px: an Apparence block (a sun for Jour, a moon for Nuit) and a separate Langue block, each a pill pair with the current one in `primary`; then one `surface` list per category, a row per service with its logo, name (an agent's model under it), state as a dot and words, and, when not green, what to do.
 - **Pages**: À revoir / To review, Candidatures / Applications, Contrôle / Control. Each has its title and, for now, an empty card.
 - **Settings**: dark and French by default; the candidate's choice is kept in `localStorage`.
 - **Strings**: all in `frontend/src/locales/{fr,en}.json`; the lint fails on a literal string in JSX.

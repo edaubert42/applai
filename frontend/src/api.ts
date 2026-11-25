@@ -188,8 +188,10 @@ export interface Service {
   last_at: string | null;
   last_error: string | null;
   last_error_at: string | null;
-  /** The sentence that says what to do; null when the state is green. */
+  /** The code of what to do (a settings file error comes as its own sentence); null when the state is green. */
   hint: string | null;
+  /** The model of an agent row. */
+  model?: string;
 }
 
 export const CATEGORIES = ["sites", "agents", "mailbox", "applai"] as const;
