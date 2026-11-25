@@ -313,3 +313,15 @@ def test_a_manual_run_writes_what_it_would_open_to_the_run_summary_and_opens_not
     dry_run = _run_step(learn, "--dry-run")
     assert dry_run["if"] == "github.event_name == 'workflow_dispatch'"
     assert opener["if"] == "github.event_name == 'pull_request'"
+
+
+def test_a_clean_merged_pr_skips_the_learner_model():
+    assert main(["has-findings", "41"], run=FakeGh(), env=ENV) == 0
+    assert main(["has-findings", "44"], run=FakeGh(), env=ENV) == 0
+    assert main(["has-findings", "45"], run=FakeGh(), env=ENV) == 1
+
+    learn = _workflow()["jobs"]["learn"]
+    gather = _run_step(learn, "tools/lesson.py has-findings")
+    assert gather["id"] == "gather"
+    assert _agent_step(learn)["if"] == "steps.gather.outputs.run == 'true'"
+    assert '{"lessons":[]}' in learn["outputs"]["lessons"]

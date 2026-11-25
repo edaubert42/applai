@@ -81,7 +81,7 @@ jobs:
           claude_args: |
             --model ${{ steps.ready.outputs.hard == 'true' && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
             --effort high
-            --max-turns 120
+            --max-turns ${{ steps.ready.outputs.hard == 'true' && 100 || 80 }}
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(uv:*),Bash(python3 tools/*),Bash(git:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(npm ci:*),Bash(npm run:*),Bash(npm test:*)"
           prompt: |
             You are the coder agent of ${{ github.repository }}. Build issue #${{ steps.ready.outputs.issue }}.
@@ -94,13 +94,16 @@ jobs:
                Never end without a PR or a `Questions:` comment: a tool you need is denied, a gate cannot run,
                or the code contradicts the issue (a missing transition, a rule it breaks)? Ask it there and stop.
             2. Create the branch `agent/issue-${{ steps.ready.outputs.issue }}-<short-slug>` from `main`.
-            3. Work test first: one failing test per acceptance criterion, then the code that makes it pass.
-            4. Run every gate listed in CLAUDE.md until all are green. Commit in small steps.
+            3. Work test first: one failing test per acceptance criterion, then the smallest complete change that makes it pass.
+               Reuse existing helpers and patterns; skip speculative abstractions or unrequested options; never cut validation,
+               error handling, or security.
+            4. Iterate with targeted tests (`uv run pytest -q --tb=short <path>`), then run every gate listed in CLAUDE.md
+               once at the end until all are green (`uv run pytest -q --tb=short`). Commit in small steps.
                Then review your own diff as the reviewer will: spec, tests that prove something, CLAUDE.md rules, bugs.
             5. Push the branch and open a PR with `gh pr create`, filling .github/pull_request_template.md (150 words at most),
                with `Closes #${{ steps.ready.outputs.issue }}`${{ steps.ready.outputs.hard == 'true' && ' and `--label hard`' || '' }}.
                Done when the PR is open and every gate passed locally.
-            The frontend's gates are the steps of .github/workflows/frontend-ci.yml, run in `frontend/`
+            When `frontend/` changed, run the frontend's gates in .github/workflows/frontend-ci.yml, in `frontend/`
             (`npm ci`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`). A new npm dependency
             is a question for the owner: `npm install` is not one of your tools.
 
@@ -141,8 +144,8 @@ jobs:
           allowed_bots: github-actions[bot]
           claude_args: |
             --model ${{ steps.ready.outputs.hard == 'true' && 'claude-opus-5-5' || 'claude-sonnet-5-5' }}
-            --effort high
-            --max-turns 40
+            --effort ${{ steps.ready.outputs.hard == 'true' && 'high' || 'medium' }}
+            --max-turns 25
             --allowedTools "Read,Write,Glob,Grep,Bash(gh issue view:*),Bash(gh issue comment:*)"
           prompt: |
             You are the answerer agent of ${{ github.repository }}. The coder stopped on issue #${{ steps.ready.outputs.issue }}
