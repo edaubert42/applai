@@ -1,7 +1,10 @@
 """Drafting: Opus writes answers and a cover letter, each sentence citing validated facts."""
 
 import shutil
-from collections.abc import Iterator
+import threading
+from collections.abc import Generator, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -282,3 +285,68 @@ def test_drafting_is_retried_on_a_failed_application_and_refused_in_other_states
     assert (application.state, application.draft_error) == ("drafted", None)
     refused = [client.post(f"/api/applications/{i}/draft").status_code for i in (created, drafted)]
     assert refused == [409, 409]
+
+
+@contextmanager
+def _client_on(data_dir: Path, backend: FakeBackend) -> Generator[tuple[TestClient, AgentRunner]]:
+    runner = AgentRunner(backend)
+    watch = Watch(http=httpx2.Client(), runner=runner, ms_client_id=None)
+    app = create_app(data_dir, frontend_dir=data_dir / "none", watch=watch)
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        yield client, runner
+
+
+def test_a_draft_asked_while_one_runs_for_the_application_is_refused_with_409(
+    data_dir: Path, engine: Engine
+):
+    application_id = _application(engine, [*IDENTITY, QUESTION], draft_error="agent failed")
+    hold = threading.Event()
+    backend = FakeBackend([ANSWER, SUPPORTED, ANSWER, SUPPORTED], hold=hold)
+    url = f"/api/applications/{application_id}/draft"
+
+    with _client_on(data_dir, backend) as (client, _), ThreadPoolExecutor() as pool:
+        first = pool.submit(client.post, url)
+        try:
+            assert backend.started.wait(10)  # the first draft runs, held in the runner
+            second = pool.submit(client.post, url).result(10)
+            calls_while_held = [spec.name for spec in backend.specs]
+        finally:
+            hold.set()
+        assert first.result(10).status_code == 202
+
+    assert second.status_code == 409
+    assert calls_while_held == ["drafting"]
+    assert _get(engine, application_id).state == "drafted"
+
+
+def test_after_a_draft_ends_failed_or_drafted_a_new_one_starts(data_dir: Path, engine: Engine):
+    application_id = _application(engine, [*IDENTITY, QUESTION])
+    refused = _result({"answers": {"4": _sentences("F5")}})  # F5 is forbidden
+    backend = FakeBackend([refused, ANSWER, SUPPORTED])
+    url = f"/api/applications/{application_id}/draft"
+
+    with _client_on(data_dir, backend) as (client, runner):
+        failed = client.post(url)
+        error = _get(engine, application_id).draft_error
+        retried = client.post(url)
+        runner.claim("drafting", application_id=application_id).release()  # nothing holds it
+
+    assert (failed.status_code, retried.status_code) == (202, 202)
+    assert error is not None and error.startswith("Drafting refused")
+    assert [spec.name for spec in backend.specs] == ["drafting", "drafting", "drafting_judge"]
+    assert _get(engine, application_id).state == "drafted"
+
+
+def test_a_draft_that_crashed_does_not_block_its_application(data_dir: Path, engine: Engine):
+    application_id = _application(engine, [*IDENTITY, QUESTION])
+    backend = FakeBackend([RuntimeError("the run crashed"), ANSWER, SUPPORTED])
+    url = f"/api/applications/{application_id}/draft"
+
+    with _client_on(data_dir, backend) as (client, _):
+        crashed = client.post(url)
+        error = _get(engine, application_id).draft_error
+        retried = client.post(url)
+
+    assert (crashed.status_code, retried.status_code) == (202, 202)
+    assert error == "RuntimeError"
+    assert _get(engine, application_id).state == "drafted"

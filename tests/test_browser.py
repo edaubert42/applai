@@ -2,6 +2,8 @@
 
 import json
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -257,3 +259,32 @@ def test_a_failed_page_waits_for_the_next_scan_and_a_second_failure_triages_the_
     assert offer.detail_error == "the page answered HTTP 403"
     assert offer.description is not None and "Data engineer" in offer.description
     assert [(card["id"], card["full_text_read"]) for card in review] == [(offer_id, False)]
+
+
+def test_a_scan_does_not_triage_again_an_offer_whose_posted_page_is_triaging(data_dir: Path):
+    (offer_id,) = _seed(data_dir, JOBTEASER)
+    usage = Usage(model=TRIAGE_MODEL, input_tokens=900, output_tokens=300)
+    hold = threading.Event()
+    backend = FakeBackend([AgentResult(output=CARD, usage=usage)] * 2, hold=hold)
+    watch = Watch(http=httpx2.Client(), runner=AgentRunner(backend), ms_client_id=None)
+    later = NOON + timedelta(minutes=1)  # the 08:30 scan is old enough for one by hand
+    app = create_app(data_dir, frontend_dir=data_dir / "none", watch=watch, clock=lambda: later)
+    page = f"/api/browser/pages/{offer_id}"
+
+    with TestClient(app, base_url="http://127.0.0.1") as client, ThreadPoolExecutor() as pool:
+        sent = pool.submit(client.post, page, json={"html": PAGE}, headers=EXTENSION)
+        try:
+            assert backend.started.wait(10)  # the page's Triage runs, held in the runner
+            assert client.post("/api/scan").status_code == 202
+            app.state.scanner.wait(10)
+            calls_while_held = len(backend.specs)
+            status = client.get("/api/scan").json()
+        finally:
+            hold.set()
+        assert sent.result(10).status_code == 204
+
+    assert calls_while_held == 1
+    last = status["last_scan"]
+    assert last["finished_at"] is not None
+    assert not any(f"Offer {offer_id}" in error for error in last["errors"])
+    assert _offers(data_dir)[offer_id].state == "triaged"
