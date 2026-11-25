@@ -1,0 +1,5 @@
+# Existing identifier exceptions for tools/glossary.py (`path:identifier`).
+# Schema.org JobPosting and LinkedIn MCP's `job_posting` section name.
+src/applai/details.py:posting
+src/applai/linkedin.py:_posting
+src/applai/linkedin.py:posting
