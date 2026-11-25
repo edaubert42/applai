@@ -8,8 +8,10 @@ Like the candidate's real server, it also has a tool that acts on LinkedIn.
 import json
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import TextContent
 
 jobs_file, calls_file = Path(sys.argv[1]), Path(sys.argv[2])
 server = MCPServer("fictional-linkedin")
@@ -21,12 +23,23 @@ def _record(tool: str, arguments: dict[str, str]) -> None:
 
 
 @server.tool()
-def get_job_details(job_id: str) -> str:
+def get_job_details(job_id: str) -> str | list[TextContent]:
     _record("get_job_details", {"job_id": job_id})
-    jobs = json.loads(jobs_file.read_text())
+    jobs: dict[str, Any] = json.loads(jobs_file.read_text())
     if job_id not in jobs:
         raise ValueError(f"no job {job_id}")
-    return json.dumps(jobs[job_id])
+    payload: Any = jobs[job_id]
+    if isinstance(payload, dict) and "_extra_blocks" in payload:
+        raw = cast(dict[str, Any], payload)
+        job = {k: v for k, v in raw.items() if k != "_extra_blocks"}
+        extras = cast(list[str], raw["_extra_blocks"])
+        return [
+            TextContent(type="text", text=json.dumps(job)),
+            *(TextContent(type="text", text=text) for text in extras),
+        ]
+    if isinstance(payload, str):
+        return payload
+    return json.dumps(payload)
 
 
 @server.tool()

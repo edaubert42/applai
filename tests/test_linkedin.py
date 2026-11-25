@@ -51,7 +51,7 @@ class FictionalServer:
         args = [sys.executable, str(SERVER), str(self.jobs_file), str(self.calls_file)]
         self.command = shlex.join(args)
 
-    def serve(self, jobs: dict[str, dict[str, Any]]) -> None:
+    def serve(self, jobs: dict[str, Any]) -> None:
         self.jobs_file.write_text(json.dumps(jobs))
 
     def calls(self) -> list[dict[str, Any]]:
@@ -283,6 +283,27 @@ def test_the_client_refuses_any_tool_but_get_job_details(server: FictionalServer
         call_tool(server.command, "connect_with_person", {"profile_url": "/in/someone/"})
 
     assert server.calls() == []
+
+
+def test_extra_text_block_alongside_job_json_is_ignored(engine: Engine, server: FictionalServer):
+    job = _job(POSTING) | {"_extra_blocks": ["Update available: 4.31.0 is out."]}
+    server.serve({"4000000001": job})
+    offer_id = _offer(engine, "4000000001")
+
+    assert _run(engine) == []
+
+    offer = _get(engine, offer_id)
+    assert (offer.state, offer.description, offer.detail_error) == ("described", POSTING, None)
+
+
+def test_non_json_answer_records_an_error(engine: Engine, server: FictionalServer):
+    server.serve({"4000000001": "Update available: 4.31.0 is out."})
+    offer_id = _offer(engine, "4000000001")
+
+    assert _run(engine) == [f"offer {offer_id}: the LinkedIn MCP server did not answer in JSON"]
+
+    offer = _get(engine, offer_id)
+    assert (offer.state, offer.description) == ("new", None)
 
 
 def test_without_the_variable_linkedin_offers_stay_new_with_an_error_naming_it(

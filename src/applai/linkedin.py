@@ -251,7 +251,18 @@ async def _call(argv: list[str], tool: str, arguments: dict[str, Any], timeout: 
             result = await client.call_tool(tool, arguments)
     if result.is_error:
         raise LinkedInError("the LinkedIn MCP server could not read the offer")
-    return "".join(block.text for block in result.content if isinstance(block, TextContent))
+    return _payload([block.text for block in result.content if isinstance(block, TextContent)])
+
+
+def _payload(texts: list[str]) -> str:
+    """The JSON object block when the server adds extra text (e.g. an update notice), else all."""
+    for text in texts:
+        try:
+            if isinstance(json.loads(text), dict):
+                return text
+        except json.JSONDecodeError:
+            continue
+    return "".join(texts)
 
 
 def _fail(describing: Describing, offer: Offer, error: str, failed_at: datetime) -> None:
