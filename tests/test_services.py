@@ -15,7 +15,6 @@ from applai.app import create_app
 from applai.database import open_database
 from applai.details import PageError, describe_offer, page_answered
 from applai.drafting import INVALID_CITATION
-from applai.linkedin import COMMAND_VARIABLE
 from applai.models import AgentRun, Offer, OfferOrigin, OfferState, Scan, StateChange
 from applai.triage import TRIAGE_MODEL
 
@@ -28,10 +27,8 @@ def _utc(moment: datetime) -> datetime:
 
 
 @pytest.fixture
-def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def data_dir(tmp_path: Path) -> Path:
     shutil.copy(DEMO_DIR / "profile.yaml", tmp_path)
-    for var in (COMMAND_VARIABLE, "APPLAI_MS_CLIENT_ID", "APPLAI_NOTION_TOKEN"):
-        monkeypatch.delenv(var, raising=False)
     return tmp_path
 
 

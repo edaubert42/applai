@@ -6,6 +6,18 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def no_real_services(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clears what names the candidate's real services and data: a test sets what it needs."""
+    for var in (
+        "APPLAI_LINKEDIN_MCP",
+        "APPLAI_MS_CLIENT_ID",
+        "APPLAI_NOTION_TOKEN",
+        "APPLAI_DATA_DIR",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def backup_dir(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A backup directory outside every test's data directory, named by APPLAI_BACKUP_DIR."""
     directory = tmp_path_factory.mktemp("backups")
