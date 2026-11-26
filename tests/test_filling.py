@@ -184,6 +184,28 @@ def test_a_drafted_letter_is_planned_for_its_textarea_with_its_blank_lines(
     }
 
 
+def test_a_letter_asked_as_a_textarea_and_as_a_file_is_attached_and_the_textarea_left_unfilled(
+    data_dir: Path, engine: Engine
+):
+    profile = load_profile(data_dir)
+    fields = [_field("Lettre de motivation", "textarea"), _field("Lettre de motivation", "file")]
+    application_id = _application(engine, fields, state="form_captured")
+    paragraphs = [[{"text": LETTER, "facts": ["F1"]}]] * 3
+    judged = AgentResult(output={"verdicts": [{"supported": True, "reason": None}] * 3},
+                         usage=Usage(model="claude-haiku-5-5"))  # fmt: skip
+    drafted = AgentResult(output={"answers": {}, "cover_letter": paragraphs},
+                          usage=Usage(model="claude-opus-5-5"))  # fmt: skip
+    draft_application(AgentRunner(FakeBackend([drafted, judged])), engine, application_id, profile)
+    with Session(engine) as session, session.begin():
+        [answer] = session.scalars(select(DraftAnswer))
+        decide(session, 1, application_id, answer.id, AnswerRequest(decision=AnswerDecision.ACCEPT))
+        check_answers(session, 1, application_id)
+
+    plan_fill(AgentRunner(FakeBackend([])), engine, data_dir, application_id, profile)
+
+    assert _planned(engine, application_id) == {1: ("attach", "cover_letter")}
+
+
 def test_a_name_field_drafting_leaves_to_identity_is_filled_with_the_name(
     data_dir: Path, engine: Engine
 ):

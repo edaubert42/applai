@@ -338,6 +338,30 @@ def test_a_form_with_a_slot_for_a_letter_gets_a_cover_letter(
     assert _get(engine, application_id).state == "drafted"
 
 
+def test_a_letter_asked_as_a_textarea_and_as_a_file_is_drafted_for_the_file(
+    engine: Engine, profile: Profile
+):
+    fields = [*IDENTITY, LETTER_FIELD, _field("Lettre de motivation", "file")]
+    application_id = _application(engine, fields)
+
+    draft_application(AgentRunner(FakeBackend([LETTER])), engine, application_id, profile)
+
+    [answer] = _answers(engine)
+    assert (answer.kind, answer.field_index) == ("cover_letter", 5)
+    assert _get(engine, application_id).state == "drafted"
+
+
+def test_a_letter_asked_only_as_a_textarea_in_english_fills_the_textarea(
+    engine: Engine, profile: Profile
+):
+    application_id = _application(engine, [*IDENTITY, _field("Cover letter", "textarea")])
+
+    draft_application(AgentRunner(FakeBackend([LETTER])), engine, application_id, profile)
+
+    [answer] = _answers(engine)
+    assert (answer.kind, answer.field_index) == ("cover_letter", 4)
+
+
 def test_a_form_with_only_identity_and_a_cv_is_drafted_with_no_agent_run(
     engine: Engine, profile: Profile
 ):

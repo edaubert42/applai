@@ -117,8 +117,8 @@ def drafted_fields(fields: list[dict[str, Any]]) -> tuple[list[int], int | None]
             questions.append(index)
         elif kind == "file":
             files.append(index)
-    if asked:
-        return questions, asked[0]
+    if asked:  # a letter asked as a file too goes to the file, which Filling attaches as a PDF
+        return questions, next((i for i in asked if fields[i]["type"] == "file"), asked[0])
     if questions:
         return questions, None
     others = [i for i in files if not _CV.search(fold(fields[i]["label"]))] or files[1:]
