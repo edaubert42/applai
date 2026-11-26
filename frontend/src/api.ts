@@ -91,13 +91,6 @@ export interface BrowserStatus {
   last_asked_at: string | null;
 }
 
-/** GET /api/health; demo: the public demo, whose fills are replayed without the extension. */
-export interface Health {
-  status: "ok";
-  database_revision: string | null;
-  demo: boolean;
-}
-
 export interface FormUrl {
   form_url: string;
   form_url_error: null;
@@ -301,7 +294,6 @@ export const api = {
   reread: (id: number) => request<unknown>("POST", `/api/offers/${id}/reread`),
   applications: () => request<Applications>("GET", "/api/applications"),
   browserStatus: () => request<BrowserStatus>("GET", "/api/browser/status"),
-  health: () => request<Health>("GET", "/api/health"),
   pasteFormUrl: (id: number, url: string) =>
     request<FormUrl>("PUT", `/api/applications/${id}/form-url`, { url }),
   trace: (id: number) => request<ApplicationTrace>("GET", `/api/applications/${id}/trace`),
