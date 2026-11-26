@@ -15,6 +15,7 @@ missing ones call Claude, and the file keeps the others.
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from jsonschema import Draft202012Validator
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,7 @@ from applai.agents import (
     AgentRunner,
     AgentSpec,
     Backend,
+    FailureKind,
     read_recordings,
     recording_key,
     write_recordings,
@@ -103,7 +105,8 @@ def _run_offer(
 class Recorder:
     """Answers each spec from the recordings, or else with the backend, and keeps its result.
 
-    A run the backend fails is counted and raised: nothing is recorded for it.
+    A run the backend fails, or whose output the schema refuses, is counted and raised:
+    nothing is recorded for it.
     """
 
     def __init__(self, backend: Backend, recordings: dict[str, AgentResult]) -> None:
@@ -117,6 +120,10 @@ class Recorder:
         if key not in self.recordings:
             try:
                 result = self.backend.run(spec)
+                if not Draft202012Validator(spec.json_schema).is_valid(  # pyright: ignore[reportUnknownMemberType]
+                    result.output
+                ):
+                    raise AgentError(spec.name, FailureKind.SCHEMA_MISMATCH)
             except Exception:
                 self.failed += 1
                 raise

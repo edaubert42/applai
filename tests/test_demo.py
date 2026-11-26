@@ -26,6 +26,7 @@ from applai.agents import (
 from applai.cli import main
 from applai.database import open_database
 from applai.models import AgentRun
+from applai.trace import OK
 from applai.triage import TAGS
 
 
@@ -69,9 +70,10 @@ COST = float("0.0412" + "345678")
 class Models:
     """Stands in for Claude: a valid output for each agent; the first run of `failing` fails."""
 
-    def __init__(self, failing: str | None = None) -> None:
+    def __init__(self, failing: str | None = None, invalid: str | None = None) -> None:
         self.specs: list[AgentSpec] = []
         self.failing = failing
+        self.invalid = invalid  # its first run answers with an output the schema refuses
 
     def run(self, spec: AgentSpec) -> AgentResult:
         self.specs.append(spec)
@@ -80,7 +82,11 @@ class Models:
             raise AgentError(spec.name, FailureKind.TIMEOUT)
         usage = Usage(model=spec.model, duration_ms=4000, input_tokens=2000, output_tokens=300,
                       cost_usd=COST)  # fmt: skip
-        return AgentResult(output=OUTPUTS[spec.name](json.loads(spec.input)), usage=usage)
+        output = OUTPUTS[spec.name](json.loads(spec.input))
+        if spec.name == self.invalid:
+            self.invalid = None
+            output = {"unexpected": True}
+        return AgentResult(output=output, usage=usage)
 
 
 @pytest.fixture
@@ -129,6 +135,24 @@ def test_a_failed_run_is_printed_and_the_next_record_runs_only_what_is_missing(
     assert set(read_recordings(recordings)) == set(kept) | {recording_key(s) for s in retry.specs}
 
 
+def test_an_output_the_schema_refuses_is_not_recorded_and_the_next_record_asks_again(
+    recordings: Path, capsys: pytest.CaptureFixture[str]
+):
+    models = Models(invalid="drafting")
+
+    main(["demo", "record"], runner=AgentRunner(models))
+
+    assert "agent drafting failed: schema_mismatch" in capsys.readouterr().out
+    bad = next(spec for spec in models.specs if spec.name == "drafting")
+    assert recording_key(bad) not in read_recordings(recordings)
+
+    retry = Models()
+    main(["demo", "record"], runner=AgentRunner(retry))
+
+    assert retry.specs[0] == bad
+    assert recording_key(bad) in read_recordings(recordings)
+
+
 def test_the_recordings_pass_the_privacy_checks_which_read_their_text(
     recordings: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -152,6 +176,6 @@ def test_every_demo_application_replays_from_the_recordings_in_the_repository(tm
     finally:
         engine.dispose()
 
-    missing = [agent for agent, outcome in runs if outcome == FailureKind.NO_RECORDING]
+    failed = [agent for agent, outcome in runs if outcome != OK]
     assert runs
-    assert missing == [], f"no recording for {Counter(missing)}: run `applai demo record`"
+    assert failed == [], f"no valid recording for {Counter(failed)}: run `applai demo record`"
