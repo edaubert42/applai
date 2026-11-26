@@ -497,6 +497,108 @@ describe("dropping an application", () => {
   });
 });
 
+describe("recording a send made outside ApplAI", () => {
+  const states = ["created", "form_captured", "drafted", "answers_checked", "filled", "reviewed", "form_checked", "validated"];
+  const open = states.map((state, i) => aRow({ id: i + 1, offer_id: i + 1, title: `Poste ${state}`, state }));
+  const sent = aRow({ id: 20, offer_id: 20, title: "Envoyée", state: "sent" });
+  const dropped = aRow({ id: 21, offer_id: 21, title: "Abandonnée", state: "dropped" });
+  const old = aRow({ id: null, offer_id: 22, title: "Ancienne", state: "Candidature envoyée", origin: "old_workflow" });
+  const rowOf = (title: string) => within(screen.getByRole("heading", { name: title }).closest("li") as HTMLElement);
+  const boardOf = (groups: Parameters<typeof applicationsRoutes>[0]) => applicationsRoutes(groups)["GET /api/applications"];
+  const posts = (calls: { method: string; path: string }[]) => calls.filter((call) => call.method === "POST").map((call) => call.path);
+
+  async function openBoard(routes: Record<string, unknown>, language: "fr" | "en" = "fr") {
+    const calls = fakeApi({ ...reviewRoutes(), ...applicationsRoutes(), ...routes });
+    if (language === "en") localStorage.setItem("applai.language", "en");
+    render(<App />);
+    const words = language === "en" ? en : fr;
+    fireEvent.click(screen.getByRole("button", { name: words["nav.applications"] }));
+    await screen.findAllByRole("region");
+    return calls;
+  }
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("offers I applied on every application not sent or dropped, in %s", async (language, words) => {
+    await openBoard(applicationsRoutes({ in_progress: [...open, old], sent: [sent], dropped: [dropped] }), language);
+
+    for (const state of states) {
+      expect(rowOf(`Poste ${state}`).getByRole("button", { name: words["applications.sent_outside.open"] })).toBeTruthy();
+    }
+    for (const title of ["Envoyée", "Abandonnée", "Ancienne"]) {
+      expect(rowOf(title).queryByRole("button", { name: words["applications.sent_outside.open"] })).toBeNull();
+    }
+  });
+
+  it("asks for confirmation, is cancelled without a call, then lists the row under Sent", async () => {
+    const created = aRow({ id: 5, offer_id: 5, title: "Agent de quai", state: "created", form_url_error: "page_no_form" });
+    let board = boardOf({ in_progress: [created] });
+    const calls = await openBoard({
+      "GET /api/applications": () => board,
+      "POST /api/applications/5/sent-outside": () => {
+        board = boardOf({ sent: [{ ...created, state: "sent" }] });
+        return new Response(null, { status: 204 });
+      },
+    });
+    const open = () => fireEvent.click(screen.getByRole("button", { name: fr["applications.sent_outside.open"] }));
+
+    open();
+    expect(screen.getByText(fr["applications.sent_outside.question"])).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: fr["decline.cancel"] }));
+    expect(screen.queryByText(fr["applications.sent_outside.question"])).toBeNull();
+    expect(posts(calls)).toEqual([]);
+
+    open();
+    fireEvent.click(screen.getByRole("button", { name: fr["applications.sent_outside.confirm"] }));
+
+    const sentGroup = within(await screen.findByRole("region", { name: fill(fr["applications.group.sent"], { n: 1 }) }));
+    expect(sentGroup.getByText(fr["applications.state.sent"])).toBeTruthy();
+    expect(sentGroup.queryByRole("button", { name: fr["applications.sent_outside.open"] })).toBeNull();
+    expect(posts(calls)).toEqual(["/api/applications/5/sent-outside"]);
+    expect(calls.some((call) => call.path.startsWith("/api/browser/") && call.path !== "/api/browser/status")).toBe(false);
+  });
+
+  it("says so when the send was not saved, keeps the row, and a retry records it once", async () => {
+    let fails = true;
+    let board = boardOf({ waiting: [aRow()] });
+    const calls = await openBoard({
+      "GET /api/applications": () => board,
+      "POST /api/applications/1/sent-outside": () => {
+        if (fails) return new Response("boom", { status: 500 });
+        board = boardOf({ sent: [aRow({ state: "sent" })] });
+        return new Response(null, { status: 204 });
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: fr["applications.sent_outside.open"] }));
+    fireEvent.click(screen.getByRole("button", { name: fr["applications.sent_outside.confirm"] }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(fr["applications.sent_outside.failed"]);
+    expect(screen.getByText(fr["applications.state.drafted"])).toBeTruthy();
+
+    fails = false;
+    fireEvent.click(screen.getByRole("button", { name: fr["applications.sent_outside.confirm"] }));
+    expect(await screen.findByText(fr["applications.state.sent"])).toBeTruthy();
+    expect(posts(calls)).toEqual(["/api/applications/1/sent-outside", "/api/applications/1/sent-outside"]);
+  });
+
+  it("loads the board again when the application moved on meanwhile", async () => {
+    let board = boardOf({ waiting: [aRow({ state: "validated" })] });
+    await openBoard({
+      "GET /api/applications": () => board,
+      "POST /api/applications/1/sent-outside": () => {
+        board = boardOf({ dropped: [aRow({ state: "dropped" })] });
+        return new Response("{}", { status: 409 });
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: fr["applications.sent_outside.open"] }));
+    fireEvent.click(screen.getByRole("button", { name: fr["applications.sent_outside.confirm"] }));
+
+    expect(await screen.findByText(fr["applications.state.dropped"])).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
 describe("retrying a stage that failed", () => {
   const stages = [
     ["draft", "form_captured", { draft_error: "drafting_failed" }, "drafting"],
