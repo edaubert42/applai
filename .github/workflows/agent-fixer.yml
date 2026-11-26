@@ -18,6 +18,10 @@ on:
     workflows: [CI, Frontend]
     types: [completed]
 
+# A command left running in the background ends the agent's turn before it reports.
+env:
+  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+
 jobs:
   on-mention:
     if: >-
