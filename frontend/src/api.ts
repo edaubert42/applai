@@ -55,6 +55,9 @@ export interface Card {
   seen_at: string;
 }
 
+/** The stages whose failure the board retries: the end of their endpoint's path. */
+export type RetryStage = "draft" | "fill" | "review";
+
 export const GROUPS = ["in_progress", "waiting", "sent", "dropped"] as const;
 export type Group = (typeof GROUPS)[number];
 
@@ -307,6 +310,13 @@ export const api = {
   markSent: (id: number) => requestEmpty("POST", `/api/applications/${id}/sent`),
   dropApplication: (id: number, reasons: DropReason[], note?: string) =>
     requestEmpty("POST", `/api/applications/${id}/drop`, note ? { reasons, note } : { reasons }),
+  /** Start a failed stage again: Drafting, Filling or Review runs in the background (202). */
+  retryStage: (id: number, stage: RetryStage) =>
+    stage === "draft"
+      ? requestEmpty("POST", `/api/applications/${id}/draft`)
+      : stage === "fill"
+        ? requestEmpty("POST", `/api/applications/${id}/fill`)
+        : requestEmpty("POST", `/api/applications/${id}/review`),
   scanStatus: () => request<ScanStatus>("GET", "/api/scan"),
   services: () => request<Services>("GET", "/api/services"),
   startScan: () => request<unknown>("POST", "/api/scan"),

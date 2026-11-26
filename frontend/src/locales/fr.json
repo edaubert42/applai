@@ -150,6 +150,8 @@
   "applications.next.validated": "À vous : envoyer",
   "applications.draft.error": "Rédaction impossible : {error}.",
   "applications.review.error": "Relecture impossible : {error}.",
+  "applications.retry": "Réessayer",
+  "applications.retry_failed": "La nouvelle tentative n’a pas démarré : réessayez.",
   "trace.open": "Trace",
   "trace.title": "Trace de la candidature",
   "trace.error": "La trace n’a pas pu être chargée.",
