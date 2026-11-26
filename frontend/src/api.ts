@@ -99,6 +99,32 @@ export interface OfferAdded {
 
 export type Applications = Record<Group, Row[]>;
 
+/** GET /api/applications/{id}/trace, as src/applai/trace.py serves it. */
+export interface RunStep {
+  kind: "run";
+  at: string;
+  agent: string;
+  model: string;
+  duration_ms: number;
+  cost_usd: number | null; // a failed run has none
+  outcome: string; // "ok", or the kind of the error
+}
+
+export interface GateStep {
+  kind: "gate";
+  at: string;
+  to_state: string;
+  decision: string | null;
+  corrections: number;
+  reasons: string[];
+}
+
+export interface ApplicationTrace {
+  steps: (RunStep | GateStep)[]; // in time order
+  total_cost_usd: number;
+  total_duration_ms: number; // the agents' time
+}
+
 export type AnswerStatus = "pending" | "accepted" | "edited" | "rejected";
 
 export interface CitedFact {
@@ -255,6 +281,7 @@ export const api = {
   browserStatus: () => request<BrowserStatus>("GET", "/api/browser/status"),
   pasteFormUrl: (id: number, url: string) =>
     request<FormUrl>("PUT", `/api/applications/${id}/form-url`, { url }),
+  trace: (id: number) => request<ApplicationTrace>("GET", `/api/applications/${id}/trace`),
   draft: (id: number) => request<Draft>("GET", `/api/applications/${id}/draft`),
   decideAnswer: (id: number, answer: number, decision: AnswerDecision) =>
     request<Answer>("POST", `/api/applications/${id}/draft/${answer}`, decision),

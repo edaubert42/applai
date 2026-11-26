@@ -17,6 +17,14 @@ export function worstState(services: Services): { state: ServiceState; at_fault:
   return { state: "green", at_fault: [] };
 }
 
+/** "claude-haiku-5-5" as "Haiku 5.5"; a name of another shape stays as it is. */
+export function modelName(model: string): string {
+  return model.replace(
+    /^claude-([a-z])([a-z]+)-(\d+)-(\d+)$/,
+    (_, first: string, rest: string, major: string, minor: string) => `${first.toUpperCase()}${rest} ${major}.${minor}`,
+  );
+}
+
 /** A service's name in the candidate's language; one the translation files do not name (a new source) shows its id. */
 export function serviceName(id: string, lookup: (key: string) => string | undefined): string {
   return lookup(`settings.service.${id}`) ?? id;
