@@ -14,7 +14,6 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from applai import linkedin
 from applai.database import open_database
 from applai.linkedin import (
     COMMAND_VARIABLE,
@@ -369,12 +368,13 @@ def test_no_server_process_is_left_after_the_run_ends(
 ):
     kept: list[LinkedInServer] = []  # the run's server outlives the run: only closing stops it
 
-    class KeptServer(LinkedInServer):
-        def __init__(self, command: str) -> None:
-            super().__init__(command)
-            kept.append(self)
+    start = LinkedInServer.__init__
 
-    monkeypatch.setattr(linkedin, "LinkedInServer", KeptServer)
+    def remember(self: LinkedInServer, command: str) -> None:
+        start(self, command)
+        kept.append(self)
+
+    monkeypatch.setattr(LinkedInServer, "__init__", remember)
     jobs = (*JOBS, "4000000004")
     server.serve({} if end == "failures in a row" else {job_id: _job(POSTING) for job_id in jobs})
     offer_ids = [_offer(engine, job_id) for job_id in jobs]
