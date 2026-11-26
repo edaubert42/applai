@@ -313,6 +313,30 @@ def test_not_interested_stores_its_reasons_and_note(engine: Engine, client: Test
     )
 
 
+def test_an_offer_can_be_declined_as_expired(engine: Engine, client: TestClient):
+    offer_id = _offer(engine, "data-engineer", "triaged", score=82)
+
+    assert _decide(client, offer_id, "not_interested", reasons=["expired"]).status_code == 201
+
+    assert _state(engine, offer_id) == "declined"
+    [label] = _labels(engine)
+    assert label.reasons == ["expired"]
+
+
+@pytest.mark.parametrize(
+    ("reasons", "correction"), [(["expired"], False), (["expired", "salary"], True)]
+)
+def test_declining_a_proposed_offer_as_expired_only_is_not_a_correction(
+    engine: Engine, client: TestClient, reasons: list[str], correction: bool
+):
+    offer_id = _offer(engine, "data-engineer", "triaged", score=82)
+
+    assert _decide(client, offer_id, "not_interested", reasons=reasons).status_code == 201
+
+    [label] = _labels(engine)
+    assert label.correction is correction
+
+
 def test_reasons_are_refused_on_a_decision_that_is_not_a_decline(
     engine: Engine, client: TestClient
 ):

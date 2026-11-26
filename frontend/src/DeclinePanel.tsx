@@ -9,6 +9,7 @@ const REASON_LABELS = {
   skills: "reason.skills",
   salary: "reason.salary",
   location: "reason.location",
+  expired: "reason.expired",
   other: "reason.other",
   offer_closed: "reason.offer_closed",
 } as const;
