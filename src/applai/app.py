@@ -464,7 +464,9 @@ def answers_checked(
     watch: Watch | None = request.app.state.watch
     if watch is not None:
         s = request.app.state
-        later.add_task(plan_in_background, s.engine, s.data_dir, watch.runner, application_id)
+        later.add_task(
+            plan_in_background, s.engine, s.data_dir, watch.runner, application_id, s.clock
+        )
 
 
 @api.post("/applications/{application_id}/fill", status_code=202)
@@ -484,7 +486,7 @@ def plan_again(
     application.fill_error, application.fill_failed_at = None, None
     session.commit()
     s = request.app.state
-    later.add_task(plan_in_background, s.engine, s.data_dir, watch.runner, application_id)
+    later.add_task(plan_in_background, s.engine, s.data_dir, watch.runner, application_id, s.clock)
 
 
 @api.get("/applications/{application_id}/review")

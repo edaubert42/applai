@@ -2,7 +2,7 @@
 the form the extension filled, never sent (ADR 0003)."""
 
 import base64
-import re
+import io
 import shutil
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -13,6 +13,7 @@ from uuid import uuid4
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
+from pypdf import PdfReader
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
@@ -230,9 +231,9 @@ def test_a_failed_replan_drops_the_old_plan_so_the_extension_is_not_offered_it(
 
 
 def _pdf_text(pdf: bytes) -> str:
-    """The text a PDF shows, from its uncompressed text operators."""
-    lines = re.findall(rb"\(((?:[^()\\]|\\.)*)\) Tj", pdf)
-    return " ".join(re.sub(rb"\\(.)", rb"\1", line).decode("cp1252") for line in lines)
+    """The text a PDF shows, its lines joined by one space."""
+    pages = PdfReader(io.BytesIO(pdf)).pages
+    return " ".join(" ".join(page.extract_text().split()) for page in pages)
 
 
 def test_a_cover_letter_file_field_gets_a_pdf_of_the_checked_letter_served_to_the_extension(
@@ -248,7 +249,7 @@ def test_a_cover_letter_file_field_gets_a_pdf_of_the_checked_letter_served_to_th
     assert checked.status_code == 204
     assert _planned(engine, application_id)[7] == ("attach", "cover_letter")
     assert letter.status_code == 200 and letter.headers["content-type"] == "application/pdf"
-    assert letter.content.startswith(b"%PDF-") and _pdf_text(letter.content) == LETTER
+    assert letter.content.startswith(b"%PDF-") and LETTER in _pdf_text(letter.content)
     assert (data_dir / "applications" / str(application_id) / "cover_letter.pdf").is_file()
     assert (cv.status_code, cv.content) == (200, CV_BYTES)
 
