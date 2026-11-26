@@ -101,10 +101,19 @@ _GATE_LEVELS = {
 _ANSWER_LEVELS = ("answers", "cv")  # the labels the answers gate closes
 
 
-def _gate(change: StateChange, labels: list[Label]) -> GateStep:
+def _gate(change: StateChange, labels: list[Label], changes: list[StateChange]) -> GateStep:
     at = change.changed_at
     if change.to_state == "answers_checked":
-        mine = [x for x in labels if x.level in _ANSWER_LEVELS and x.created_at <= at]
+        # A pass starts where the previous closing of this gate ended.
+        since = max(
+            (x.changed_at for x in changes if x.to_state == change.to_state and x.changed_at < at),
+            default=None,
+        )
+        mine = [
+            x for x in labels
+            if x.level in _ANSWER_LEVELS and x.created_at <= at
+            and (since is None or x.created_at > since)
+        ]  # fmt: skip
         return GateStep(
             at=at, to_state=change.to_state, decision=None,
             corrections=sum(x.correction for x in mine), reasons=[],
@@ -141,7 +150,7 @@ def application_trace(database: Engine, user_id: int, application_id: int) -> Ap
             )
         ).all()
         labels = list(session.scalars(select(Label).where(Label.offer_id == offer_id)))
-        gates = [_gate(change, labels) for change in changes]
+        gates = [_gate(change, labels, list(changes)) for change in changes]
     runs = trace(database, offer_id).runs
     steps: list[RunStep | GateStep] = [
         RunStep(
