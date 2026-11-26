@@ -1,4 +1,6 @@
+import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +97,30 @@ def test_a_successful_run_records_one_row_with_its_usage_and_its_offer(engine: E
     assert row.outcome == "ok"
     assert row.application_id is None
     assert row.started_at is not None
+
+
+def test_a_run_is_recorded_running_when_it_starts_and_completed_in_the_same_row(engine: Engine):
+    offer_id = _offer(engine)
+    hold = threading.Event()
+    backend = FakeBackend([_result()], hold)
+    runner = AgentRunner(backend)
+
+    with ThreadPoolExecutor() as pool:
+        done = pool.submit(runner.run_agent, _spec(), database=engine, offer_id=offer_id)
+        try:
+            assert backend.started.wait(10)
+            [running] = _rows(engine)
+        finally:
+            hold.set()
+        result = done.result(10)
+
+    assert (running.agent, running.model, running.outcome) == ("triage", "haiku", "running")
+    assert (running.input_tokens, running.output_tokens, running.cost_usd) == (None, None, None)
+    [row] = _rows(engine)
+    assert (row.id, result.run_id, row.started_at) == (running.id, running.id, running.started_at)
+    assert (row.model, row.duration_ms, row.cost_usd, row.outcome) == (
+        "claude-haiku-5-5", 2345, 0.0123, "ok",
+    )  # fmt: skip
 
 
 def test_a_run_for_an_application_records_it_with_the_offer_of_that_application(engine: Engine):

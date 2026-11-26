@@ -6,7 +6,7 @@ import FinalValidationScreen from "./FinalValidationScreen";
 import Mark from "./Mark";
 import { Logo } from "./ReviewCard";
 import { serverMessage } from "./server-message";
-import { useSettings } from "./settings";
+import { useSettings, type MessageKey } from "./settings";
 import { button } from "./styles";
 import TraceScreen from "./TraceScreen";
 
@@ -131,7 +131,11 @@ function ApplicationRow({
   const pill = "rounded-pill bg-raised px-3 py-1 text-sm";
   // A failure is shown instead of the spinner and of the gate: it is what the candidate must see.
   // Only the errors the row shows: a fill_error past answers_checked shows on final validation.
-  const hasError = row.draft_error !== null || (row.state === "answers_checked" && row.fill_error !== null);
+  const reviewError = row.state === "filled" ? row.review_error : null;
+  const hasError = row.draft_error !== null || (row.state === "answers_checked" && row.fill_error !== null) || reviewError !== null;
+  // A stage's failure; a stage a stopped ApplAI cut short says so in a sentence of its own.
+  const failure = (key: MessageKey, error: string) =>
+    error.startsWith("interrupted_") ? serverMessage(error, lookup) : t(key, { error: serverMessage(error, lookup) });
   // The gate the candidate is at, for an application whose next move is theirs.
   const next = !old && row.state ? lookup(`applications.next.${row.state}`) : undefined;
   // The form's URL the finder recorded, or the one the candidate pasted since.
@@ -262,14 +266,17 @@ function ApplicationRow({
       )}
       {row.draft_error && (
         <p role="alert" className="basis-full text-sm text-minus">
-          {t("applications.draft.error", { error: serverMessage(row.draft_error, lookup) })}
+          {failure("applications.draft.error", row.draft_error)}
         </p>
       )}
       {row.state === "answers_checked" && (row.fill_error || !extensionConnected) && (
         <p role="alert" className="basis-full text-sm text-minus">
-          {row.fill_error
-            ? t("applications.fill.error", { error: serverMessage(row.fill_error, lookup) })
-            : t("applications.fill.extension_disconnected")}
+          {row.fill_error ? failure("applications.fill.error", row.fill_error) : t("applications.fill.extension_disconnected")}
+        </p>
+      )}
+      {reviewError && (
+        <p role="alert" className="basis-full text-sm text-minus">
+          {failure("applications.review.error", reviewError)}
         </p>
       )}
       {canPaste && (

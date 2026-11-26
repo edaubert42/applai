@@ -1,7 +1,9 @@
 """The trace: every agent call is a row of agent_runs, kept with its offer.
 
 AgentRunner.run_agent() calls record_run() when it is given the database and the offer
-the agent works on; trace(database, offer_id) reads them back.
+the agent works on, as the run starts (outcome running), then finish_run() as it ends;
+trace(database, offer_id) reads them back. A run still running when ApplAI stopped is
+marked interrupted at the next start by interrupt_runs().
 """
 
 from datetime import UTC, datetime
@@ -12,9 +14,12 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from applai.models import AgentRun, Application, Label, Offer, StateChange
+from applai.orchestrator import ApplicationState
 
 OK = "ok"
 UNEXPECTED = "unexpected"  # a failure that is not an AgentError
+RUNNING = "running"  # the run has not ended yet
+INTERRUPTED = "interrupted"  # ApplAI stopped before the run ended
 
 
 def utc_now() -> datetime:
@@ -34,7 +39,7 @@ class Run(BaseModel):
     input_tokens: int | None
     output_tokens: int | None
     cost_usd: float | None
-    outcome: str  # "ok", or the kind of the error
+    outcome: str  # "ok", the kind of the error, "running" or "interrupted"
 
 
 class Trace(BaseModel):
@@ -187,6 +192,43 @@ def record_run(
         session.add(row)
         session.flush()
         return row.id
+
+
+def finish_run(database: Engine, run_id: int, run: Run) -> None:
+    """Complete the row record_run() wrote as the run started with how it ended."""
+    with Session(database) as session, session.begin():
+        row = session.get_one(AgentRun, run_id)
+        for key, value in run.model_dump().items():
+            setattr(row, key, value)
+
+
+# The error a run cut short leaves on its application, by the state the run kept it in.
+_INTERRUPTED_ERRORS = {
+    ApplicationState.FORM_CAPTURED: ("draft_error", "interrupted_drafting"),
+    ApplicationState.ANSWERS_CHECKED: ("fill_error", "interrupted_filling"),
+    ApplicationState.FILLED: ("review_error", "interrupted_review"),
+}
+
+
+def interrupt_runs(database: Engine) -> None:
+    """Mark interrupted every run still running: at startup, before any run of this process.
+
+    An application left form_captured, answers_checked or filled gets its stage's error, a
+    code the page words, for the candidate's retry; its state does not move. Filling's plan
+    is dropped, as after a failed plan. Any other run cut short is marked in the trace only.
+    """
+    with Session(database) as session, session.begin():
+        for row in session.scalars(select(AgentRun).where(AgentRun.outcome == RUNNING)).all():
+            row.outcome = INTERRUPTED
+            if row.application_id is None:
+                continue
+            application = session.get_one(Application, row.application_id)
+            stage = _INTERRUPTED_ERRORS.get(ApplicationState(application.state))
+            if stage is None:
+                continue
+            setattr(application, *stage)
+            if application.state == ApplicationState.ANSWERS_CHECKED:
+                application.fill_plan = None
 
 
 def trace(database: Engine, offer_id: int) -> Trace:

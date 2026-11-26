@@ -201,6 +201,25 @@ def test_drafting_refused_for_its_citations_is_not_told_to_check_the_claude_logi
     assert triage["hint"] == "claude_login"
 
 
+def test_a_running_or_interrupted_run_leaves_its_agent_green(data_dir: Path):
+    """Neither says anything of Claude's health: a stopped ApplAI is not a failed login."""
+    engine = open_database(data_dir)
+    with Session(engine) as s:
+        offer = _offer("drafted-2", "alert_wttj", OfferState.ACCEPTED)
+        s.add(offer)
+        s.flush()
+        d: dict[str, object] = {"user_id": 1, "offer_id": offer.id, "agent": "drafting"}
+        for hours, outcome in ((3, "ok"), (2, "interrupted"), (1, "running")):
+            at = _utc(NOON - timedelta(hours=hours))
+            s.add(AgentRun(**d, model="claude-opus-5-5", started_at=at, duration_ms=0,
+                           outcome=outcome))  # fmt: skip
+        s.commit()
+    engine.dispose()
+
+    drafting = {row["id"]: row for row in _services(data_dir)["agents"]}["drafting"]
+    assert (drafting["state"], drafting["last_error"], drafting["hint"]) == ("green", None, None)
+
+
 def _messages(language: str) -> dict[str, str]:
     locales = Path(__file__).parents[1] / "frontend" / "src" / "locales"
     return json.loads((locales / f"{language}.json").read_text(encoding="utf-8"))
@@ -239,6 +258,7 @@ def test_every_code_the_server_records_has_a_sentence_in_the_page(language: str)
     codes += ["page_not_ours", "page_http", "page_not_read", "page_no_form", "required_empty"]
     codes += [UNTAILORED, OVER_ONE_PAGE, NO_PHOTO, NO_PHOTO_FILE.split(":")[0]]
     codes += [NOT_JUDGED, "judge_sentence", "judge_unsupported"]
+    codes += [f"interrupted_{stage}" for stage in ("drafting", "filling", "review")]
     messages = _messages(language)
     assert [c for c in codes if f"message.{c}" not in messages] == []
 

@@ -45,6 +45,7 @@ class Row(BaseModel):
     form_url_error: str | None = None
     fill_error: str | None = None  # why Filling failed: the plan, or the extension (applai.browser)
     draft_error: str | None = None  # why Drafting failed (applai.drafting)
+    review_error: str | None = None  # why Review failed (applai.review_form)
     running: str | None = None  # the agent running on it now (AgentRunner.running)
     reasons: list[str] = []  # why the candidate dropped it (applai.validation)
     # Whether the filled form's tab is open; none: not asked, or the extension has not said lately.
@@ -129,6 +130,7 @@ def board(
                 form_url_error=application.form_url_error,
                 fill_error=application.fill_error,
                 draft_error=application.draft_error,
+                review_error=application.review_error,
                 running=(running or {}).get(application.id),
                 reasons=drop_reasons.get(application.id, []),
                 tab_open=_tab_open(application, open_tabs),
