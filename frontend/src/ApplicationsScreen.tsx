@@ -44,6 +44,7 @@ function Board({
   const [groups, setGroups] = useState<Applications | null>(null);
   const [failed, setFailed] = useState(false);
   const [extensionConnected, setExtensionConnected] = useState(true);
+  const [demo, setDemo] = useState(false); // the demo replays its fills: no extension needed
   const [loads, setLoads] = useState(0); // a row found stale asks for the board again
   const reload = useCallback(() => setLoads((count) => count + 1), []);
   // The application whose drop panel is open: one at a time, as the panel listens to the keys.
@@ -58,6 +59,10 @@ function Board({
     api.browserStatus().then(
       (status) => current && setExtensionConnected(status.connected),
       () => current && setExtensionConnected(false),
+    );
+    api.health().then(
+      (health) => current && setDemo(health.demo),
+      () => undefined, // not the demo, as far as the board knows
     );
     return () => {
       current = false;
@@ -81,7 +86,7 @@ function Board({
                   <ApplicationRow
                     key={row.offer_id}
                     row={row}
-                    extensionConnected={extensionConnected}
+                    extensionConnected={extensionConnected || demo}
                     onCorrect={onCorrect}
                     onValidate={onValidate}
                     onTrace={onTrace}

@@ -298,6 +298,7 @@
   "message.page_http": "La page de l’offre a répondu par l’erreur HTTP {detail} : collez l’adresse du formulaire.",
   "message.page_not_read": "La page de l’offre n’a pas pu être lue ({detail}) : collez l’adresse du formulaire.",
   "message.page_no_form": "La page de l’offre ne mène à aucun formulaire : collez l’adresse du formulaire.",
+  "message.no_recording": "la démo n’a pas d’enregistrement pour ces réponses",
   "message.fill_not_allowed": "l’extension ApplAI n’a pas accès au site de ce formulaire. Vérifiez qu’elle est activée dans Chrome ; nouvel essai après la prochaine recherche",
   "message.fill_not_loaded": "le formulaire ne s’est pas chargé. Vérifiez que l’extension ApplAI est activée dans Chrome ; nouvel essai après la prochaine recherche",
   "message.fill_not_filled": "le formulaire n’a pas pu être rempli. Vérifiez que l’extension ApplAI est activée dans Chrome ; nouvel essai après la prochaine recherche",

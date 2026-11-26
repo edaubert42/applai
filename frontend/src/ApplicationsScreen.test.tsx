@@ -20,13 +20,17 @@ const groups = {
   dropped: [],
 };
 
-async function openScreen(routes = applicationsRoutes(groups), language: "fr" | "en" = "fr") {
-  fakeApi({ ...reviewRoutes(), ...routes });
+async function openScreen(
+  routes: Parameters<typeof fakeApi>[0] = applicationsRoutes(groups),
+  language: "fr" | "en" = "fr",
+) {
+  const calls = fakeApi({ ...reviewRoutes(), ...routes });
   if (language === "en") localStorage.setItem("applai.language", "en"); // as chosen on Réglages
   render(<App />);
   const nav = language === "en" ? en["nav.applications"] : fr["nav.applications"];
   fireEvent.click(screen.getByRole("button", { name: nav }));
   await screen.findAllByRole("region");
+  return calls;
 }
 
 const groupNamed = (name: string) => within(screen.getByRole("region", { name }));
@@ -209,6 +213,19 @@ describe("the Applications dashboard", () => {
       words["applications.fill.extension_disconnected"],
     );
     expect(within(rows[1] as HTMLElement).getByRole("alert").textContent).toContain("form not loaded");
+  });
+
+  it("shows no extension message in the demo, whose fills are replayed", async () => {
+    const waiting = aRow({ id: 8, offer_id: 8, state: "answers_checked" });
+    const calls = await openScreen({
+      ...applicationsRoutes({ in_progress: [waiting] }),
+      "GET /api/browser/status": { connected: false, last_asked_at: null },
+      "GET /api/health": { status: "ok", database_revision: "0001", demo: true },
+    });
+
+    await waitFor(() => expect(calls.map((call) => call.path)).toContain("/api/browser/status"));
+    await new Promise((resolve) => setTimeout(resolve, 50)); // the answers are applied
+    expect(screen.queryByText(fr["applications.fill.extension_disconnected"])).toBeNull();
   });
 
   it.each([
