@@ -28,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from applai import browser, correct, notion, reread, review_form, validation
+from applai import browser, correct, notion, reread, review_form, trace, validation
 from applai.agents import AgentError, AlreadyRunning
 from applai.applications import Board, board
 from applai.capture import find_form
@@ -168,6 +168,15 @@ def add_offer(body: NewOffer, session: _Session, response: Response) -> OfferAdd
 def applications(session: _Session, request: Request) -> Board:
     """The candidate's applications: in progress, waiting for them, sent and dropped."""
     return board(session, LOCAL_USER_ID, browser.open_tabs(request))
+
+
+@api.get("/applications/{application_id}/trace")
+def application_trace(application_id: int, request: Request) -> trace.ApplicationTrace:
+    """The timeline of an application: its agent runs and the candidate's gates, in order."""
+    try:
+        return trace.application_trace(request.app.state.engine, LOCAL_USER_ID, application_id)
+    except trace.NotFound:
+        raise HTTPException(404, "no such application") from None
 
 
 def _min_score(request: Request) -> int:

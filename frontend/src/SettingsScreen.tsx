@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { CATEGORIES, api, type Category, type Service, type ServiceState, type Services } from "./api";
 import { ServiceLogo } from "./ServiceLogo";
-import { serviceName } from "./service-state";
+import { modelName, serviceName } from "./service-state";
 import { useSettings } from "./settings";
 
 /**
@@ -52,14 +52,6 @@ const LIGHT: Record<ServiceState, string> = {
   orange: "bg-status-orange ring-status-orange/22",
   green: "bg-status-green ring-status-green/22",
 };
-
-/** "claude-haiku-5-5" as "Haiku 5.5"; a name of another shape stays as it is. */
-function modelName(model: string): string {
-  return model.replace(
-    /^claude-([a-z])([a-z]+)-(\d+)-(\d+)$/,
-    (_, first: string, rest: string, major: string, minor: string) => `${first.toUpperCase()}${rest} ${major}.${minor}`,
-  );
-}
 
 function ServiceRow({ service, category }: { service: Service; category: Category }) {
   const { t, lookup } = useSettings();

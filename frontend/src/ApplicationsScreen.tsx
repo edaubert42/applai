@@ -7,6 +7,7 @@ import { Logo } from "./ReviewCard";
 import { serverMessage } from "./server-message";
 import { useSettings } from "./settings";
 import { button } from "./styles";
+import TraceScreen from "./TraceScreen";
 
 const CHECKABLE = ["reviewed", "form_checked", "validated"];
 
@@ -14,6 +15,7 @@ const CHECKABLE = ["reviewed", "form_checked", "validated"];
 export default function ApplicationsScreen() {
   const [correcting, setCorrecting] = useState<Row | null>(null);
   const [validating, setValidating] = useState<Row | null>(null);
+  const [tracing, setTracing] = useState<Row | null>(null);
   // The board loads again each time it comes back, so a closed gate shows in the state.
   if (correcting) {
     const back = () => setCorrecting(null);
@@ -23,11 +25,20 @@ export default function ApplicationsScreen() {
     const back = () => setValidating(null);
     return <FinalValidationScreen row={validating} onBack={back} onDone={back} />;
   }
-  return <Board onCorrect={setCorrecting} onValidate={setValidating} />;
+  if (tracing) return <TraceScreen row={tracing} onBack={() => setTracing(null)} />;
+  return <Board onCorrect={setCorrecting} onValidate={setValidating} onTrace={setTracing} />;
 }
 
 /** Every application in four groups, the latest change first. */
-function Board({ onCorrect, onValidate }: { onCorrect: (row: Row) => void; onValidate: (row: Row) => void }) {
+function Board({
+  onCorrect,
+  onValidate,
+  onTrace,
+}: {
+  onCorrect: (row: Row) => void;
+  onValidate: (row: Row) => void;
+  onTrace: (row: Row) => void;
+}) {
   const { t } = useSettings();
   const [groups, setGroups] = useState<Applications | null>(null);
   const [failed, setFailed] = useState(false);
@@ -72,6 +83,7 @@ function Board({ onCorrect, onValidate }: { onCorrect: (row: Row) => void; onVal
                     extensionConnected={extensionConnected}
                     onCorrect={onCorrect}
                     onValidate={onValidate}
+                    onTrace={onTrace}
                     onStale={reload}
                     dropping={row.id !== null && row.id === dropping}
                     onDrop={() => setDropping(row.id)}
@@ -94,6 +106,7 @@ function ApplicationRow({
   extensionConnected,
   onCorrect,
   onValidate,
+  onTrace,
   onStale,
   dropping,
   onDrop,
@@ -103,6 +116,7 @@ function ApplicationRow({
   extensionConnected: boolean;
   onCorrect: (row: Row) => void;
   onValidate: (row: Row) => void;
+  onTrace: (row: Row) => void;
   onStale: () => void;
   dropping: boolean;
   onDrop: () => void;
@@ -193,6 +207,11 @@ function ApplicationRow({
         <a href={form.url} target="_blank" rel="noreferrer" className={button}>
           {t("applications.form")}
         </a>
+      )}
+      {row.id !== null && (
+        <button type="button" onClick={() => onTrace(row)} className={button}>
+          {t("trace.open")}
+        </button>
       )}
       {row.id !== null && row.state === "drafted" && (
         <button type="button" onClick={() => onCorrect(row)} className={button}>
