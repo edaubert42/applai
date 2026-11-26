@@ -167,7 +167,9 @@ def add_offer(body: NewOffer, session: _Session, response: Response) -> OfferAdd
 @api.get("/applications")
 def applications(session: _Session, request: Request) -> Board:
     """The candidate's applications: in progress, waiting for them, sent and dropped."""
-    return board(session, LOCAL_USER_ID, browser.open_tabs(request))
+    watch: Watch | None = request.app.state.watch
+    running = watch.runner.running() if watch else {}
+    return board(session, LOCAL_USER_ID, browser.open_tabs(request), running)
 
 
 @api.get("/applications/{application_id}/trace")

@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import ApplicationsScreen from "./ApplicationsScreen";
+import Mark from "./Mark";
 import ReviewScreen from "./ReviewScreen";
 import ServicesChip from "./ServicesChip";
 import SettingsScreen from "./SettingsScreen";
@@ -61,22 +62,5 @@ function Shell() {
         )}
       </main>
     </div>
-  );
-}
-
-/** The ApplAI mark: an A in a rounded square. */
-function Mark() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 32 32" className="size-8">
-      <rect width="32" height="32" rx="10" className="fill-primary" />
-      <path
-        d="M10 23 16 9l6 14M12.5 18h7"
-        fill="none"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="stroke-on-primary"
-      />
-    </svg>
   );
 }

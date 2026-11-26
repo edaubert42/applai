@@ -6,6 +6,7 @@ has no application: the Notion sync only reads it (ADR 0006). It is a row of its
 progress, with its Notion status as written; no status is guessed to mean sent or dropped.
 """
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
@@ -43,6 +44,8 @@ class Row(BaseModel):
     form_url: str | None = None  # where its form lives, or why not (applai.capture)
     form_url_error: str | None = None
     fill_error: str | None = None  # why Filling failed: the plan, or the extension (applai.browser)
+    draft_error: str | None = None  # why Drafting failed (applai.drafting)
+    running: str | None = None  # the agent running on it now (AgentRunner.running)
     reasons: list[str] = []  # why the candidate dropped it (applai.validation)
     # Whether the filled form's tab is open; none: not asked, or the extension has not said lately.
     tab_open: bool | None = None
@@ -81,10 +84,16 @@ def _tab_open(application: Application, open_tabs: list[str] | None) -> bool | N
     return any(same_form_url(url, application.form_url) for url in open_tabs)
 
 
-def board(session: Session, user_id: int, open_tabs: list[str] | None = None) -> Board:
+def board(
+    session: Session,
+    user_id: int,
+    open_tabs: list[str] | None = None,
+    running: Mapping[int, str] | None = None,
+) -> Board:
     """The candidate's applications in four groups, the latest change first in each.
 
     open_tabs: the URLs of the tabs in the extension's group, none when it has not said lately.
+    running: the agent running now on each application, by id (AgentRunner.running).
     """
     last_change = (
         select(StateChange.application_id, func.max(StateChange.changed_at).label("at"))
@@ -119,6 +128,8 @@ def board(session: Session, user_id: int, open_tabs: list[str] | None = None) ->
                 form_url=application.form_url,
                 form_url_error=application.form_url_error,
                 fill_error=application.fill_error,
+                draft_error=application.draft_error,
+                running=(running or {}).get(application.id),
                 reasons=drop_reasons.get(application.id, []),
                 tab_open=_tab_open(application, open_tabs),
             ),
