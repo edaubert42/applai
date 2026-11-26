@@ -5,11 +5,11 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from demo_profile import write_profile_without_cv_sources
 from pypdf import PdfReader
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 from test_filling import (  # type: ignore[import-not-found]
-    DEMO_DIR,
     EXTENSION_ID,
     IDENTITY,
     LETTER_FILE,
@@ -33,7 +33,7 @@ _ENDS = {"fr": ("Madame, Monsieur,", "Cordialement,"), "en": ("Dear Hiring Team,
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    (tmp_path / "profile.yaml").write_text((DEMO_DIR / "profile.yaml").read_text())
+    write_profile_without_cv_sources(tmp_path)
     (tmp_path / "settings.yaml").write_text(f"extension_id: {EXTENSION_ID}\n")
     return tmp_path
 

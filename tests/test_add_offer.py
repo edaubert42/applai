@@ -1,13 +1,13 @@
 """The candidate adds an offer by its URL: the real app, a real database."""
 
 import json
-import shutil
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx2
 import pytest
+from demo_profile import write_profile_without_cv_sources
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -47,7 +47,7 @@ CARD = {
 
 @pytest.fixture
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    shutil.copy(DEMO_DIR / "profile.yaml", tmp_path)
+    write_profile_without_cv_sources(tmp_path)
     (tmp_path / "settings.yaml").write_text(f"extension_id: {EXTENSION_ID}\n")
     monkeypatch.delenv("APPLAI_MS_CLIENT_ID", raising=False)
     engine = open_database(tmp_path)

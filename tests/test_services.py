@@ -4,7 +4,6 @@ import importlib
 import json
 import pkgutil
 import re
-import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import get_args
@@ -12,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 import httpx2
 import pytest
+from demo_profile import write_profile_without_cv_sources
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -38,7 +38,7 @@ def _utc(moment: datetime) -> datetime:
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    shutil.copy(DEMO_DIR / "profile.yaml", tmp_path)
+    write_profile_without_cv_sources(tmp_path)
     return tmp_path
 
 

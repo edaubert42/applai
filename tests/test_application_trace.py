@@ -201,6 +201,23 @@ def test_a_dropped_application_shows_its_reasons_at_the_drop_gate(
     assert (drop["decision"], drop["reasons"]) == ("dropped", ["salary"])
 
 
+def test_an_answers_gate_closed_twice_counts_the_corrections_of_each_pass(
+    engine: Engine, client: TestClient
+):
+    offer_id, application_id = _accepted_offer(engine)
+    _label(engine, offer_id, application_id, "answers", "edited", 30, correction=True)
+    _label(engine, offer_id, application_id, "cv", "rejected", 31, correction=True)
+    _change(engine, offer_id, application_id, "drafted", "answers_checked", "candidate", 33)
+    _label(engine, offer_id, application_id, "answers", "accepted", 40)
+    _label(engine, offer_id, application_id, "answers", "edited", 41, correction=True)
+    _change(engine, offer_id, application_id, "drafted", "answers_checked", "candidate", 43)
+
+    body = _trace(client, application_id)
+
+    gates = [s for s in body["steps"] if s.get("to_state") == "answers_checked"]
+    assert [g["corrections"] for g in gates] == [2, 1]
+
+
 def test_an_unknown_application_or_another_users_has_no_trace(engine: Engine, client: TestClient):
     _, mine = _accepted_offer(engine)
     other_users = _application(engine, _offer(engine, "agent-de-quai", user_id=2), user_id=2)

@@ -1,6 +1,5 @@
 """Correct: the candidate accepts, edits or rejects each drafted answer, then closes the gate."""
 
-import shutil
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -8,6 +7,7 @@ from uuid import uuid4
 
 import httpx2
 import pytest
+from demo_profile import write_profile_without_cv_sources
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -48,7 +48,7 @@ REDRAFT = _result({"1": [{"text": REDRAFTED, "facts": ["F3"]}]})
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    shutil.copy(DEMO_DIR / "profile.yaml", tmp_path)
+    write_profile_without_cv_sources(tmp_path)
     return tmp_path
 
 

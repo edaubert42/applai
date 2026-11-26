@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 import yaml
+from demo_profile import profile_without_cv_sources
 from pypdf import PdfReader
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
@@ -35,7 +36,7 @@ FRENCH = "Nous cherchons une ingénieure data pour construire les pipelines de n
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
     """The demo profile with a fixed CV, as the other Filling tests have it."""
-    profile = (DEMO_DIR / "profile.yaml").read_text()
+    profile = profile_without_cv_sources()
     (tmp_path / "profile.yaml").write_text(f"{profile}\ncv: cv/jeanne-dupont.pdf\n")
     (tmp_path / "cv").mkdir()
     (tmp_path / "cv" / "jeanne-dupont.pdf").write_bytes(CV_BYTES)

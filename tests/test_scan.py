@@ -2,7 +2,6 @@
 
 import json
 import shlex
-import shutil
 import sqlite3
 import sys
 import threading
@@ -14,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 import httpx2
 import pytest
+from demo_profile import write_profile_without_cv_sources
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -174,7 +174,7 @@ def _scanner(client: TestClient) -> Scanner:
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    shutil.copy(DEMO_DIR / "profile.yaml", tmp_path)
+    write_profile_without_cv_sources(tmp_path)
     return tmp_path
 
 

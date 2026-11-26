@@ -1,12 +1,12 @@
 """applai retriage reads the triaged offers' pages again and triages them again."""
 
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import httpx2
 import pytest
+from demo_profile import write_profile_without_cv_sources
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,7 +38,7 @@ class Setup:
     """A data directory, the pages the network serves and the model's answers."""
 
     def __init__(self, root: Path) -> None:
-        shutil.copy(DEMO_DIR / "profile.yaml", root)
+        write_profile_without_cv_sources(root)
         self.root = root
         self.fetched: list[str] = []  # the URLs the network was asked for
         self.pages: dict[str, int] = {}  # the status each URL answers, 404 for the others

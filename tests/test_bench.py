@@ -1,11 +1,11 @@
 import json
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+from demo_profile import write_profile_without_cv_sources
 
 from applai.agents import AgentResult, FakeBackend, Usage
 from applai.bench import main
@@ -48,7 +48,7 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A data directory with the demo profile and no case yet, named by APPLAI_DATA_DIR."""
     directory = tmp_path / "data"
     (directory / "bench" / "triage").mkdir(parents=True)
-    shutil.copy(DEMO_DIR / "profile.yaml", directory / "profile.yaml")
+    write_profile_without_cv_sources(directory)
     monkeypatch.setenv("APPLAI_DATA_DIR", str(directory))
     return directory
 
