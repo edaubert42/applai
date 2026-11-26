@@ -19,14 +19,16 @@ import os
 import re
 import shlex
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import ExitStack, asynccontextmanager, closing
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from urllib.parse import urlsplit
 
 import anyio
-from mcp import ClientSession, StdioServerParameters, stdio_client
-from mcp.types import TextContent
+from anyio.from_thread import BlockingPortal, start_blocking_portal
+from mcp import ClientSession, MCPError, StdioServerParameters, stdio_client
+from mcp.types import CONNECTION_CLOSED, CallToolResult, TextContent
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -57,33 +59,81 @@ class ToolRefused(Exception):
     """A call to a tool ApplAI never calls on the LinkedIn MCP server."""
 
 
+class LinkedInServer:
+    """The server command, started on the first call and kept open for the next until closed.
+
+    A server that fails a call, dies or does not answer in time is stopped, and started again
+    on the next call: one start per call at most. Its event loop runs in a thread of its own,
+    so the caller may wait between calls holding nothing open but the server.
+    """
+
+    def __init__(self, command: str, timeout: float = TIMEOUT) -> None:
+        self._command = command
+        self._timeout = timeout
+        self._open = ExitStack()
+        self._portal: BlockingPortal | None = None
+        self._client: ClientSession | None = None
+
+    def call_tool(self, tool: str, arguments: dict[str, Any]) -> str:
+        """Call tool with arguments, starting the server if needed; return the text it gives.
+
+        Refuses, before starting or calling anything, every tool but get_job_details. Raises
+        LinkedInError when the server cannot be started, fails or does not answer in time.
+        """
+        if tool != TOOL:
+            raise ToolRefused(f"ApplAI calls only {TOOL} on the LinkedIn MCP server, not {tool}")
+        try:
+            argv = shlex.split(self._command)
+        except ValueError:
+            argv = []
+        if not argv:
+            raise LinkedInError(f"{COMMAND_VARIABLE} is not a command line")
+        try:
+            if self._portal is None or self._client is None:
+                self._portal = self._open.enter_context(start_blocking_portal())
+                self._client = self._open.enter_context(
+                    self._portal.wrap_async_context_manager(_session(argv, self._timeout))
+                )
+            result = self._portal.call(_call, self._client, tool, arguments, self._timeout)
+        except Exception as error:  # messages may hold the command line, which may hold a token
+            self.close()
+            raise _failure(error) from None
+        if result.is_error:  # the server answered: it stays open for the next call
+            raise LinkedInError("the LinkedIn MCP server could not read the offer")
+        return _payload([block.text for block in result.content if isinstance(block, TextContent)])
+
+    def close(self) -> None:
+        """Stop the server, if started; the next call starts it again."""
+        opened, self._open = self._open, ExitStack()
+        self._portal = self._client = None
+        try:
+            opened.close()
+        except Exception:  # a dead server's own errors on the way out: its process is stopped
+            pass
+
+
 def call_tool(command: str, tool: str, arguments: dict[str, Any], timeout: float = TIMEOUT) -> str:
-    """Start the server command, call tool with arguments, return the text it gives.
+    """Start the server command, call tool with arguments, stop the server, return the text.
 
     Refuses, before starting anything, every tool but get_job_details. Raises LinkedInError
     when the server cannot be started, fails or does not answer in time.
     """
-    if tool != TOOL:
-        raise ToolRefused(f"ApplAI calls only {TOOL} on the LinkedIn MCP server, not {tool}")
-    try:
-        argv = shlex.split(command)
-    except ValueError:
-        argv = []
-    if not argv:
-        raise LinkedInError(f"{COMMAND_VARIABLE} is not a command line")
-    try:
-        return anyio.run(_call, argv, tool, arguments, timeout)
-    except LinkedInError:
-        raise
-    except Exception as error:  # messages may hold the command line, which may hold a token
-        cause = _single(error)
-        if isinstance(cause, LinkedInError):
-            raise cause from None
-        if isinstance(cause, TimeoutError):
-            raise LinkedInError("the LinkedIn MCP server did not answer in time") from None
-        if isinstance(cause, OSError):
-            raise LinkedInError("the LinkedIn MCP server could not be started") from None
-        raise LinkedInError(f"the LinkedIn MCP server failed: {type(cause).__name__}") from None
+    with closing(LinkedInServer(command, timeout)) as server:
+        return server.call_tool(tool, arguments)
+
+
+def _failure(error: Exception) -> LinkedInError:
+    """The LinkedInError to raise for an error starting or calling the server."""
+    cause = _single(error)
+    if isinstance(cause, LinkedInError):
+        return cause
+    if isinstance(cause, TimeoutError):
+        return LinkedInError("the LinkedIn MCP server did not answer in time")
+    if isinstance(cause, OSError):
+        return LinkedInError("the LinkedIn MCP server could not be started")
+    if isinstance(cause, MCPError) and cause.error.code == CONNECTION_CLOSED:
+        return LinkedInError("the LinkedIn MCP server stopped")
+    return LinkedInError(f"the LinkedIn MCP server failed: {type(cause).__name__}")
 
 
 def _utc_now() -> datetime:
@@ -120,27 +170,28 @@ def describe_linkedin_offers(
     failures = 0
     if progress and offers:
         progress(0, len(offers))  # the first call may take a while: the server opens a browser
-    for done, offer in enumerate(offers, start=1):
-        if stop and stop():
-            break
-        match = _JOB_ID.search(urlsplit(offer.url).path)
-        if match is None:
-            _fail(describing, offer, "the LinkedIn URL has no job id", clock())
-        else:
-            now = _wait_turn(session, user_id, clock, sleep, stop)
-            if now is None:
-                break  # the daily limit or stopped: the offers left wait for a later run
-            if offer.state == OfferState.NEW:  # reloaded: another part of ApplAI may have moved it
-                read = _describe(session, offer, command, match.group(1), now, describing)
-                failures = 0 if read else failures + 1
-        session.commit()
-        if described and offer.state == OfferState.DESCRIBED:
-            described(offer.id)
-        if progress:
-            progress(done, len(offers))
-        if failures == FAILURES_IN_A_ROW:
-            describing.errors.append(STOPPED)
-            break
+    with closing(LinkedInServer(command)) as server:  # started by the first call, if any
+        for done, offer in enumerate(offers, start=1):
+            if stop and stop():
+                break
+            match = _JOB_ID.search(urlsplit(offer.url).path)
+            if match is None:
+                _fail(describing, offer, "the LinkedIn URL has no job id", clock())
+            else:
+                now = _wait_turn(session, user_id, clock, sleep, stop)
+                if now is None:
+                    break  # the daily limit or stopped: the offers left wait for a later run
+                if offer.state == OfferState.NEW:  # reloaded: another part of ApplAI moves offers
+                    read = _describe(session, offer, server, match.group(1), now, describing)
+                    failures = 0 if read else failures + 1
+            session.commit()
+            if described and offer.state == OfferState.DESCRIBED:
+                described(offer.id)
+            if progress:
+                progress(done, len(offers))
+            if failures == FAILURES_IN_A_ROW:
+                describing.errors.append(STOPPED)
+                break
     session.commit()
     return describing
 
@@ -184,14 +235,19 @@ def _wait_turn(
 
 
 def _describe(
-    session: Session, offer: Offer, command: str, job_id: str, now: datetime, into: Describing
+    session: Session,
+    offer: Offer,
+    server: LinkedInServer,
+    job_id: str,
+    now: datetime,
+    into: Describing,
 ) -> bool:
     """Read the offer through the server; return whether the call succeeded."""
     # The read counts before the call: a call that fails still reached LinkedIn.
     session.add(LinkedInRead(user_id=offer.user_id, offer_id=offer.id, read_at=now))
     session.commit()
     try:
-        description = _posting(call_tool(command, TOOL, {"job_id": job_id}))
+        description = _posting(server.call_tool(TOOL, {"job_id": job_id}))
     except LinkedInError as error:
         _fail(into, offer, str(error), now)
         return False
@@ -257,15 +313,21 @@ def _posting(text: str) -> str:
     raise LinkedInError(f"LinkedIn gave no text for the offer{reason}")
 
 
-async def _call(argv: list[str], tool: str, arguments: dict[str, Any], timeout: float) -> str:
+@asynccontextmanager
+async def _session(argv: list[str], timeout: float) -> AsyncIterator[ClientSession]:
+    """The started server, open until the block ends; starting it fails after timeout."""
     server = StdioServerParameters(command=argv[0], args=argv[1:])
-    with anyio.fail_after(timeout):
-        async with stdio_client(server) as (read, write), ClientSession(read, write) as client:
+    async with stdio_client(server) as (read, write), ClientSession(read, write) as client:
+        with anyio.fail_after(timeout):
             await client.initialize()
-            result = await client.call_tool(tool, arguments)
-    if result.is_error:
-        raise LinkedInError("the LinkedIn MCP server could not read the offer")
-    return _payload([block.text for block in result.content if isinstance(block, TextContent)])
+        yield client
+
+
+async def _call(
+    client: ClientSession, tool: str, arguments: dict[str, Any], timeout: float
+) -> CallToolResult:
+    with anyio.fail_after(timeout):
+        return await client.call_tool(tool, arguments)
 
 
 def _payload(texts: list[str]) -> str:

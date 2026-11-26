@@ -1,11 +1,13 @@
-"""A fictional LinkedIn MCP server over stdio, for tests: python linkedin_mcp_server.py JOBS CALLS.
+"""A fictional LinkedIn MCP server over stdio, for tests: linkedin_mcp_server.py JOBS CALLS [STARTS].
 
 JOBS is a JSON file mapping a job id to what get_job_details returns; an id it lacks makes
 the tool fail. Every tool call is appended to CALLS, one JSON line each, before it runs.
+Each start appends the server's process id to STARTS, when given, one line each.
 Like the candidate's real server, it also has a tool that acts on LinkedIn.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -14,6 +16,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import TextContent
 
 jobs_file, calls_file = Path(sys.argv[1]), Path(sys.argv[2])
+starts_file = Path(sys.argv[3]) if len(sys.argv) > 3 else None
 server = MCPServer("fictional-linkedin")
 
 
@@ -49,4 +52,7 @@ def connect_with_person(profile_url: str) -> str:
 
 
 if __name__ == "__main__":
+    if starts_file:
+        with starts_file.open("a") as starts:
+            starts.write(f"{os.getpid()}\n")
     server.run("stdio")

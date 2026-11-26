@@ -1,7 +1,11 @@
 import json
+import os
 import shlex
+import signal
 import sys
+import time
 from collections.abc import Callable, Iterator
+from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -10,11 +14,13 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from applai import linkedin
 from applai.database import open_database
 from applai.linkedin import (
     COMMAND_VARIABLE,
+    FAILURES_IN_A_ROW,
     MAX_READS_PER_DAY,
+    TOOL,
+    LinkedInServer,
     ToolRefused,
     call_tool,
     describe_linkedin_offers,
@@ -42,14 +48,15 @@ def _job(text: str, error: dict[str, str] | None = None) -> dict[str, Any]:
 
 
 class FictionalServer:
-    """The fictional LinkedIn MCP server's jobs, and the tool calls it received."""
+    """The fictional LinkedIn MCP server's jobs, the tool calls it received, and its starts."""
 
     def __init__(self, directory: Path) -> None:
         self.jobs_file = directory / "jobs.json"
         self.calls_file = directory / "calls.jsonl"
+        self.starts_file = directory / "starts.txt"
         self.jobs_file.write_text("{}")
-        args = [sys.executable, str(SERVER), str(self.jobs_file), str(self.calls_file)]
-        self.command = shlex.join(args)
+        files = (self.jobs_file, self.calls_file, self.starts_file)
+        self.command = shlex.join([sys.executable, str(SERVER), *map(str, files)])
 
     def serve(self, jobs: dict[str, Any]) -> None:
         self.jobs_file.write_text(json.dumps(jobs))
@@ -58,6 +65,20 @@ class FictionalServer:
         if not self.calls_file.exists():
             return []
         return [json.loads(line) for line in self.calls_file.read_text().splitlines()]
+
+    def starts(self) -> list[int]:
+        """The process id of each server started, in order."""
+        if not self.starts_file.exists():
+            return []
+        return [int(line) for line in self.starts_file.read_text().splitlines()]
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 @pytest.fixture
@@ -245,14 +266,16 @@ def test_an_offer_moved_during_its_own_call_keeps_its_state_and_the_run_goes_on(
     server.serve({"4000000001": _job(POSTING), "4000000002": _job(POSTING)})
     first, second = _offer(engine, "4000000001"), _offer(engine, "4000000002")
 
-    def call_while_screened_out(command: str, tool: str, arguments: dict[str, Any]) -> str:
+    call = LinkedInServer.call_tool
+
+    def call_while_screened_out(self: LinkedInServer, tool: str, arguments: dict[str, Any]) -> str:
         if arguments["job_id"] == "4000000001":  # the rest of ApplAI writes during the call
             with Session(engine) as session:
                 move(session, session.get_one(Offer, first), OfferState.SCREENED_OUT, Actor.WATCH)
                 session.commit()
-        return call_tool(command, tool, arguments)
+        return call(self, tool, arguments)
 
-    monkeypatch.setattr(linkedin, "call_tool", call_while_screened_out)
+    monkeypatch.setattr(LinkedInServer, "call_tool", call_while_screened_out)
 
     assert _run(engine) == []
 
@@ -322,3 +345,99 @@ def test_without_the_variable_linkedin_offers_stay_new_with_an_error_naming_it(
         assert COMMAND_VARIABLE in str(offer.detail_error)
     with Session(engine) as session:
         assert session.scalars(select(LinkedInRead)).all() == []
+
+
+JOBS = ("4000000001", "4000000002", "4000000003")
+
+
+def test_a_run_reads_every_offer_through_one_server_started_once(
+    engine: Engine, server: FictionalServer
+):
+    server.serve({job_id: _job(POSTING) for job_id in JOBS})
+    offer_ids = [_offer(engine, job_id) for job_id in JOBS]
+
+    assert _run(engine) == []
+
+    assert len(server.starts()) == 1
+    assert [_get(engine, offer_id).state for offer_id in offer_ids] == ["described"] * 3
+
+
+@pytest.mark.parametrize("end", ["daily limit", "stop", "failures in a row"])
+def test_no_server_process_is_left_after_the_run_ends(
+    engine: Engine, server: FictionalServer, end: str
+):
+    jobs = (*JOBS, "4000000004")
+    server.serve({} if end == "failures in a row" else {job_id: _job(POSTING) for job_id in jobs})
+    offer_ids = [_offer(engine, job_id) for job_id in jobs]
+    if end == "daily limit":
+        with Session(engine) as session:
+            session.add_all(
+                LinkedInRead(user_id=1, offer_id=offer_ids[0], read_at=NOON - timedelta(minutes=i))
+                for i in range(1, MAX_READS_PER_DAY - 1)
+            )  # two reads left today
+            session.commit()
+    clock = Clock()
+    stop = (lambda: len(server.calls()) == 2) if end == "stop" else None
+
+    with Session(engine) as session:
+        describe_linkedin_offers(session, clock, clock.sleep, stop=stop)
+
+    assert len(server.calls()) == (FAILURES_IN_A_ROW if end == "failures in a row" else 2)
+    assert len(server.starts()) == 1
+    assert [pid for pid in server.starts() if _alive(pid)] == []
+
+
+def test_a_server_that_exits_after_the_first_read_is_started_again_on_the_third(
+    engine: Engine, server: FictionalServer
+):
+    server.serve({job_id: _job(POSTING) for job_id in JOBS})
+    first, second, third = (_offer(engine, job_id) for job_id in JOBS)
+    clock = Clock()
+
+    def exit_after_the_first_read() -> None:
+        if len(server.calls()) == 1 and len(server.starts()) == 1:
+            pid = server.starts()[0]
+            if _alive(pid):
+                os.kill(pid, signal.SIGKILL)
+            deadline = time.monotonic() + 10
+            while _alive(pid) and time.monotonic() < deadline:
+                time.sleep(0.01)
+
+    clock.on_sleep = exit_after_the_first_read
+    error = "the LinkedIn MCP server stopped"
+
+    assert _run(engine, clock) == [f"offer {second}: {error}"]
+
+    states = [_get(engine, offer_id).state for offer_id in (first, second, third)]
+    assert states == ["described", "new", "described"]
+    assert _get(engine, second).detail_error == error
+    assert [call["arguments"]["job_id"] for call in server.calls()] == [JOBS[0], JOBS[2]]
+    assert len(server.starts()) == 2
+    assert [pid for pid in server.starts() if _alive(pid)] == []
+
+
+def test_the_open_server_refuses_any_tool_but_get_job_details(server: FictionalServer):
+    server.serve({"4000000001": _job(POSTING)})
+
+    with closing(LinkedInServer(server.command)) as open_server:
+        open_server.call_tool(TOOL, {"job_id": "4000000001"})
+        with pytest.raises(ToolRefused, match="connect_with_person"):
+            open_server.call_tool("connect_with_person", {"profile_url": "/in/someone/"})
+
+    assert server.calls() == [{"tool": TOOL, "arguments": {"job_id": "4000000001"}}]
+    assert len(server.starts()) == 1
+
+
+def test_a_run_with_no_linkedin_offer_to_read_starts_no_server(
+    engine: Engine, server: FictionalServer
+):
+    with Session(engine) as session:
+        for url in ("https://emplois.example.org/offres/42", "https://www.linkedin.com/jobs/"):
+            session.add(
+                Offer(user_id=1, url=url, title="Data engineer", company="Pivoine Analytics")
+            )
+        session.commit()
+
+    _run(engine)
+
+    assert server.starts() == []
