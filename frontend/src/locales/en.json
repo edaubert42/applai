@@ -1,5 +1,6 @@
 {
   "app.name": "ApplAI",
+  "demo.banner": "Demo: fictional candidate, replayed agents, nothing is sent",
   "nav.label": "Main navigation",
   "nav.review": "To review",
   "nav.applications": "Applications",
