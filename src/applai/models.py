@@ -262,7 +262,8 @@ class StateChange(Base):
 class AgentRun(Base):
     """One agent call, as the trace of its offer keeps it (applai.trace).
 
-    outcome is "ok", or the kind of the error. A failed run has no tokens and no cost.
+    outcome is "ok", the kind of the error, "running" while it runs, or "interrupted" when
+    ApplAI stopped during it. A failed run has no tokens and no cost.
     """
 
     __tablename__ = "agent_runs"

@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import httpx2
 import pytest
+from demo_profile import profile_without_cv_sources
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -22,7 +23,6 @@ from applai.database import open_database
 from applai.models import AgentRun, Application, DraftAnswer, Offer
 from applai.scan import Watch
 
-DEMO_DIR = Path(__file__).parents[1] / "demo" / "candidate"
 FORM = "https://jobs.lever.co/pivoine/1/apply"
 SENTENCE = "J'ai construit la prévision des délais de livraison de 120 entrepôts."
 
@@ -63,7 +63,7 @@ STAGES = {
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    profile = (DEMO_DIR / "profile.yaml").read_text()
+    profile = profile_without_cv_sources()
     (tmp_path / "profile.yaml").write_text(f"{profile}\ncv: cv/jeanne-dupont.pdf\n")
     (tmp_path / "cv").mkdir()
     (tmp_path / "cv" / "jeanne-dupont.pdf").write_bytes(b"%PDF-1.4 fictional CV")
