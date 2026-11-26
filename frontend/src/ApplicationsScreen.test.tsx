@@ -316,6 +316,13 @@ describe("who acts next on an application", () => {
     expect(screen.queryByText(fr["applications.next.drafted"])).toBeNull();
   });
 
+  it("keeps the gate on a row whose fill_error the row does not show, past answers_checked", async () => {
+    const reviewed = aRow({ state: "reviewed", fill_error: "fill_again_not_loaded" });
+    await openScreen(applicationsRoutes({ waiting: [reviewed] }));
+
+    expect(rowOf("Chef de quai").getByText(fr["applications.next.reviewed"])).toBeTruthy();
+  });
+
   it.each([
     ["fr", fr],
     ["en", en],

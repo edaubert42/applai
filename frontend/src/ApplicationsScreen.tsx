@@ -130,7 +130,8 @@ function ApplicationRow({
   const state = old ? row.state : row.state && (lookup(`applications.state.${row.state}`) ?? row.state);
   const pill = "rounded-pill bg-raised px-3 py-1 text-sm";
   // A failure is shown instead of the spinner and of the gate: it is what the candidate must see.
-  const hasError = row.draft_error !== null || row.fill_error !== null;
+  // Only the errors the row shows: a fill_error past answers_checked shows on final validation.
+  const hasError = row.draft_error !== null || (row.state === "answers_checked" && row.fill_error !== null);
   // The gate the candidate is at, for an application whose next move is theirs.
   const next = !old && row.state ? lookup(`applications.next.${row.state}`) : undefined;
   // The form's URL the finder recorded, or the one the candidate pasted since.
