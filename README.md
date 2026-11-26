@@ -1,23 +1,33 @@
 # ApplAI
 
-Agents that prepare job applications while the candidate stays in control.
+Claude agents that prepare job applications, while the candidate decides at every gate and is the only one who sends.
 
-ApplAI finds offers, drafts answers and cover letters from a verified fact sheet, and fills application forms. The candidate checks every step, and every check is recorded and measured.
+| Stage | Who | What happens |
+|---|---|---|
+| Watch | code | new offers from Google, LinkedIn, Notion and e-mail alerts |
+| Triage | Claude Haiku | a score, its reasons and its doubts |
+| **Gate** | candidate | accept or decline the offer, with a reason |
+| Drafting | Claude Opus | answers, cover letter and tailored CV; every sentence cites a verified fact |
+| **Gate** | candidate | accept, edit or reject each answer |
+| Filling | Claude Sonnet + Chrome extension | the form filled in the candidate's own browser |
+| Review | Claude Sonnet, fresh context | the problems it finds on the filled form |
+| **Gate** | candidate | final validation, then the candidate sends |
 
-- **The candidate stays in control.** Offers, answers, forms and the final application each go through the candidate. No agent has a tool that sends an application.
-- **Autonomy is earned, not assumed.** A step runs on its own only once the candidate has stopped correcting it, and it locks again at the first mistake.
-- **Everything is measured.** Each agent is scored on an evaluation bench, and cost, time and corrections are tracked for every application.
+What it shows:
 
-**Status:** design phase. The code lands through small pull requests.
+- **Guardrails by design.** No agent has a tool that sends an application ([ADR 0003](docs/adr/0003-sending-is-a-human-decision.md)). Every decision at a gate is recorded, so a gate can later pass on its own once the candidate has stopped correcting it ([ADR 0004](docs/adr/0004-autonomy-is-earned-per-level.md)).
+- **Everything is measured.** Triage and Drafting are scored on a fixed evaluation bench, and every agent run records its model, tokens, duration and estimated cost in the application's trace.
+- **Built by agents too.** Of the 130 pull requests merged from 18 to 26 November 2026, 78 were opened by a coder agent working from a GitHub issue, then checked by a reviewer agent; I review and merge every one.
+
+**Status:** every stage above is built. Next: a public demo with a fictional candidate, and the Control screen that measures each gate.
 
 ## How it's built
 
-I build ApplAI with Claude Code, the same way ApplAI works: the agents do the work, a human makes the decisions.
+I build ApplAI with Claude Code, the way ApplAI works: agents do the work, a human decides.
 
-- **I decide.** Goals, scope and design choices are mine. Claude Code lays out the options and their trade-offs; what I chose, and why, is in the [design decisions](docs/adr/).
-- **Claude Code writes most of the code**, one small pull request at a time. Most issues are built by agents in GitHub Actions: a coder opens the pull request, a reviewer reads it with a fresh context, a fixer repairs failing checks, a learner proposes a rule or a check when a mistake comes back ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)). That is why commits carry a `Co-authored-by: Claude` line.
-- **I review and merge every pull request**, and only once the checks pass: lint, types, tests, and a scan for personal data.
-- **Measurements decide whether a change helped.** Every agent is scored on a fixed evaluation bench, and the numbers published here come from it.
+- **I decide** goals, scope and design. Each choice and its reason is a [design decision](docs/adr/).
+- **Agents build the issues** in GitHub Actions: a coder opens the pull request, a reviewer reads it with a fresh context, a fixer repairs failing checks, a learner proposes a rule when a mistake comes back ([ADR 0009](docs/adr/0009-agents-build-applai-from-issues.md)). Hard issues go to Opus, the rest to Sonnet.
+- **I merge** only once lint, types, tests and a scan for personal data pass.
 
 ## Read more
 
