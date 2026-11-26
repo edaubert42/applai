@@ -4,3 +4,5 @@
 e92496060c97eeb4dc05954dcb44bf8dc5ac761f:src/applai/scan.py:linkedin-client-secret:198
 e92496060c97eeb4dc05954dcb44bf8dc5ac761f:src/applai/scan.py:linkedin-client-secret:221
 d8ceb91090f4781318eca207fcce0d376eefff7c:.gitleaksignore:linkedin-client-secret:1
+# The same rule read a test's job id after "LinkedInServer" in a commit of PR #295; the next commit reworded the test.
+45f5d530c7078abd2e852e026609887094ddd818:tests/test_linkedin.py:linkedin-client-id:377
