@@ -342,6 +342,23 @@ describe("who acts next on an application", () => {
     );
     expect(failedFilling.queryByRole("status")).toBeNull();
   });
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("says which stage a stopped ApplAI cut short, Review included, in %s", async (language, words) => {
+    const rows = [
+      aRow({ id: 1, offer_id: 1, title: "Poste rédaction", state: "form_captured", draft_error: "interrupted_drafting" }),
+      aRow({ id: 2, offer_id: 2, title: "Poste remplissage", state: "answers_checked", fill_error: "interrupted_filling" }),
+      aRow({ id: 3, offer_id: 3, title: "Poste relecture", state: "filled", review_error: "interrupted_review" }),
+    ];
+    await openScreen(applicationsRoutes({ in_progress: rows }), language);
+
+    for (const [title, stage] of [["Poste rédaction", "drafting"], ["Poste remplissage", "filling"], ["Poste relecture", "review"]] as const) {
+      expect(rowOf(title).getByRole("alert").textContent).toBe(words[`message.interrupted_${stage}`]);
+      expect(rowOf(title).queryByRole("status")).toBeNull();
+    }
+  });
 });
 
 describe("dropping an application", () => {

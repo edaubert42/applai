@@ -787,6 +787,7 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.data_dir = data_dir
         app.state.engine = engine = open_database(data_dir)
+        trace.interrupt_runs(engine)  # before the scanner starts a run of this process
         app.state.scanner = None
         app.state.watch, app.state.clock, app.state.extension_asked_at = watch, clock, None
         app.state.tabs_posted = None  # when, and the URLs, of the extension's last good post

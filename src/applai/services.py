@@ -26,7 +26,7 @@ from applai.notion import last_write_status
 from applai.profile import ProfileError, load_profile
 from applai.scan import Clock, Scanner, Watch
 from applai.settings import SettingsError, extension_id
-from applai.trace import OK
+from applai.trace import INTERRUPTED, OK, RUNNING
 from applai.triage import AGENT as TRIAGE_AGENT
 from applai.triage import TRIAGE_MODEL
 
@@ -196,10 +196,12 @@ def _site_hint(st: State, is_ext: bool, is_li: bool, conn: bool | None) -> Hint 
 
 _AGENT_HINT: Hint = "claude_login"
 _AGENT_HINTS: dict[str, Hint] = {INVALID_CITATION: "invalid_citation"}
+_NOT_ENDED = (RUNNING, INTERRUPTED)
 
 
 def _agents(s: Session, uid: int, now: datetime) -> list[dict[str, Any]]:
-    q = select(AgentRun).where(AgentRun.user_id == uid)
+    # Neither says anything of Claude's health: the run has not ended, or ApplAI stopped.
+    q = select(AgentRun).where(AgentRun.user_id == uid, AgentRun.outcome.not_in(_NOT_ENDED))
     by_agent: dict[str, list[AgentRun]] = defaultdict(list)
     for r in s.scalars(q.order_by(AgentRun.started_at.desc(), AgentRun.id.desc())):
         by_agent[r.agent].append(r)

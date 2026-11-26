@@ -31,7 +31,7 @@ from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import Engine
 
-from applai.trace import OK, UNEXPECTED, Run, record_run, utc_now
+from applai.trace import OK, RUNNING, UNEXPECTED, Run, finish_run, record_run, utc_now
 
 MAX_PARALLEL_AGENTS = 3
 CLI_TIMEOUT_S = 600.0
@@ -196,23 +196,38 @@ class AgentRunner:
     ) -> AgentResult:
         """Run the agent. Given the database and the offer it works on, record the run.
 
-        The run is recorded whether it succeeds or fails (see applai.trace), and the result
-        holds the id of its row. Without them nothing is recorded.
+        The run is recorded as it starts, outcome running, then completed whether it
+        succeeds or fails (see applai.trace), and the result holds the id of its row.
+        Without them nothing is recorded.
         """
         if (database is None) != (offer_id is None):
             raise ValueError("run_agent takes the database and offer_id together, or neither")
         if database is None or offer_id is None:
             return self._run(spec, application_id)
         started_at, clock = utc_now(), time.monotonic()
+        run_id = record_run(
+            database,
+            offer_id=offer_id,
+            application_id=application_id,
+            run=Run(
+                agent=spec.name,
+                model=spec.model,
+                started_at=started_at,
+                duration_ms=0,
+                input_tokens=None,
+                output_tokens=None,
+                cost_usd=None,
+                outcome=RUNNING,
+            ),
+        )
         try:
             result = self._run(spec, application_id)
         except Exception as error:
             outcome = error.kind.value if isinstance(error, AgentError) else UNEXPECTED
-            record_run(
+            finish_run(
                 database,
-                offer_id=offer_id,
-                application_id=application_id,
-                run=Run(
+                run_id,
+                Run(
                     agent=spec.name,
                     model=spec.model,
                     started_at=started_at,
@@ -225,11 +240,10 @@ class AgentRunner:
             )
             raise
         usage = result.usage
-        run_id = record_run(
+        finish_run(
             database,
-            offer_id=offer_id,
-            application_id=application_id,
-            run=Run(
+            run_id,
+            Run(
                 agent=spec.name,
                 model=usage.model,
                 started_at=started_at,

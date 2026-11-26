@@ -45,7 +45,11 @@ export default function TraceScreen({ row, onBack }: { row: Row; onBack: () => v
               .filter(Boolean)
               .join(" · ")}
           </p>
-          {step.outcome !== "ok" && <p className="text-sm text-minus">{t("trace.failed", { outcome: step.outcome })}</p>}
+          {step.outcome === "running" ? (
+            <p className="text-sm text-muted">{t("trace.running")}</p>
+          ) : (
+            step.outcome !== "ok" && <p className="text-sm text-minus">{t("trace.failed", { outcome: step.outcome })}</p>
+          )}
         </div>
       </>
     );

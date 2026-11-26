@@ -67,6 +67,14 @@ describe("the trace of an application", () => {
     expect(failed && retried && failed.compareDocumentPosition(retried) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("shows a run that has not ended as running, not failed", async () => {
+    await openTrace({ ...TRACE, steps: [triage, { ...drafted, outcome: "running" }] });
+
+    const running = (await screen.findByText(fr["trace.agent.drafting"])).closest("li") ?? undefined;
+    expect(text(running)).toContain(fr["trace.running"]);
+    expect(text(running)).not.toContain(fr["trace.failed"].replace("{outcome}", "running"));
+  });
+
   it("ends with the time and the estimated cost of the whole application", async () => {
     await openTrace(TRACE);
 

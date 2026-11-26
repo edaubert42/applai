@@ -149,6 +149,7 @@
   "applications.next.form_checked": "À vous : validation finale",
   "applications.next.validated": "À vous : envoyer",
   "applications.draft.error": "Rédaction impossible : {error}.",
+  "applications.review.error": "Relecture impossible : {error}.",
   "trace.open": "Trace",
   "trace.title": "Trace de la candidature",
   "trace.error": "La trace n’a pas pu être chargée.",
@@ -162,6 +163,7 @@
   "trace.agent.filling": "Remplissage",
   "trace.agent.review": "Relecture",
   "trace.failed": "Échec : {outcome}",
+  "trace.running": "En cours",
   "trace.gate.accepted": "Offre acceptée",
   "trace.gate.declined": "Offre refusée",
   "trace.gate.later": "Offre gardée pour plus tard",
@@ -312,5 +314,8 @@
   "message.required_empty": "Champ obligatoire vide.",
   "message.not_judged": "le contrôle de la rédaction n’a pas relu cette réponse.",
   "message.judge_sentence": "phrase {detail}",
-  "message.judge_unsupported": "la phrase {detail} n’est pas justifiée par les faits cités."
+  "message.judge_unsupported": "la phrase {detail} n’est pas justifiée par les faits cités.",
+  "message.interrupted_drafting": "Interrompu : ApplAI s’est arrêté pendant la rédaction.",
+  "message.interrupted_filling": "Interrompu : ApplAI s’est arrêté pendant le remplissage.",
+  "message.interrupted_review": "Interrompu : ApplAI s’est arrêté pendant la relecture."
 }

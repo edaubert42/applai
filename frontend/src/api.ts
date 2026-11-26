@@ -74,6 +74,7 @@ export interface Row {
   form_url_error: string | null;
   fill_error: string | null;
   draft_error: string | null;
+  review_error: string | null;
   /** The agent running on it now (its name), or null. */
   running: string | null;
   /** Why the candidate dropped it; empty for any other application. */

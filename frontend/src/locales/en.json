@@ -149,6 +149,7 @@
   "applications.next.form_checked": "Your turn: final validation",
   "applications.next.validated": "Your turn: send",
   "applications.draft.error": "Drafting failed: {error}.",
+  "applications.review.error": "Review failed: {error}.",
   "trace.open": "Trace",
   "trace.title": "Trace of the application",
   "trace.error": "The trace could not be loaded.",
@@ -162,6 +163,7 @@
   "trace.agent.filling": "Filling",
   "trace.agent.review": "Review",
   "trace.failed": "Failed: {outcome}",
+  "trace.running": "Running",
   "trace.gate.accepted": "Offer accepted",
   "trace.gate.declined": "Offer declined",
   "trace.gate.later": "Offer kept for later",
@@ -312,5 +314,8 @@
   "message.required_empty": "Required field left empty.",
   "message.not_judged": "the drafting check did not read this answer.",
   "message.judge_sentence": "sentence {detail}",
-  "message.judge_unsupported": "sentence {detail} is not supported by its cited facts."
+  "message.judge_unsupported": "sentence {detail} is not supported by its cited facts.",
+  "message.interrupted_drafting": "Interrupted: ApplAI stopped during drafting.",
+  "message.interrupted_filling": "Interrupted: ApplAI stopped during filling.",
+  "message.interrupted_review": "Interrupted: ApplAI stopped during review."
 }
