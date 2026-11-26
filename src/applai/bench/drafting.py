@@ -146,11 +146,15 @@ def run_drafting_bench(backend: Backend) -> bool:
     return _failures(totals) == []
 
 
-def _draft(runner: AgentRunner, case: OfferCase, profile: Profile, totals: _Totals) -> None:
+def case_fields(case: OfferCase) -> list[dict[str, Any]]:
+    """An offer case's form: each question as a textarea, then the cover letter's if asked."""
     labels = [*case.questions, *([_LETTER_LABEL] if case.cover_letter else [])]
-    fields: list[dict[str, Any]] = [
-        {"label": label, "type": "textarea", "required": False, "options": []} for label in labels
-    ]
+    return [{"label": label, "type": "textarea", "required": False, "options": []}
+            for label in labels]  # fmt: skip
+
+
+def _draft(runner: AgentRunner, case: OfferCase, profile: Profile, totals: _Totals) -> None:
+    fields = case_fields(case)
     questions, letter = drafted_fields(fields)
     offer: dict[str, str | None] = {
         "title": case.title, "company": case.company, "description": case.description,

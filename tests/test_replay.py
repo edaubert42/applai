@@ -28,8 +28,10 @@ from applai.profile import Profile, load_profile
 DEMO_DIR = Path(__file__).parents[1] / "demo" / "candidate"
 TITLE, COMPANY = "Data engineer", "Coquelicot Logistique"
 DESCRIPTION = "Coquelicot Logistique livre les commerces de la région lyonnaise."
-FIELDS = [{"label": "Pourquoi Coquelicot Logistique ?", "type": "textarea", "required": False,
-           "options": []}]  # fmt: skip
+QUESTION = "Pourquoi Coquelicot Logistique ?"
+FIELDS: list[dict[str, Any]] = [
+    {"label": QUESTION, "type": "textarea", "required": False, "options": []}
+]
 SENTENCES = [{"text": "J'ai construit la prévision utilisée par 120 entrepôts.", "facts": ["F3"]}]
 USAGE = Usage(model="claude-haiku-5-5-20261001", duration_ms=8400, input_tokens=3100,
               output_tokens=420, cost_usd=0.0123)  # fmt: skip
