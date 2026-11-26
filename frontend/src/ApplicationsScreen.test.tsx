@@ -496,3 +496,108 @@ describe("dropping an application", () => {
     expect(calls.filter((call) => call.method === "POST")).toEqual([]);
   });
 });
+
+describe("retrying a stage that failed", () => {
+  const stages = [
+    ["draft", "form_captured", { draft_error: "drafting_failed" }, "drafting"],
+    ["fill", "answers_checked", { fill_error: "fill_not_loaded" }, "filling"],
+    ["review", "filled", { review_error: "review_failed" }, "review"],
+  ] as const;
+  const li = (title: string) => screen.getByRole("heading", { name: title }).closest("li") as HTMLElement;
+  const rowOf = (title: string) => within(li(title));
+  const boardOf = (groups: Parameters<typeof applicationsRoutes>[0]) => applicationsRoutes(groups)["GET /api/applications"];
+
+  async function openBoard(routes: Record<string, unknown>, language: "fr" | "en" = "fr") {
+    const calls = fakeApi({ ...reviewRoutes(), ...applicationsRoutes(), ...routes });
+    if (language === "en") localStorage.setItem("applai.language", "en");
+    render(<App />);
+    const words = language === "en" ? en : fr;
+    fireEvent.click(screen.getByRole("button", { name: words["nav.applications"] }));
+    await screen.findAllByRole("region");
+    return calls;
+  }
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("offers Retry next to each of the three errors and on no row without one, in %s", async (language, words) => {
+    const failed = stages.map(([stage, state, error], i) =>
+      aRow({ id: i + 1, offer_id: i + 1, title: `Poste ${stage}`, state, ...error }),
+    );
+    const fine = aRow({ id: 9, offer_id: 9, title: "Poste sain", state: "form_captured" });
+    // a fill_error past answers_checked shows on final validation, not on the row
+    const past = aRow({ id: 10, offer_id: 10, title: "Poste relu", state: "reviewed", fill_error: "fill_again_not_loaded" });
+    await openBoard(applicationsRoutes({ in_progress: [...failed, fine, past] }), language);
+
+    for (const [stage] of stages) {
+      expect(rowOf(`Poste ${stage}`).getByRole("button", { name: words["applications.retry"] })).toBeTruthy();
+    }
+    for (const title of ["Poste sain", "Poste relu"]) {
+      expect(rowOf(title).queryByRole("button", { name: words["applications.retry"] })).toBeNull();
+    }
+  });
+
+  it.each(stages)("calls the %s retry once on a double click, then shows the running agent", async (stage, state, error, running) => {
+    const row = aRow({ id: 4, offer_id: 4, title: "Agent de quai", state, ...error });
+    let board = boardOf({ in_progress: [row] });
+    const calls = await openBoard({
+      "GET /api/applications": () => board,
+      [`POST /api/applications/4/${stage}`]: () => {
+        board = boardOf({ in_progress: [{ ...row, draft_error: null, fill_error: null, review_error: null, running }] });
+        return new Response(null, { status: 202 });
+      },
+    });
+    const button = rowOf("Agent de quai").getByRole("button", { name: fr["applications.retry"] }) as HTMLButtonElement;
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(button.disabled).toBe(true);
+
+    expect((await rowOf("Agent de quai").findByRole("status")).textContent).toBe(fr[`applications.running.${running}`]);
+    expect(rowOf("Agent de quai").queryByRole("button", { name: fr["applications.retry"] })).toBeNull();
+    expect(calls.filter((call) => call.method === "POST")).toEqual([
+      { method: "POST", path: `/api/applications/4/${stage}`, body: undefined },
+    ]);
+  });
+
+  it("loads the board again on a 409, and shows where the row stands", async () => {
+    const row = aRow({ id: 4, offer_id: 4, state: "form_captured", draft_error: "drafting_failed" });
+    let board = boardOf({ in_progress: [row] });
+    await openBoard({
+      "GET /api/applications": () => board,
+      "POST /api/applications/4/draft": () => {
+        board = boardOf({ waiting: [aRow({ id: 4, offer_id: 4, state: "drafted" })] });
+        return new Response("{}", { status: 409 });
+      },
+    });
+    fireEvent.click(rowOf("Chef de quai").getByRole("button", { name: fr["applications.retry"] }));
+
+    expect(await screen.findByText(fr["applications.state.drafted"])).toBeTruthy();
+    expect(screen.queryByRole("button", { name: fr["applications.retry"] })).toBeNull();
+  });
+
+  it("says so on the row after another failure, keeps the button, and a second click retries again", async () => {
+    const row = aRow({ id: 4, offer_id: 4, state: "filled", review_error: "review_failed" });
+    let fails = true;
+    let board = boardOf({ in_progress: [row] });
+    const calls = await openBoard({
+      "GET /api/applications": () => board,
+      "POST /api/applications/4/review": () => {
+        if (fails) return new Response("boom", { status: 500 });
+        board = boardOf({ in_progress: [{ ...row, review_error: null, running: "review" }] });
+        return new Response(null, { status: 202 });
+      },
+    });
+    const button = () => rowOf("Chef de quai").getByRole("button", { name: fr["applications.retry"] }) as HTMLButtonElement;
+    fireEvent.click(button());
+
+    expect(await rowOf("Chef de quai").findByText(fr["applications.retry_failed"])).toBeTruthy();
+    expect(rowOf("Chef de quai").getByText(fill(fr["applications.review.error"], { error: "review_failed" }))).toBeTruthy();
+    expect(button().disabled).toBe(false);
+
+    fails = false;
+    fireEvent.click(button());
+    expect((await rowOf("Chef de quai").findByRole("status")).textContent).toBe(fr["applications.running.review"]);
+    expect(rowOf("Chef de quai").queryByText(fr["applications.retry_failed"])).toBeNull();
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(2);
+  });
+});

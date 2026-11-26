@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ApiError, DROP_REASONS, GROUPS, api, type Applications, type DropReason, type Row } from "./api";
+import { ApiError, DROP_REASONS, GROUPS, api, type Applications, type DropReason, type RetryStage, type Row } from "./api";
 import CorrectScreen from "./CorrectScreen";
 import DeclinePanel from "./DeclinePanel";
 import FinalValidationScreen from "./FinalValidationScreen";
@@ -133,6 +133,15 @@ function ApplicationRow({
   // Only the errors the row shows: a fill_error past answers_checked shows on final validation.
   const reviewError = row.state === "filled" ? row.review_error : null;
   const hasError = row.draft_error !== null || (row.state === "answers_checked" && row.fill_error !== null) || reviewError !== null;
+  // The stage the candidate can start again: the one whose error the row shows.
+  const retry: RetryStage | null =
+    row.state === "form_captured" && row.draft_error !== null
+      ? "draft"
+      : row.state === "answers_checked" && row.fill_error !== null
+        ? "fill"
+        : reviewError !== null
+          ? "review"
+          : null;
   // A stage's failure; a stage a stopped ApplAI cut short says so in a sentence of its own.
   const failure = (key: MessageKey, error: string) =>
     error.startsWith("interrupted_") ? serverMessage(error, lookup) : t(key, { error: serverMessage(error, lookup) });
@@ -148,6 +157,26 @@ function ApplicationRow({
   const canDrop = id !== null && row.state !== "sent" && row.state !== "dropped";
   const [dropBusy, setDropBusy] = useState(false);
   const [dropFailed, setDropFailed] = useState(false);
+  const [retryBusy, setRetryBusy] = useState(false);
+  const [retryFailed, setRetryFailed] = useState(false);
+
+  function retryStage(id: number, stage: RetryStage) {
+    if (retryBusy) return; // clicked again while the retry is on its way
+    setRetryBusy(true);
+    setRetryFailed(false);
+    api.retryStage(id, stage).then(
+      () => {
+        setRetryBusy(false);
+        onStale(); // 202: the board shows the agent running
+      },
+      (error: unknown) => {
+        setRetryBusy(false);
+        // 409: the application moved on meanwhile; the board shows where it stands.
+        if (error instanceof ApiError && error.status === 409) onStale();
+        else setRetryFailed(true);
+      },
+    );
+  }
 
   function drop(id: number, reasons: DropReason[], note: string) {
     if (dropBusy) return; // Enter pressed again while the drop is on its way
@@ -277,6 +306,16 @@ function ApplicationRow({
       {reviewError && (
         <p role="alert" className="basis-full text-sm text-minus">
           {failure("applications.review.error", reviewError)}
+        </p>
+      )}
+      {id !== null && retry && (
+        <button type="button" disabled={retryBusy} onClick={() => retryStage(id, retry)} className={button}>
+          {t("applications.retry")}
+        </button>
+      )}
+      {retryFailed && (
+        <p role="alert" className="basis-full text-sm text-minus">
+          {t("applications.retry_failed")}
         </p>
       )}
       {canPaste && (

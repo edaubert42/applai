@@ -150,6 +150,8 @@
   "applications.next.validated": "Your turn: send",
   "applications.draft.error": "Drafting failed: {error}.",
   "applications.review.error": "Review failed: {error}.",
+  "applications.retry": "Retry",
+  "applications.retry_failed": "The retry did not start: try again.",
   "trace.open": "Trace",
   "trace.title": "Trace of the application",
   "trace.error": "The trace could not be loaded.",
