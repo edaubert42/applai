@@ -16,6 +16,10 @@ on:
         required: true
         type: number
 
+# A command left running in the background ends the agent's turn before it reports.
+env:
+  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+
 jobs:
   code:
     # Job level, not workflow level: a comment whose job is skipped must not cancel a queued restart.

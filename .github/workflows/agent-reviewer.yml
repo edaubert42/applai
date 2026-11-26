@@ -11,6 +11,10 @@ concurrency:
   group: agent-reviewer-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# A command left running in the background ends the agent's turn before it reports.
+env:
+  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+
 jobs:
   review:
     if: >-

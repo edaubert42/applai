@@ -14,6 +14,10 @@ on:
 
 permissions: {}
 
+# A command left running in the background ends the agent's turn before it reports.
+env:
+  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+
 jobs:
   learn:
     # Once per merged PR of this repository; by hand, for the owner only.
