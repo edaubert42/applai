@@ -1,0 +1,1229 @@
+{
+  "cv_tailoring:4480ca3d52d8e96811ed7674e9d217b06359e7669f8789d6286e2f0be3ec36b9": {
+    "output": {
+      "changes": [
+        {
+          "facts": [],
+          "op": "reorder",
+          "order": [
+            1,
+            0,
+            2
+          ],
+          "path": "skills",
+          "text": null
+        }
+      ],
+      "headline": "Data engineer freelance",
+      "photo": "with",
+      "photo_reason": "Myrtille Commerce looks like a French company: its offer is in French, its site is in Lyon and it pays a daily rate in euros, and the rule calls for a photo for French companies."
+    },
+    "usage": {
+      "cost_usd": 0.091319,
+      "duration_ms": 11680,
+      "input_tokens": 10033,
+      "model": "claude-opus-5-5",
+      "output_tokens": 1034
+    }
+  },
+  "cv_tailoring:b45b69fd8b91f2482d865686dc838f26c2d0fa979d37b13ad5be5c59cb8cb172": {
+    "output": {
+      "changes": [],
+      "headline": "Data engineer plateforme",
+      "photo": "with",
+      "photo_reason": "Glycine Réseaux est une entreprise française (réseaux de chaleur autour de Lyon, CDI à Villeurbanne), donc la règle demande une photo."
+    },
+    "usage": {
+      "cost_usd": 0.084915,
+      "duration_ms": 9821,
+      "input_tokens": 10055,
+      "model": "claude-opus-5-5",
+      "output_tokens": 705
+    }
+  },
+  "cv_tailoring:cdee811cfde4f029c8256a8d1cdbefb7409ed2b98b71c5460078318832bddd7d": {
+    "output": {
+      "changes": [
+        {
+          "facts": [],
+          "op": "reorder",
+          "order": [
+            1,
+            0,
+            2
+          ],
+          "path": "skills",
+          "text": null
+        }
+      ],
+      "headline": "Data engineer",
+      "photo": "unknown",
+      "photo_reason": "The offer only says Lavande Freight works from a Lyon office, which does not show whether the company is French, so the rule cannot be applied."
+    },
+    "usage": {
+      "cost_usd": 0.092691,
+      "duration_ms": 15268,
+      "input_tokens": 9947,
+      "model": "claude-opus-5-5",
+      "output_tokens": 1137
+    }
+  },
+  "cv_tailoring:db81a0687741ad14214f96d7c6057045bf1748d33f10e5e79d96cc38154f5cb4": {
+    "output": {
+      "changes": [],
+      "headline": "Data engineer",
+      "photo": "with",
+      "photo_reason": "Coquelicot Logistique est une entreprise française basée à Lyon, et la règle demande une photo pour les entreprises françaises."
+    },
+    "usage": {
+      "cost_usd": 0.094468,
+      "duration_ms": 8410,
+      "input_tokens": 10067,
+      "model": "claude-opus-5-5",
+      "output_tokens": 697
+    }
+  },
+  "cv_tailoring:f4511904759093772537bb9ba04dfbd5df4f4fa446f8cdd584d2558803a90e30": {
+    "output": {
+      "changes": [
+        {
+          "facts": [],
+          "op": "reorder",
+          "order": [
+            1,
+            0,
+            2
+          ],
+          "path": "experience[0].bullets",
+          "text": null
+        },
+        {
+          "facts": [],
+          "op": "reorder",
+          "order": [
+            1,
+            0,
+            2
+          ],
+          "path": "skills",
+          "text": null
+        }
+      ],
+      "headline": "Analytics engineer",
+      "photo": "with",
+      "photo_reason": "Sureau Mobilité operates in ten French cities and hires remote staff in France, so it reads as a French company and the rule calls for a photo."
+    },
+    "usage": {
+      "cost_usd": 0.093983,
+      "duration_ms": 14142,
+      "input_tokens": 10056,
+      "model": "claude-opus-5-5",
+      "output_tokens": 1158
+    }
+  },
+  "drafting:41b32b84fbe294c492af1a12e68d02a26158c8787fc2273a3635ef289878c65d": {
+    "output": {
+      "answers": {
+        "0": [
+          {
+            "facts": [
+              "F1"
+            ],
+            "text": "Je suis data engineer depuis six ans, d'abord chez Brindille Logistique puis chez Ventolune Énergie, et la logistique est un domaine que je connais de l'intérieur."
+          },
+          {
+            "facts": [
+              "F3"
+            ],
+            "text": "Chez Brindille Logistique, j'ai construit la prévision des délais de livraison utilisée par 120 entrepôts, un travail proche des prévisions de charge que vous voulez mettre en place pour vos entrepôts."
+          },
+          {
+            "facts": [
+              "F1",
+              "F3"
+            ],
+            "text": "Construire vos pipelines de données de livraison me permettrait de remettre cette expérience au service d'un logisticien."
+          }
+        ],
+        "1": [
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "Chez Ventolune Énergie, j'ai repris le pipeline nocturne, qui prenait 6 heures."
+          },
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "En passant à des chargements incrémentaux, je l'ai ramené à 40 minutes."
+          }
+        ]
+      }
+    },
+    "usage": {
+      "cost_usd": 0.09424,
+      "duration_ms": 9977,
+      "input_tokens": 9606,
+      "model": "claude-opus-5-5",
+      "output_tokens": 870
+    }
+  },
+  "drafting:8961401eed9a2ea684869f6ff9a586e6167ecf397ede844864f919e355249720": {
+    "output": {
+      "answers": {},
+      "cover_letter": [
+        [
+          {
+            "facts": [
+              "F1"
+            ],
+            "text": "Data engineer depuis six ans, chez Brindille Logistique puis chez Ventolune Énergie, je construis des pipelines de données pour la logistique et l'énergie."
+          },
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "Votre mission freelance, qui consiste à migrer vos chargements de données vers des traitements incrémentaux, correspond à un travail que j'ai déjà mené."
+          }
+        ],
+        [
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "Chez Ventolune Énergie, j'ai fait passer le pipeline nocturne de 6 heures à 40 minutes grâce à des chargements incrémentaux."
+          },
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "C'est cette expérience que je souhaite apporter à Myrtille Commerce pour la migration de vos chargements."
+          }
+        ],
+        [
+          {
+            "facts": [
+              "F3"
+            ],
+            "text": "Chez Brindille Logistique, j'ai construit la prévision des délais de livraison utilisée par 120 entrepôts."
+          },
+          {
+            "facts": [
+              "F3"
+            ],
+            "text": "J'ai donc l'habitude de livrer des traitements de données dont dépendent de nombreux sites au quotidien."
+          }
+        ],
+        [
+          {
+            "facts": [
+              "F1",
+              "F2"
+            ],
+            "text": "Je serais heureuse d'échanger avec vous sur la manière dont mes six années de data engineering peuvent servir votre passage aux traitements incrémentaux."
+          }
+        ]
+      ]
+    },
+    "usage": {
+      "cost_usd": 0.097756,
+      "duration_ms": 13232,
+      "input_tokens": 9423,
+      "model": "claude-opus-5-5",
+      "output_tokens": 1119
+    }
+  },
+  "drafting:a5b5cb3aaa87a4887f1d5b5e1d3c7df51c232ba9c16a046b850e7785bf580c31": {
+    "output": {
+      "answers": {
+        "0": [
+          {
+            "facts": [
+              "F1"
+            ],
+            "text": "I have been a data engineer for six years, first in logistics at Brindille Logistique, then in energy at Ventolune Énergie."
+          },
+          {
+            "facts": [
+              "F3"
+            ],
+            "text": "At Brindille Logistique, I built the delivery-time forecast used by 120 warehouses, which is close to the pipelines behind your delivery-time estimates."
+          },
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "At Ventolune Énergie, I cut the nightly pipeline from 6 hours to 40 minutes with incremental loads, and I want to bring that work on reliable pipelines to Lavande Freight."
+          }
+        ],
+        "1": [
+          {
+            "facts": [
+              "F1",
+              "F3"
+            ],
+            "text": "At Brindille Logistique, where I worked as a data engineer, I built the delivery-time forecast."
+          },
+          {
+            "facts": [
+              "F3"
+            ],
+            "text": "This forecast was used by 120 warehouses."
+          }
+        ]
+      }
+    },
+    "usage": {
+      "cost_usd": 0.08111,
+      "duration_ms": 10144,
+      "input_tokens": 9553,
+      "model": "claude-opus-5-5",
+      "output_tokens": 707
+    }
+  },
+  "drafting:e54906c9959bb87ea6320209aef41b6d19364ec2eb6ff43ef7283c4f5de616c4": {
+    "output": {
+      "answers": {
+        "0": [
+          {
+            "facts": [
+              "F1"
+            ],
+            "text": "J'attends de mon prochain poste qu'il me permette de mettre à profit six ans de data engineering, acquis chez Brindille Logistique puis chez Ventolune Énergie."
+          },
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "Je souhaite continuer à rendre les traitements de données plus rapides et plus fiables, comme lorsque j'ai réduit le pipeline nocturne de Ventolune Énergie de 6 heures à 40 minutes grâce à des chargements incrémentaux."
+          },
+          {
+            "facts": [
+              "F3"
+            ],
+            "text": "Je cherche aussi un poste où mon travail sert directement aux équipes sur le terrain, comme la prévision des délais de livraison que j'ai construite chez Brindille Logistique et qu'utilisent 120 entrepôts."
+          }
+        ]
+      },
+      "cover_letter": [
+        [
+          {
+            "facts": [
+              "F1"
+            ],
+            "text": "Je vous propose ma candidature au poste d'analytics engineer chez Sureau Mobilité."
+          },
+          {
+            "facts": [
+              "F1"
+            ],
+            "text": "Je suis data engineer depuis six ans, d'abord chez Brindille Logistique, puis chez Ventolune Énergie."
+          }
+        ],
+        [
+          {
+            "facts": [
+              "F3"
+            ],
+            "text": "Chez Brindille Logistique, j'ai construit la prévision des délais de livraison utilisée par 120 entrepôts."
+          },
+          {
+            "facts": [
+              "F3"
+            ],
+            "text": "Je souhaite continuer à produire ce genre de données utiles au quotidien pour vos équipes d'exploitation."
+          }
+        ],
+        [
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "Chez Ventolune Énergie, j'ai réduit le pipeline nocturne de 6 heures à 40 minutes grâce à des chargements incrémentaux."
+          },
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "J'aimerais apporter le même souci de rapidité et de fiabilité à la modélisation de vos données de flotte."
+          }
+        ],
+        [
+          {
+            "facts": [
+              "F1"
+            ],
+            "text": "Je serais heureuse d'échanger avec vous sur la façon dont mes six ans de data engineering peuvent servir Sureau Mobilité."
+          }
+        ]
+      ]
+    },
+    "usage": {
+      "cost_usd": 0.119144,
+      "duration_ms": 21656,
+      "input_tokens": 9624,
+      "model": "claude-opus-5-5",
+      "output_tokens": 2108
+    }
+  },
+  "drafting:f477af5fe17124783d5e91fce984e3bb43103c172e06f8469ff5781e292b6417": {
+    "output": {
+      "answers": {
+        "0": [
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "Chez Ventolune Énergie, le pipeline nocturne prenait 6 heures."
+          },
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "Je l'ai ramené à 40 minutes en passant à des chargements incrémentaux."
+          },
+          {
+            "facts": [
+              "F2"
+            ],
+            "text": "C'est une expérience que je peux mettre au service de la réduction du temps de vos traitements nocturnes."
+          }
+        ]
+      }
+    },
+    "usage": {
+      "cost_usd": 0.084868,
+      "duration_ms": 7797,
+      "input_tokens": 9417,
+      "model": "claude-opus-5-5",
+      "output_tokens": 477
+    }
+  },
+  "drafting_judge:21654de3d5343a082f83913fcc6a0075440e5cce46f0fbf6074361a442af38f1": {
+    "output": {
+      "verdicts": [
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": "The fact states one forecast used by 120 warehouses, not a habit of delivering such processing nor any daily dependence on it.",
+          "supported": false
+        },
+        {
+          "reason": null,
+          "supported": true
+        }
+      ]
+    },
+    "usage": {
+      "cost_usd": 0.044678,
+      "duration_ms": 6222,
+      "input_tokens": 9458,
+      "model": "claude-sonnet-5-5",
+      "output_tokens": 685
+    }
+  },
+  "drafting_judge:78cc106b601cba35aa47cbbd3f91ea793121e3a9c197a57edf75f17551196874": {
+    "output": {
+      "verdicts": [
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": "The fact states a shorter nightly pipeline run through incremental loads, not any work on pipeline reliability.",
+          "supported": false
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        }
+      ]
+    },
+    "usage": {
+      "cost_usd": 0.042405,
+      "duration_ms": 7801,
+      "input_tokens": 9132,
+      "model": "claude-sonnet-5-5",
+      "output_tokens": 918
+    }
+  },
+  "drafting_judge:a7f8d6a556d1f434dcd9b26d3376cf1fe89f6551221ac7cbb0df4cc1626d64a9": {
+    "output": {
+      "verdicts": [
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        }
+      ]
+    },
+    "usage": {
+      "cost_usd": 0.037902,
+      "duration_ms": 2734,
+      "input_tokens": 8844,
+      "model": "claude-sonnet-5-5",
+      "output_tokens": 253
+    }
+  },
+  "drafting_judge:d92b7ca54687f5bd3f8a25347472e3622cbd2a2b8a77c2ae0f14013b83203d6d": {
+    "output": {
+      "verdicts": [
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": "The fact states a faster pipeline, not any past work making data processing more reliable, which \"continuer\" claims.",
+          "supported": false
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": "The fact states a speed gain but nothing about reliability, which \"le même souci\" attributes to past work.",
+          "supported": false
+        },
+        {
+          "reason": null,
+          "supported": true
+        }
+      ]
+    },
+    "usage": {
+      "cost_usd": 0.047478,
+      "duration_ms": 7101,
+      "input_tokens": 9813,
+      "model": "claude-sonnet-5-5",
+      "output_tokens": 823
+    }
+  },
+  "drafting_judge:ebe96d69737a7403b3f69a63063b10e84be098efde3173c143fd2fdad5ba05a9": {
+    "output": {
+      "verdicts": [
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        },
+        {
+          "reason": null,
+          "supported": true
+        }
+      ]
+    },
+    "usage": {
+      "cost_usd": 0.041498,
+      "duration_ms": 4429,
+      "input_tokens": 9188,
+      "model": "claude-sonnet-5-5",
+      "output_tokens": 475
+    }
+  },
+  "triage:4274c2328905a6ce013eb3a7444fd98f8e5a8828d3d9667bf45e924ed3782c64": {
+    "output": {
+      "about": "Camélia Immobilier gère des résidences étudiantes. L'offre ne décrit pas davantage l'entreprise.",
+      "cons": [
+        {
+          "text": "Contrat de stage : ni CDI ni freelance",
+          "verdict": "−"
+        },
+        {
+          "text": "Gratification légale, loin du minimum de 52 000 € visé",
+          "verdict": "−"
+        },
+        {
+          "text": "Réservé à un étudiant de dernière année : profil de six ans d'expérience surdimensionné",
+          "verdict": "−"
+        },
+        {
+          "text": "Stack technique, taille de l'équipe et date de début non précisées",
+          "verdict": "?"
+        }
+      ],
+      "fixed_term_months": null,
+      "mission": [
+        "Automatiser les rapports d'occupation des résidences étudiantes",
+        "Stage de six mois en data engineering, à Lyon, sur site"
+      ],
+      "pros": [
+        "Intitulé « Stage data engineer » : le rôle visé est présent",
+        "Lieu : Lyon, comme demandé",
+        "Automatisation de rapports : proche du pipeline nocturne réduit de 6 h à 40 min (F2)"
+      ],
+      "score": 20,
+      "tags": {
+        "contract": {
+          "text": "Stage de six mois, hors CDI et freelance",
+          "verdict": "−"
+        },
+        "experience": {
+          "text": "Étudiant en dernière année d'école d'ingénieur, aucune durée chiffrée",
+          "verdict": "−"
+        },
+        "location": {
+          "text": "Lyon",
+          "verdict": "+"
+        },
+        "salary": {
+          "text": "Gratification légale, montant non précisé",
+          "verdict": "−"
+        },
+        "work_mode": {
+          "text": "Sur site",
+          "verdict": "+"
+        }
+      },
+      "work_mode": "onsite",
+      "years_required": null
+    },
+    "usage": {
+      "cost_usd": 0.004425,
+      "duration_ms": 17557,
+      "input_tokens": 23731,
+      "model": "claude-haiku-5-5",
+      "output_tokens": 3963
+    }
+  },
+  "triage:5b1013c05f383bb242380b24a0d1128d88bbbd5e6885f636375e96a78b2da4fe": {
+    "output": {
+      "about": "Coquelicot Logistique livre les commerces de proximité de la région lyonnaise. L'entreprise s'appuie sur quatre entrepôts.",
+      "cons": [
+        {
+          "text": "Hybride et non full remote : deux jours de présence sur site par semaine",
+          "verdict": "−"
+        },
+        {
+          "text": "Outils et stack technique non précisés",
+          "verdict": "?"
+        },
+        {
+          "text": "Taille de l'équipe et organisation data non précisées",
+          "verdict": "?"
+        }
+      ],
+      "fixed_term_months": null,
+      "mission": [
+        "Construire les pipelines de données de livraison",
+        "Construire les prévisions de charge des entrepôts"
+      ],
+      "pros": [
+        "Poste de data engineer, rôle visé",
+        "Lyon 3e, lieu visé",
+        "Salaire de 54 000 à 60 000 € brut par an, au-dessus du minimum de 52 000 €",
+        "Six ans d'expérience de data engineer couvrent les deux ans demandés",
+        "Prévisions de livraison déjà construites pour 120 entrepôts (F3), proche des prévisions de charge demandées"
+      ],
+      "score": 88,
+      "tags": {
+        "contract": {
+          "text": "CDI",
+          "verdict": "+"
+        },
+        "experience": {
+          "text": "Deux ans d'expérience demandés",
+          "verdict": "+"
+        },
+        "location": {
+          "text": "Lyon 3e",
+          "verdict": "+"
+        },
+        "salary": {
+          "text": "54 000 à 60 000 € brut par an",
+          "verdict": "+"
+        },
+        "work_mode": {
+          "text": "Hybride : deux jours de télétravail par semaine",
+          "verdict": "+"
+        }
+      },
+      "work_mode": "hybrid",
+      "years_required": 2
+    },
+    "usage": {
+      "cost_usd": 0.00295,
+      "duration_ms": 8442,
+      "input_tokens": 10150,
+      "model": "claude-haiku-5-5",
+      "output_tokens": 1841
+    }
+  },
+  "triage:8030b70093e57ef33aab71430a42494ca8a84b6c2b651e378527ca4a874ef0ea": {
+    "output": {
+      "about": "Bruyère Santé gère les plannings de quarante cliniques.",
+      "cons": [
+        {
+          "text": "Saint-Étienne, hors Lyon et hors télétravail visé",
+          "verdict": "−"
+        },
+        {
+          "text": "Salaire de 50 000 € brut, sous le minimum de 52 000 €",
+          "verdict": "−"
+        },
+        {
+          "text": "Sur site quatre jours par semaine, contraire à Remote in France",
+          "verdict": "−"
+        },
+        {
+          "text": "Organisation du cinquième jour de travail non précisée",
+          "verdict": "?"
+        }
+      ],
+      "fixed_term_months": null,
+      "mission": [
+        "Construire les modèles de données d'activité",
+        "Construire les indicateurs destinés aux directions"
+      ],
+      "pros": [
+        "Poste d'analytics engineer, rôle visé",
+        "CDI, contrat visé",
+        "Deux ans d'expérience requis, couverts par six ans de data engineering"
+      ],
+      "score": 25,
+      "tags": {
+        "contract": {
+          "text": "CDI",
+          "verdict": "+"
+        },
+        "experience": {
+          "text": "2 ans d'expérience requis",
+          "verdict": "+"
+        },
+        "location": {
+          "text": "Saint-Étienne",
+          "verdict": "−"
+        },
+        "salary": {
+          "text": "50 000 € brut/an, sous le minimum de 52 000 €",
+          "verdict": "−"
+        },
+        "work_mode": {
+          "text": "Sur site quatre jours par semaine",
+          "verdict": "−"
+        }
+      },
+      "work_mode": "onsite",
+      "years_required": 2
+    },
+    "usage": {
+      "cost_usd": 0.002637,
+      "duration_ms": 8691,
+      "input_tokens": 10121,
+      "model": "claude-haiku-5-5",
+      "output_tokens": 1993
+    }
+  },
+  "triage:cbf5aa586435be4319cc86d0d39d538641acd10afe8b9b99210ce1af49e00274": {
+    "output": {
+      "about": "Sureau Mobilité loue des vélos électriques aux entreprises dans dix villes françaises. L'offre ne décrit pas davantage l'entreprise.",
+      "cons": [
+        {
+          "text": "Outils au-delà de dbt non précisés",
+          "verdict": "?"
+        },
+        {
+          "text": "Taille de l'équipe data et périmètre exact non précisés",
+          "verdict": "?"
+        },
+        {
+          "text": "Processus de recrutement et date de début non précisés",
+          "verdict": "?"
+        }
+      ],
+      "fixed_term_months": null,
+      "mission": [
+        "Modéliser les données de flotte avec dbt",
+        "Construire les tableaux de bord des équipes d'exploitation"
+      ],
+      "pros": [
+        "Poste d'analytics engineer, rôle visé",
+        "Télétravail complet depuis la France",
+        "CDI à 55 000 € brut par an, au-dessus du minimum visé",
+        "Deux ans d'expérience demandés, six ans d'expérience du candidat",
+        "Pipeline optimisé (F2) et prévisions de délais (F3) proches du besoin"
+      ],
+      "score": 88,
+      "tags": {
+        "contract": {
+          "text": "CDI",
+          "verdict": "+"
+        },
+        "experience": {
+          "text": "2 ans d'expérience requis",
+          "verdict": "+"
+        },
+        "location": {
+          "text": "Télétravail depuis la France",
+          "verdict": "+"
+        },
+        "salary": {
+          "text": "55 000 € brut par an",
+          "verdict": "+"
+        },
+        "work_mode": {
+          "text": "Télétravail complet",
+          "verdict": "+"
+        }
+      },
+      "work_mode": "remote",
+      "years_required": 2
+    },
+    "usage": {
+      "cost_usd": 0.002311,
+      "duration_ms": 6679,
+      "input_tokens": 10139,
+      "model": "claude-haiku-5-5",
+      "output_tokens": 1335
+    }
+  },
+  "triage:d8aac3fdb39d520450eeea65058e4dca8d393e258a0a94879be8f94a97a3a362": {
+    "output": {
+      "about": "Absinthe Studio crée des jeux mobiles. L'offre ne dit rien de plus sur l'entreprise.",
+      "cons": [
+        {
+          "text": "Bordeaux : hors Lyon et hors télétravail en France.",
+          "verdict": "−"
+        },
+        {
+          "text": "Sur site cinq jours par semaine, sans télétravail.",
+          "verdict": "−"
+        },
+        {
+          "text": "Salaire de 42 000 € brut, sous le minimum de 52 000 €.",
+          "verdict": "−"
+        },
+        {
+          "text": "Autres missions, stack technique et équipe non précisées.",
+          "verdict": "?"
+        }
+      ],
+      "fixed_term_months": null,
+      "mission": [
+        "Construire les pipelines de nos données de jeu.",
+        "Les autres missions, outils et l'équipe ne sont pas précisés dans l'offre."
+      ],
+      "pros": [
+        "Intitulé Data engineer, rôle visé.",
+        "CDI, contrat visé.",
+        "Deux ans requis, le candidat en a six.",
+        "Construction de pipelines de données, comme le chargement incrémental de Ventolune Énergie."
+      ],
+      "score": 12,
+      "tags": {
+        "contract": {
+          "text": "CDI",
+          "verdict": "+"
+        },
+        "experience": {
+          "text": "2 ans requis, le candidat en a six",
+          "verdict": "+"
+        },
+        "location": {
+          "text": "Bordeaux, ni Lyon ni France entière en télétravail",
+          "verdict": "−"
+        },
+        "salary": {
+          "text": "42 000 € brut par an, sous le minimum de 52 000 €",
+          "verdict": "−"
+        },
+        "work_mode": {
+          "text": "Sur site cinq jours par semaine, sans télétravail",
+          "verdict": "−"
+        }
+      },
+      "work_mode": "onsite",
+      "years_required": 2
+    },
+    "usage": {
+      "cost_usd": 0.002759,
+      "duration_ms": 9862,
+      "input_tokens": 10112,
+      "model": "claude-haiku-5-5",
+      "output_tokens": 2241
+    }
+  },
+  "triage:de3cf02462252dac23188e791d65368aad8b623575a627673f001da011853bce": {
+    "output": {
+      "about": "Lavande Freight planifie le fret ferroviaire à travers l'Europe depuis son bureau de Lyon. L'offre ne décrit pas davantage l'entreprise.",
+      "cons": [
+        {
+          "text": "Rythme du télétravail non précisé",
+          "verdict": "?"
+        },
+        {
+          "text": "Stack technique non citée",
+          "verdict": "?"
+        },
+        {
+          "text": "Taille de l'équipe et volume de données non précisés",
+          "verdict": "?"
+        }
+      ],
+      "fixed_term_months": null,
+      "mission": [
+        "Construire les pipelines qui alimentent les estimations de délais de livraison",
+        "Assurer la fiabilité de ces pipelines"
+      ],
+      "pros": [
+        "Poste de data engineer, rôle visé",
+        "Lyon, lieu visé, en mode hybride",
+        "CDI à 56 000 EUR, au-dessus du minimum de 52 000 EUR",
+        "Pipelines et délais de livraison: proche de F2 et F3"
+      ],
+      "score": 85,
+      "tags": {
+        "contract": {
+          "text": "CDI",
+          "verdict": "+"
+        },
+        "experience": {
+          "text": "2 ans requis, 6 ans d'expérience",
+          "verdict": "+"
+        },
+        "location": {
+          "text": "Lyon",
+          "verdict": "+"
+        },
+        "salary": {
+          "text": "56 000 EUR par an, minimum 52 000 EUR",
+          "verdict": "+"
+        },
+        "work_mode": {
+          "text": "Hybride, à Lyon",
+          "verdict": "+"
+        }
+      },
+      "work_mode": "hybrid",
+      "years_required": 2
+    },
+    "usage": {
+      "cost_usd": 0.002749,
+      "duration_ms": 10102,
+      "input_tokens": 10105,
+      "model": "claude-haiku-5-5",
+      "output_tokens": 2223
+    }
+  },
+  "triage:e989e6f7c1c5512dceb9b63e6b274fdd193b388f24e2d74662975091e22a9e87": {
+    "output": {
+      "about": "Mélisse Médias vend des espaces publicitaires dans ses magazines régionaux. L'offre ne dit rien d'autre sur l'entreprise.",
+      "cons": [
+        {
+          "text": "Poste commercial, hors des rôles visés (data engineer, analytics engineer)",
+          "verdict": "−"
+        },
+        {
+          "text": "Poste à Paris, sur site : hors Lyon et hors télétravail",
+          "verdict": "−"
+        },
+        {
+          "text": "Cinq ans d'expérience commerciale demandés, alors que le profil est data",
+          "verdict": "−"
+        },
+        {
+          "text": "Fixe de 45 000 €, sous le minimum visé de 52 000 €",
+          "verdict": "−"
+        },
+        {
+          "text": "Montant de la part variable non précisé",
+          "verdict": "?"
+        }
+      ],
+      "fixed_term_months": null,
+      "mission": [
+        "Développer un portefeuille de clients grands comptes",
+        "Négocier leurs campagnes publicitaires"
+      ],
+      "pros": [
+        "Contrat CDI, comme visé"
+      ],
+      "score": 4,
+      "tags": {
+        "contract": {
+          "text": "CDI",
+          "verdict": "+"
+        },
+        "experience": {
+          "text": "5 ans d'expérience commerciale",
+          "verdict": "−"
+        },
+        "location": {
+          "text": "Paris",
+          "verdict": "−"
+        },
+        "salary": {
+          "text": "Fixe 45 000 € + variable",
+          "verdict": "−"
+        },
+        "work_mode": {
+          "text": "Sur site",
+          "verdict": "−"
+        }
+      },
+      "work_mode": "onsite",
+      "years_required": 5
+    },
+    "usage": {
+      "cost_usd": 0.00242,
+      "duration_ms": 7190,
+      "input_tokens": 10132,
+      "model": "claude-haiku-5-5",
+      "output_tokens": 1554
+    }
+  },
+  "triage:f440d656d107913758bf7c329f85969a58f832be045792f2c814be248c0160f2": {
+    "output": {
+      "about": "Myrtille Commerce vend des produits bio en ligne et dans vingt magasins.",
+      "cons": [
+        {
+          "text": "TJM de 550 € par jour : pas de salaire annuel à comparer au minimum de 52 000 €.",
+          "verdict": "?"
+        },
+        {
+          "text": "Années d'expérience requises non précisées.",
+          "verdict": "?"
+        },
+        {
+          "text": "Stack technique non précisée.",
+          "verdict": "?"
+        },
+        {
+          "text": "Au-delà des six mois, la poursuite de la mission n'est pas garantie.",
+          "verdict": "?"
+        }
+      ],
+      "fixed_term_months": null,
+      "mission": [
+        "Migrer les chargements de données existants vers des traitements incrémentaux.",
+        "Mission freelance de six mois, renouvelable."
+      ],
+      "pros": [
+        "Migration vers des traitements incrémentaux, comme la baisse de 6 h à 40 min (F2).",
+        "Rôle de data engineer, cible visée.",
+        "Lyon, cible de localisation.",
+        "Contrat freelance, cible visée."
+      ],
+      "score": 80,
+      "tags": {
+        "contract": {
+          "text": "Freelance, mission de six mois renouvelable",
+          "verdict": "+"
+        },
+        "experience": {
+          "text": "Non précisée",
+          "verdict": "?"
+        },
+        "location": {
+          "text": "Lyon",
+          "verdict": "+"
+        },
+        "salary": {
+          "text": "TJM 550 € par jour, non comparable au salaire annuel cible",
+          "verdict": "?"
+        },
+        "work_mode": {
+          "text": "Hybride, deux jours sur site par semaine ; pas de cible de mode de travail",
+          "verdict": "?"
+        }
+      },
+      "work_mode": "hybrid",
+      "years_required": null
+    },
+    "usage": {
+      "cost_usd": 0.002943,
+      "duration_ms": 11415,
+      "input_tokens": 10119,
+      "model": "claude-haiku-5-5",
+      "output_tokens": 2606
+    }
+  },
+  "triage:f5cf37d8b8f01dd5f79c938e0be49f937e29a2ea63e6a2d368390f6ac81c37fd": {
+    "output": {
+      "about": "Verveine Paiements traite les paiements des commerçants indépendants. L'offre ne donne pas d'autre information sur l'entreprise.",
+      "cons": [
+        {
+          "text": "Poste de développeur backend Java, hors des rôles visés (data engineer, analytics engineer)",
+          "verdict": "−"
+        },
+        {
+          "text": "4 ans d'expérience Java demandés ; aucune expérience Java dans les faits",
+          "verdict": "?"
+        },
+        {
+          "text": "Missions hors API non précisées, pas de lien avec les données",
+          "verdict": "?"
+        }
+      ],
+      "fixed_term_months": null,
+      "mission": [
+        "Développer les API en Java et Spring Boot",
+        "Autres missions : non précisées dans l'offre"
+      ],
+      "pros": [
+        "CDI à Lyon, lieu visé",
+        "Hybride, compatible avec un poste à Lyon",
+        "Salaire de 55 000 € brut, au-dessus du minimum de 52 000 €"
+      ],
+      "score": 25,
+      "tags": {
+        "contract": {
+          "text": "CDI",
+          "verdict": "+"
+        },
+        "experience": {
+          "text": "4 ans de Java demandés ; expérience Java absente des faits",
+          "verdict": "?"
+        },
+        "location": {
+          "text": "Lyon",
+          "verdict": "+"
+        },
+        "salary": {
+          "text": "55 000 € brut par an, au-dessus de 52 000 €",
+          "verdict": "+"
+        },
+        "work_mode": {
+          "text": "Hybride",
+          "verdict": "+"
+        }
+      },
+      "work_mode": "hybrid",
+      "years_required": 4
+    },
+    "usage": {
+      "cost_usd": 0.003045,
+      "duration_ms": 12554,
+      "input_tokens": 10105,
+      "model": "claude-haiku-5-5",
+      "output_tokens": 2815
+    }
+  },
+  "triage:feeeab0dd73d6ed657de11697abb66907dbabd6f07f81a443878a08ab40232f6": {
+    "output": {
+      "about": "Glycine Réseaux exploite des réseaux de chaleur urbains autour de Lyon. L'offre ne décrit pas davantage l'entreprise.",
+      "cons": [
+        {
+          "text": "Stack technique et outils non précisés",
+          "verdict": "?"
+        },
+        {
+          "text": "Rythme de télétravail non précisé pour le mode hybride",
+          "verdict": "?"
+        },
+        {
+          "text": "Taille de l'équipe et de l'entreprise non précisées",
+          "verdict": "?"
+        }
+      ],
+      "fixed_term_months": null,
+      "mission": [
+        "Industrialiser la collecte des mesures des chaufferies",
+        "Réduire le temps des traitements nocturnes"
+      ],
+      "pros": [
+        "Poste de data engineer, cible directe du candidat",
+        "CDI à Villeurbanne, dans l'agglomération lyonnaise",
+        "Salaire de 58 000 € brut/an, au-dessus du minimum de 52 000 €",
+        "Réduction de traitements nocturnes : le candidat a fait passer un pipeline nocturne de 6 h à 40 min",
+        "3 ans requis, le candidat en a 6 comme data engineer"
+      ],
+      "score": 88,
+      "tags": {
+        "contract": {
+          "text": "CDI",
+          "verdict": "+"
+        },
+        "experience": {
+          "text": "3 ans requis, 6 ans d'expérience",
+          "verdict": "+"
+        },
+        "location": {
+          "text": "Villeurbanne, agglomération lyonnaise",
+          "verdict": "+"
+        },
+        "salary": {
+          "text": "58 000 € brut/an, minimum 52 000 €",
+          "verdict": "+"
+        },
+        "work_mode": {
+          "text": "Hybride, rythme non précisé",
+          "verdict": "?"
+        }
+      },
+      "work_mode": "hybrid",
+      "years_required": 3
+    },
+    "usage": {
+      "cost_usd": 0.003743,
+      "duration_ms": 12822,
+      "input_tokens": 22679,
+      "model": "claude-haiku-5-5",
+      "output_tokens": 3035
+    }
+  }
+}

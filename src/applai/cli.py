@@ -5,6 +5,7 @@ applai serve runs ApplAI at http://127.0.0.1:8000 until stopped, and the scan wi
 in to the candidate's mailbox once; applai mail read records the offers of new job alerts.
 applai cv build renders the candidate's CV to a PDF and checks it (applai.cv).
 applai retriage reads the triaged offers' pages again and triages them again (applai.retriage).
+applai demo record runs the agents on the demo offers and records their runs (applai.demo).
 """
 
 import argparse
@@ -17,8 +18,10 @@ from typing import Literal
 import httpx2
 import uvicorn
 
-from applai.agents import AgentRunner, ClaudeCLI
+from applai import demo
+from applai.agents import AgentRunner, Backend, ClaudeCLI, RecordingsError
 from applai.app import create_app
+from applai.bench.triage import BenchError
 from applai.cv import CvError, render_cv
 from applai.database import DatabaseError, open_database
 from applai.details import watch_client
@@ -60,6 +63,9 @@ def main(
     build.add_argument("--photo", action="store_true", help="put cv/photo.jpg in the header")
     build.add_argument("--out", type=Path, required=True, help="the PDF to write")
     commands.add_parser("retriage", help="read the triaged offers' pages again and triage them")
+    demo_parser = commands.add_parser("demo", help="the public demo, on the fictional candidate")
+    demo_commands = demo_parser.add_subparsers(dest="demo_command", required=True)
+    demo_commands.add_parser("record", help="run the agents the recordings lack and record them")
     arguments = parser.parse_args(argv)
     if arguments.command == "serve":
         server(arguments.port).run()
@@ -72,9 +78,12 @@ def main(
             with watch_client() if http is None else nullcontext(http) as client:
                 _retriage(client, runner or AgentRunner(ClaudeCLI()))
             return
+        if arguments.command == "demo":
+            _record(runner.backend if runner else ClaudeCLI())
+            return
         with httpx2.Client() if http is None else nullcontext(http) as client:
             _mail(arguments.mail_command, client)
-    except (MailError, DatabaseError, ProfileError) as error:
+    except (MailError, DatabaseError, ProfileError, RecordingsError, BenchError) as error:
         raise SystemExit(str(error)) from None
 
 
@@ -89,6 +98,16 @@ def _retriage(http: httpx2.Client, runner: AgentRunner) -> None:
         print(f"Failed: {error}")
     print(f"{done.retriaged} triaged again, {done.skipped} skipped, {done.failed} failed.")
     print(f"cost: ${done.cost_usd:.4f}")
+
+
+def _record(backend: Backend) -> None:
+    recorder, failures = demo.record(backend, demo.RECORDINGS)
+    for failure in failures:
+        print(f"Failed: {failure}")
+    kept = len(recorder.recordings) - len(recorder.new)
+    print(f"{len(recorder.new)} runs recorded, {kept} kept, {recorder.failed} failed and not"
+          f" recorded, in {demo.RECORDINGS}.")  # fmt: skip
+    print(f"cost: ${sum(result.usage.cost_usd for result in recorder.new):.4f}")
 
 
 def _cv_build(lang: Literal["fr", "en"], contract: str, photo: bool, out: Path) -> None:

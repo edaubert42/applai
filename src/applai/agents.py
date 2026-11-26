@@ -15,26 +15,33 @@ application: the Applications dashboard reads it.
 An agent's input may hold the candidate's data. It reaches the CLI on stdin, not on the
 command line, and an AgentError names the agent and the kind of failure, never the input
 nor what the CLI printed, which may quote it.
+
+The ReplayBackend answers with recorded runs, for the public demo (ADR 0007): a recording
+is found by the agent's name and the SHA-256 of its input only, so a changed prompt, model
+or schema still replays it and the demo calls no model for it (recording_key).
 """
 
+import hashlib
 import json
 import subprocess
 import threading
 import time
 from collections import deque
-from collections.abc import Generator, Iterable
+from collections.abc import Generator, Iterable, Mapping
 from contextlib import contextmanager, suppress
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Any, Protocol
 
 from jsonschema import Draft202012Validator
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
 from sqlalchemy import Engine
 
 from applai.trace import OK, RUNNING, UNEXPECTED, Run, finish_run, record_run, utc_now
 
 MAX_PARALLEL_AGENTS = 3
 CLI_TIMEOUT_S = 600.0
+REPLAY_MAX_WAIT_S = 3.0  # a replay waits the recorded duration, at most this
 
 
 class FailureKind(StrEnum):
@@ -43,6 +50,7 @@ class FailureKind(StrEnum):
     TIMEOUT = "timeout"
     UNREADABLE_OUTPUT = "unreadable_output"
     SCHEMA_MISMATCH = "schema_mismatch"
+    NO_RECORDING = "no_recording"
 
 
 class AgentError(Exception):
@@ -393,3 +401,64 @@ class FakeBackend:
         if isinstance(result, Exception):
             raise result
         return result
+
+
+def recording_key(spec: AgentSpec) -> str:
+    """What a recording of a run is found by: the agent's name and the SHA-256 of its input."""
+    return f"{spec.name}:{hashlib.sha256(spec.input.encode()).hexdigest()}"
+
+
+class RecordingsError(Exception):
+    """A file of recordings ApplAI cannot read. The message never quotes it."""
+
+
+_RECORDINGS = TypeAdapter(dict[str, AgentResult])
+
+
+def read_recordings(path: Path) -> dict[str, AgentResult]:
+    """The recordings a file holds, by recording_key; none when there is no file yet."""
+    try:
+        return _RECORDINGS.validate_json(path.read_bytes())
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValidationError):
+        problem = "cannot be read as recordings"
+    raise RecordingsError(f"{path.name}: {problem}")  # chained to nothing that quotes it
+
+
+def write_recordings(path: Path, recordings: Mapping[str, AgentResult]) -> None:
+    """Write the recordings as UTF-8 JSON, a value per line, so the privacy checks read them.
+
+    A cost keeps 6 decimals: a longer one could read as a phone number to tools/pii.py. The
+    file is replaced whole, so a write that fails leaves the earlier one.
+    """
+    dumped = {
+        key: result.model_dump(mode="json", exclude={"run_id"})
+        | {"usage": result.usage.model_dump() | {"cost_usd": round(result.usage.cost_usd, 6)}}
+        for key, result in recordings.items()
+    }
+    written = path.with_name(f"{path.name}.tmp")
+    text = json.dumps(dumped, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    written.write_text(text, encoding="utf-8")
+    written.replace(path)
+
+
+class ReplayBackend:
+    """Answers each spec with the run recorded for it, for the public demo (ADR 0007).
+
+    A replay waits the recorded duration, at most max_wait_s, so the page shows the run going
+    on. A spec with no recording raises an AgentError, recorded by run_agent as the outcome.
+    """
+
+    def __init__(
+        self, recordings: Mapping[str, AgentResult], max_wait_s: float = REPLAY_MAX_WAIT_S
+    ) -> None:
+        self.recordings = recordings
+        self.max_wait_s = max_wait_s
+
+    def run(self, spec: AgentSpec) -> AgentResult:
+        recorded = self.recordings.get(recording_key(spec))
+        if recorded is None:
+            raise AgentError(spec.name, FailureKind.NO_RECORDING)
+        time.sleep(min(recorded.usage.duration_ms / 1000, self.max_wait_s))
+        return recorded
