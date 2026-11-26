@@ -28,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from applai import browser, correct, notion, reread, review_form, trace, validation
+from applai import browser, correct, demo_fill, notion, reread, review_form, trace, validation
 from applai.agents import AgentError, AlreadyRunning
 from applai.applications import Board, board
 from applai.capture import find_form
@@ -465,7 +465,8 @@ def answers_checked(
     application_id: int, session: _Session, request: Request, later: BackgroundTasks
 ) -> None:
     """Close the answers gate: 409 until every answer is accepted or edited. The fill is
-    then planned in the background with the watch's runner (applai.filling)."""
+    then planned in the background with the watch's runner (applai.filling), and in the demo
+    its recorded fill replayed (applai.demo_fill)."""
     try:
         with session.begin():
             correct.check_answers(session, LOCAL_USER_ID, application_id)
@@ -476,9 +477,7 @@ def answers_checked(
     watch: Watch | None = request.app.state.watch
     if watch is not None:
         s = request.app.state
-        later.add_task(
-            plan_in_background, s.engine, s.data_dir, watch.runner, application_id, s.clock
-        )
+        later.add_task(s.plan_fill, s.engine, s.data_dir, watch.runner, application_id, s.clock)
 
 
 @api.post("/applications/{application_id}/fill", status_code=202)
@@ -498,7 +497,7 @@ def plan_again(
     application.fill_error, application.fill_failed_at = None, None
     session.commit()
     s = request.app.state
-    later.add_task(plan_in_background, s.engine, s.data_dir, watch.runner, application_id, s.clock)
+    later.add_task(s.plan_fill, s.engine, s.data_dir, watch.runner, application_id, s.clock)
 
 
 @api.post("/applications/{application_id}/fill-again", status_code=204)
@@ -818,7 +817,8 @@ def create_app(
     it exists; backup_dir, by default APPLAI_BACKUP_DIR, keeps the database's copies.
 
     Given a watch, it scans on schedule and by hand (applai.scan), at the time clock gives.
-    In demo mode (applai.demo) it never scans, and refuses to send or authorize a send.
+    In demo mode (applai.demo) it never scans, refuses to send or authorize a send, and serves
+    and replays its own forms' fills instead of waiting for the extension (applai.demo_fill).
     """
 
     @asynccontextmanager
@@ -843,6 +843,7 @@ def create_app(
 
     app = FastAPI(title="ApplAI", lifespan=lifespan)
     app.state.demo = demo
+    app.state.plan_fill = demo_fill.fill_in_background if demo else plan_in_background
     # The last added runs first: a request for another host is refused before its Origin is read.
     app.add_middleware(SameOriginWrites, data_dir=data_dir)
     if demo:
@@ -850,6 +851,8 @@ def create_app(
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.include_router(api)
     app.include_router(browser.router)
+    if demo:
+        app.include_router(demo_fill.router)
     # Mounted last: the API's routes come first.
     if frontend_dir.is_dir():
         app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")

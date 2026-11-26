@@ -304,6 +304,7 @@
   "message.page_http": "The offer’s page answered HTTP {detail}: paste the form’s address.",
   "message.page_not_read": "The offer’s page could not be read ({detail}): paste the form’s address.",
   "message.page_no_form": "The offer’s page links to no form: paste the form’s address.",
+  "message.no_recording": "the demo has no recording for these answers",
   "message.fill_not_allowed": "the ApplAI extension does not reach this form’s site. Check that it is enabled in Chrome; it is tried again after the next search",
   "message.fill_not_loaded": "the form did not load. Check that the ApplAI extension is enabled in Chrome; it is tried again after the next search",
   "message.fill_not_filled": "the form could not be filled. Check that the ApplAI extension is enabled in Chrome; it is tried again after the next search",

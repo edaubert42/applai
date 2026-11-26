@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ApiError, DROP_REASONS, GROUPS, api, type Applications, type DropReason, type RetryStage, type Row } from "./api";
 import CorrectScreen from "./CorrectScreen";
 import DeclinePanel from "./DeclinePanel";
+import { useDemo } from "./demo";
 import FinalValidationScreen from "./FinalValidationScreen";
 import Mark from "./Mark";
 import { Logo } from "./ReviewCard";
@@ -66,6 +67,7 @@ function Board({
   const [groups, setGroups] = useState<Applications | null>(null);
   const [failed, setFailed] = useState(false);
   const [extensionConnected, setExtensionConnected] = useState(true);
+  const demo = useDemo(); // the demo replays its fills: no extension needed
   const [loads, setLoads] = useState(0); // a row found stale asks for the board again
   const reload = useCallback(() => setLoads((count) => count + 1), []);
   // The application whose drop panel is open: one at a time, as the panel listens to the keys.
@@ -103,7 +105,7 @@ function Board({
                   <ApplicationRow
                     key={row.offer_id}
                     row={row}
-                    extensionConnected={extensionConnected}
+                    extensionConnected={extensionConnected || demo}
                     onCorrect={onCorrect}
                     onValidate={onValidate}
                     onTrace={onTrace}
