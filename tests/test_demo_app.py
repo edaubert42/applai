@@ -170,6 +170,7 @@ def test_sending_answers_403_in_demo_mode_and_the_application_does_not_move(
         answers = [
             ("authorize-send", client.post(f"/api/applications/{application_id}/authorize-send")),
             ("sent", client.post(f"/api/applications/{application_id}/sent")),
+            ("sent outside", client.post(f"/api/applications/{application_id}/sent-outside")),
             ("sends", client.get("/api/browser/sends")),
             ("send done", client.post(f"/api/browser/sends/{application_id}")),
             ("send failed", client.post(
@@ -185,8 +186,8 @@ def test_sending_answers_403_in_demo_mode_and_the_application_does_not_move(
     answers = _run_demo(monkeypatch, visit)
 
     assert [(name, code) for name, code, _ in answers] == [
-        ("authorize-send", 403), ("sent", 403), ("sends", 403), ("send done", 403),
-        ("send failed", 403),
+        ("authorize-send", 403), ("sent", 403), ("sent outside", 403), ("sends", 403),
+        ("send done", 403), ("send failed", 403),
     ]  # fmt: skip
     assert {detail for _, _, detail in answers} == {"Refused: nothing is sent in the demo."}
 

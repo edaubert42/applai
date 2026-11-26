@@ -39,8 +39,8 @@ APPLICATION_CHAIN = [
     ("validated", "sent", "candidate"),
 ]
 APPLICATION_MOVES = {(origin, to): actor for origin, to, actor in APPLICATION_CHAIN} | {
-    (origin, "dropped"): "candidate" for origin, _, _ in APPLICATION_CHAIN
-}
+    (origin, end): "candidate" for origin, _, _ in APPLICATION_CHAIN for end in ("sent", "dropped")
+}  # sent from any stage: a send the candidate made outside ApplAI (#288)
 OFFER_STATES = sorted({state for pair in OFFER_MOVES for state in pair})
 APPLICATION_STATES = sorted({state for pair in APPLICATION_MOVES for state in pair})
 ACTORS = ["watch", "triage", "candidate", "form_capture", "drafting", "filling", "review"]

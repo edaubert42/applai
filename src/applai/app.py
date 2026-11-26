@@ -641,6 +641,19 @@ def mark_sent(
     later.add_task(notion.write_sent_in_background, s.engine, s.data_dir, application_id)
 
 
+@api.post("/applications/{application_id}/sent-outside", status_code=204)
+def mark_sent_outside(
+    application_id: int, session: _Session, request: Request, later: BackgroundTasks
+) -> None:
+    """Record a send the candidate made outside ApplAI, from any non-terminal state, and write
+    back to Notion. It sends nothing and gives the extension nothing to do (ADR 0003)."""
+    _run_gate(
+        session, lambda: validation.mark_sent_outside(session, LOCAL_USER_ID, application_id)
+    )
+    s = request.app.state
+    later.add_task(notion.write_sent_in_background, s.engine, s.data_dir, application_id)
+
+
 @api.post("/applications/{application_id}/drop", status_code=204)
 def drop_application(
     application_id: int,
@@ -774,7 +787,7 @@ class SameOriginWrites:
 
 
 # The routes that send an application or authorize it (ADR 0003), whatever the method.
-_SEND_PATHS = re.compile(r"/api/applications/[^/]+/(authorize-send|sent)|/api/browser/sends(/.*)?")
+_SEND_PATHS = re.compile(r"/api/applications/[^/]+/(authorize-send|sent|sent-outside)|/api/browser/sends(/.*)?")
 
 
 class NoSendInDemo:
