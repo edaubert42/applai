@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from demo_profile import write_profile_without_cv_sources
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -23,7 +24,7 @@ NOON = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    (tmp_path / "profile.yaml").write_text((DEMO_DIR / "profile.yaml").read_text())
+    write_profile_without_cv_sources(tmp_path)
     (tmp_path / "settings.yaml").write_text(f"extension_id: {EXTENSION_ID}\n")
     return tmp_path
 

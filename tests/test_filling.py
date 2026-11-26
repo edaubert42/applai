@@ -3,7 +3,6 @@ the form the extension filled, never sent (ADR 0003)."""
 
 import base64
 import io
-import shutil
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +11,7 @@ from uuid import uuid4
 
 import httpx2
 import pytest
+from demo_profile import profile_without_cv_sources, write_profile_without_cv_sources
 from fastapi.testclient import TestClient
 from pypdf import PdfReader
 from sqlalchemy import Engine, select
@@ -56,7 +56,7 @@ PLAN = [{"field": 0, "label": "Prénom", "kind": "fill", "value": "Jeanne"},
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    profile = (DEMO_DIR / "profile.yaml").read_text()
+    profile = profile_without_cv_sources()
     (tmp_path / "profile.yaml").write_text(f"{profile}\ncv: cv/jeanne-dupont.pdf\n")
     (tmp_path / "cv").mkdir()
     (tmp_path / "cv" / "jeanne-dupont.pdf").write_bytes(CV_BYTES)
@@ -348,7 +348,7 @@ def test_the_profile_refuses_a_cv_outside_the_data_directory(tmp_path: Path, cv:
     data_dir.mkdir()
     (tmp_path / "outside.pdf").write_bytes(CV_BYTES)
     (data_dir / "link").symlink_to(tmp_path)
-    shutil.copy(DEMO_DIR / "profile.yaml", data_dir)
+    write_profile_without_cv_sources(data_dir)
     with (data_dir / "profile.yaml").open("a") as profile:
         profile.write(f"\ncv: {cv}\n")
 

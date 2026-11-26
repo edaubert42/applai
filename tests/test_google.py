@@ -2,7 +2,6 @@
 
 import json
 import shlex
-import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import httpx2
 import pytest
+from demo_profile import write_profile_without_cv_sources
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -54,7 +54,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     ) -> tuple[Offer, list[str], list[dict[str, Any]], list[dict[str, Any]], Path]:  # fmt: skip
         root = (tmp_path / sub) if sub else tmp_path
         root.mkdir(exist_ok=True)
-        shutil.copy(DEMO_DIR / "profile.yaml", root)
+        write_profile_without_cv_sources(root)
         (root / "settings.yaml").write_text(f"extension_id: {EXT_ID}\n")
         monkeypatch.delenv("APPLAI_MS_CLIENT_ID", raising=False)
         calls_file = root / "li_calls.jsonl"

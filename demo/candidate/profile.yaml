@@ -35,6 +35,12 @@ triage:
   stretch_locations: [Saint-Étienne]  # passes; Triage marks it down
   trusted_boards: [LinkedIn, Welcome to the Jungle, HelloWork, Indeed, APEC, France Travail, JobTeaser, LesJeudis, WeLoveDevs, Cadremploi]
 
+# The CVs Filling renders for an offer, in its language, and when CV tailoring puts the photo on.
+cv_sources:
+  fr: cv/cv_fr.yaml
+  en: cv/cv_en.yaml
+cv_photo_rule: Une photo pour les entreprises françaises, sinon aucune.
+
 # status: validated, to_confirm or forbidden.
 # diffusion: anywhere, applications_only or never.
 facts:

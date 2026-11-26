@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 import yaml
+from demo_profile import profile_without_cv_sources
 from denylist import DenylistNotConfiguredError, load_patterns
 from denylist import main as denylist_main
 from pii import main as pii_main
@@ -31,8 +32,8 @@ REMOVE = object()
 
 
 def _edited(where: tuple[str | int, ...], value: object) -> str:
-    """The demo profile with one value replaced, or removed, as YAML text."""
-    profile: dict[str, Any] = yaml.safe_load(DEMO_TEXT)
+    """The demo profile, without CV sources, with one value replaced or removed, as YAML text."""
+    profile: dict[str, Any] = yaml.safe_load(profile_without_cv_sources())
     *parents, last = where
     node: Any = profile
     for key in parents:
@@ -310,6 +311,14 @@ def test_a_base_answer_with_a_problem_is_located_by_its_position(tmp_path: Path)
 
 def test_a_missing_profile_is_refused_naming_the_file(tmp_path: Path):
     assert str(tmp_path / "profile.yaml") in _refusal(tmp_path)
+
+
+def test_the_demo_profile_names_its_cv_sources_and_its_photo_rule():
+    profile = load_profile(DEMO_DIR)
+
+    assert profile.cv_sources is not None
+    assert profile.cv_sources.paths() == {"fr": "cv/cv_fr.yaml", "en": "cv/cv_en.yaml"}
+    assert profile.cv_photo_rule
 
 
 def test_a_profile_that_cannot_be_read_is_refused_naming_the_file(tmp_path: Path):

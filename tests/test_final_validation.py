@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from demo_profile import profile_without_cv_sources
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -41,7 +42,7 @@ PLAN: list[dict[str, Any]] = [
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    profile = (DEMO_DIR / "profile.yaml").read_text()
+    profile = profile_without_cv_sources()
     (tmp_path / "profile.yaml").write_text(f"{profile}\ncv: cv/jeanne-dupont.pdf\n")
     (tmp_path / "cv").mkdir()
     (tmp_path / "cv" / "jeanne-dupont.pdf").write_bytes(CV_BYTES)

@@ -1,7 +1,6 @@
 """JobTeaser's pages, read by the ApplAI extension in the candidate's Chrome: the real app."""
 
 import json
-import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -10,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 import httpx2
 import pytest
+from demo_profile import write_profile_without_cv_sources
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -52,7 +52,7 @@ CARD = {
 
 @pytest.fixture
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    shutil.copy(DEMO_DIR / "profile.yaml", tmp_path)
+    write_profile_without_cv_sources(tmp_path)
     (tmp_path / "settings.yaml").write_text(f"extension_id: {EXTENSION_ID}\n")
     monkeypatch.delenv("APPLAI_MS_CLIENT_ID", raising=False)
     return tmp_path
