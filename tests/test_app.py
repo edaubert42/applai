@@ -53,7 +53,7 @@ def test_health_is_ok_and_gives_the_database_revision(client: TestClient):
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "database_revision": _head()}
+    assert response.json() == {"status": "ok", "database_revision": _head(), "demo": False}
 
 
 def test_the_offers_in_a_state_are_listed_newest_first(tmp_path: Path, client: TestClient):

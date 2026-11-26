@@ -5,7 +5,9 @@ applai serve runs ApplAI at http://127.0.0.1:8000 until stopped, and the scan wi
 in to the candidate's mailbox once; applai mail read records the offers of new job alerts.
 applai cv build renders the candidate's CV to a PDF and checks it (applai.cv).
 applai retriage reads the triaged offers' pages again and triages them again (applai.retriage).
-applai demo record runs the agents on the demo offers and records their runs (applai.demo).
+applai demo serves the public demo at http://127.0.0.1:8000, on the fictional candidate of
+demo/candidate whatever the environment names; applai demo record runs the agents on the
+demo offers and records their runs (applai.demo).
 """
 
 import argparse
@@ -13,6 +15,7 @@ import os
 from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Literal
 
 import httpx2
@@ -21,11 +24,13 @@ import uvicorn
 from applai import demo
 from applai.agents import AgentRunner, Backend, ClaudeCLI, RecordingsError
 from applai.app import create_app
-from applai.bench.triage import BenchError
+from applai.bench.triage import DEMO_DIR, BenchError
 from applai.cv import CvError, render_cv
 from applai.database import DatabaseError, open_database
 from applai.details import watch_client
+from applai.linkedin import COMMAND_VARIABLE
 from applai.mail import CLIENT_ID_VARIABLE, Mailbox, MailError, read_alerts
+from applai.notion import TOKEN_VARIABLE
 from applai.profile import DATA_DIR_VARIABLE, ProfileError, load_profile
 from applai.retriage import retriage_offers
 from applai.scan import Watch
@@ -38,6 +43,8 @@ _DIRECTORIES = {
     DATA_DIR_VARIABLE: "the candidate's data directory",
     BACKUP_DIR_VARIABLE: "the directory for the database's backups, outside the data directory",
 }
+# What names the candidate's real services and backups: the demo drops them all.
+_REAL = (TOKEN_VARIABLE, CLIENT_ID_VARIABLE, COMMAND_VARIABLE, BACKUP_DIR_VARIABLE)
 
 
 def main(
@@ -64,7 +71,7 @@ def main(
     build.add_argument("--out", type=Path, required=True, help="the PDF to write")
     commands.add_parser("retriage", help="read the triaged offers' pages again and triage them")
     demo_parser = commands.add_parser("demo", help="the public demo, on the fictional candidate")
-    demo_commands = demo_parser.add_subparsers(dest="demo_command", required=True)
+    demo_commands = demo_parser.add_subparsers(dest="demo_command")
     demo_commands.add_parser("record", help="run the agents the recordings lack and record them")
     arguments = parser.parse_args(argv)
     if arguments.command == "serve":
@@ -77,6 +84,9 @@ def main(
         if arguments.command == "retriage":
             with watch_client() if http is None else nullcontext(http) as client:
                 _retriage(client, runner or AgentRunner(ClaudeCLI()))
+            return
+        if arguments.command == "demo" and arguments.demo_command is None:
+            _demo()
             return
         if arguments.command == "demo":
             _record(runner.backend if runner else ClaudeCLI())
@@ -108,6 +118,17 @@ def _record(backend: Backend) -> None:
     print(f"{len(recorder.new)} runs recorded, {kept} kept, {recorder.failed} failed and not"
           f" recorded, in {demo.RECORDINGS}.")  # fmt: skip
     print(f"cost: ${sum(result.usage.cost_usd for result in recorder.new):.4f}")
+
+
+def _demo() -> None:
+    os.environ[DATA_DIR_VARIABLE] = str(DEMO_DIR)
+    for name in _REAL:
+        os.environ.pop(name, None)
+    with TemporaryDirectory() as database_dir, TemporaryDirectory() as backup_dir:
+        app, failures = demo.demo_app(Path(database_dir), Path(backup_dir))
+        for failure in failures:
+            print(f"Failed: {failure}")
+        uvicorn.Server(uvicorn.Config(app, host=HOST, port=DEFAULT_PORT)).run()
 
 
 def _cv_build(lang: Literal["fr", "en"], contract: str, photo: bool, out: Path) -> None:

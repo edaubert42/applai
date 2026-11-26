@@ -67,6 +67,7 @@ FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 class Health(BaseModel):
     status: Literal["ok"]
     database_revision: str | None
+    demo: bool  # the public demo (applai.demo): nothing is sent
 
 
 class OfferSummary(BaseModel):
@@ -102,9 +103,9 @@ api = APIRouter(prefix="/api")
 
 
 @api.get("/health")
-def health(session: _Session) -> Health:
+def health(session: _Session, request: Request) -> Health:
     revision = MigrationContext.configure(session.connection()).get_current_revision()
-    return Health(status="ok", database_revision=revision)
+    return Health(status="ok", database_revision=revision, demo=request.app.state.demo)
 
 
 @api.get("/offers")
@@ -772,26 +773,50 @@ class SameOriginWrites:
         return None
 
 
+# The routes that send an application or authorize it (ADR 0003), whatever the method.
+_SEND_PATHS = re.compile(r"/api/applications/[^/]+/(authorize-send|sent)|/api/browser/sends(/.*)?")
+
+
+class NoSendInDemo:
+    """Refuses with a 403 every route that sends an application or authorizes it: the demo
+    sends nothing, and the extension never receives a send."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and _SEND_PATHS.fullmatch(scope["path"]):
+            refusal = JSONResponse({"detail": "Refused: nothing is sent in the demo."}, 403)
+            await refusal(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
 def create_app(
     data_dir: Path,
     frontend_dir: Path = FRONTEND_DIR,
     watch: Watch | None = None,
     clock: Clock = local_now,
+    database_dir: Path | None = None,
+    backup_dir: Path | None = None,
+    demo: bool = False,
 ) -> FastAPI:
-    """The app on the database in data_dir, serving frontend_dir if it exists.
+    """The app on the database in database_dir, by default data_dir, serving frontend_dir if
+    it exists; backup_dir, by default APPLAI_BACKUP_DIR, keeps the database's copies.
 
     Given a watch, it scans on schedule and by hand (applai.scan), at the time clock gives.
+    In demo mode (applai.demo) it never scans, and refuses to send or authorize a send.
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.data_dir = data_dir
-        app.state.engine = engine = open_database(data_dir)
+        app.state.engine = engine = open_database(database_dir or data_dir, backup_dir)
         trace.interrupt_runs(engine)  # before the scanner starts a run of this process
         app.state.scanner = None
         app.state.watch, app.state.clock, app.state.extension_asked_at = watch, clock, None
         app.state.tabs_posted = None  # when, and the URLs, of the extension's last good post
-        if watch is not None:
+        if watch is not None and not demo:
             app.state.scanner = Scanner(
                 engine, partial(run_scan, engine, data_dir, watch, LOCAL_USER_ID, clock), clock
             )
@@ -804,8 +829,11 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(title="ApplAI", lifespan=lifespan)
+    app.state.demo = demo
     # The last added runs first: a request for another host is refused before its Origin is read.
     app.add_middleware(SameOriginWrites, data_dir=data_dir)
+    if demo:
+        app.add_middleware(NoSendInDemo)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.include_router(api)
     app.include_router(browser.router)
