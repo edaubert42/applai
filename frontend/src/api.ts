@@ -316,6 +316,8 @@ export const api = {
   authorizeSend: (id: number) => requestEmpty("POST", `/api/applications/${id}/authorize-send`),
   fillAgain: (id: number) => requestEmpty("POST", `/api/applications/${id}/fill-again`),
   markSent: (id: number) => requestEmpty("POST", `/api/applications/${id}/sent`),
+  /** Record a send the candidate already made outside ApplAI: ApplAI sends nothing. */
+  markSentOutside: (id: number) => requestEmpty("POST", `/api/applications/${id}/sent-outside`),
   dropApplication: (id: number, reasons: DropReason[], note?: string) =>
     requestEmpty("POST", `/api/applications/${id}/drop`, note ? { reasons, note } : { reasons }),
   /** Start a failed stage again: Drafting, Filling or Review runs in the background (202). */

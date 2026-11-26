@@ -181,6 +181,28 @@ function ApplicationRow({
   const [dropFailed, setDropFailed] = useState(false);
   const [retryBusy, setRetryBusy] = useState(false);
   const [retryFailed, setRetryFailed] = useState(false);
+  // « J'ai postulé »: asked first, as a send cannot be taken back (ADR 0003).
+  const [confirmSent, setConfirmSent] = useState(false);
+  const [sentBusy, setSentBusy] = useState(false);
+  const [sentFailed, setSentFailed] = useState(false);
+
+  function markSentOutside(id: number) {
+    if (sentBusy) return; // clicked again while the call is on its way
+    setSentBusy(true);
+    setSentFailed(false);
+    api.markSentOutside(id).then(
+      () => {
+        setSentBusy(false);
+        onStale(); // the board shows the row under Sent
+      },
+      (error: unknown) => {
+        setSentBusy(false);
+        // 409: the application moved on meanwhile; the board shows where it stands.
+        if (error instanceof ApiError && error.status === 409) onStale();
+        else setSentFailed(true);
+      },
+    );
+  }
 
   function retryStage(id: number, stage: RetryStage) {
     if (retryBusy) return; // clicked again while the retry is on its way
@@ -313,6 +335,34 @@ function ApplicationRow({
       {dropFailed && (
         <p role="alert" className="basis-full text-sm text-minus">
           {t("applications.drop_failed")}
+        </p>
+      )}
+      {canDrop && !confirmSent && (
+        <button type="button" onClick={() => setConfirmSent(true)} className={button}>
+          {t("applications.sent_outside.open")}
+        </button>
+      )}
+      {canDrop && confirmSent && (
+        <div className="flex basis-full flex-wrap items-center gap-3">
+          <p className="basis-full">{t("applications.sent_outside.question")}</p>
+          <button type="button" disabled={sentBusy} onClick={() => markSentOutside(id)} className={button}>
+            {t("applications.sent_outside.confirm")}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmSent(false);
+              setSentFailed(false);
+            }}
+            className={button}
+          >
+            {t("decline.cancel")}
+          </button>
+        </div>
+      )}
+      {sentFailed && (
+        <p role="alert" className="basis-full text-sm text-minus">
+          {t("applications.sent_outside.failed")}
         </p>
       )}
       {row.draft_error && (
