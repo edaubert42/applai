@@ -1,6 +1,5 @@
 """A Google offer whose text was not read is read again by a button (applai.reread)."""
 
-import shutil
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -9,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import httpx2
 import pytest
+from demo_profile import write_profile_without_cv_sources
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,7 +46,7 @@ class Env:
     """The app on a temporary data directory; the pages the network serves, the triage scores."""
 
     def __init__(self, root: Path) -> None:
-        shutil.copy(DEMO_DIR / "profile.yaml", root)
+        write_profile_without_cv_sources(root)
         (root / "settings.yaml").write_text(f"extension_id: {EXT_ID}\n")
         self.root, self.now = root, [NOON]
         self.pages: dict[str, int] = {}  # the status each URL answers, 404 for the others

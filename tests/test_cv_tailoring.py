@@ -1,12 +1,14 @@
 """CV tailoring: an agent adapts a copy of the chosen CV to the offer, code checks each change."""
 
 import io
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from demo_profile import profile_without_cv_sources
 from pypdf import PdfReader
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -39,7 +41,7 @@ NEVER = Fact(id="F6", text="Travaille chez Ortie Conseil.", status=FactStatus.VA
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
     """The demo profile with its French CV source and a photo rule."""
-    profile = (DEMO_DIR / "profile.yaml").read_text()
+    profile = profile_without_cv_sources()
     rule = "cv_photo_rule: Une photo pour les entreprises françaises, sinon aucune.\n"
     (tmp_path / "profile.yaml").write_text(f"{profile}\n{rule}")
     (tmp_path / "settings.yaml").write_text(f"extension_id: {EXTENSION_ID}\n")
@@ -225,6 +227,18 @@ def test_photo_unknown_gives_no_image_and_a_warning(engine: Engine, data_dir: Pa
     assert _images(pdf) == 0
     assert review["cv_warning"] == "cv_no_photo"
     assert _application(engine, application_id).cv_photo == "unknown"
+
+
+def test_cv_tailoring_runs_on_the_demo_candidate_as_it_is(tmp_path: Path):
+    shutil.copytree(DEMO_DIR, tmp_path / "demo")
+    demo = tmp_path / "demo"
+    engine = open_database(demo)
+    try:
+        _drafted(engine, demo, _tailored())
+
+        assert _run(engine).outcome == "ok"
+    finally:
+        engine.dispose()
 
 
 def test_an_agent_error_still_drafts_the_application_with_no_change(engine: Engine, data_dir: Path):
