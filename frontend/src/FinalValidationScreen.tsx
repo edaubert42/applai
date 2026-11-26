@@ -8,6 +8,25 @@ import { button } from "./styles";
 
 const FILL_AGAIN_POLL_MS = 3000;
 
+function EyeIcon() {
+  return (
+    <svg
+      data-icon="eye"
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="size-5 shrink-0"
+    >
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 /** Final validation: review problems, filled fields, attached PDFs, screenshot, and gates. */
 export default function FinalValidationScreen({
   row, onBack, onDone,
@@ -143,8 +162,12 @@ export default function FinalValidationScreen({
                       <div className="flex flex-wrap items-center gap-3 text-sm">
                         {field.file ? <span className="[overflow-wrap:anywhere]">{field.file}</span> : <span className="text-minus">{t("validation.field.missing_file")}</span>}
                         {field.slot && (
-                          <a href={`/api/applications/${id}/files/${field.slot}`} target="_blank" rel="noreferrer" className={button}>
-                            {t("validation.field.see_pdf")}
+                          <a
+                            href={`/api/applications/${id}/files/${field.slot}`} target="_blank" rel="noreferrer"
+                            aria-label={t(`validation.field.see_${field.slot}`)} title={t(`validation.field.see_${field.slot}`)}
+                            className={`${button} px-3`}
+                          >
+                            <EyeIcon />
                           </a>
                         )}
                       </div>
