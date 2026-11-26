@@ -3,6 +3,7 @@ import { ApiError, DROP_REASONS, GROUPS, api, type Applications, type DropReason
 import CorrectScreen from "./CorrectScreen";
 import DeclinePanel from "./DeclinePanel";
 import FinalValidationScreen from "./FinalValidationScreen";
+import Mark from "./Mark";
 import { Logo } from "./ReviewCard";
 import { serverMessage } from "./server-message";
 import { useSettings } from "./settings";
@@ -128,6 +129,10 @@ function ApplicationRow({
   // An application's state is translated; a Notion status stays as written.
   const state = old ? row.state : row.state && (lookup(`applications.state.${row.state}`) ?? row.state);
   const pill = "rounded-pill bg-raised px-3 py-1 text-sm";
+  // A failure is shown instead of the spinner and of the gate: it is what the candidate must see.
+  const hasError = row.draft_error !== null || row.fill_error !== null;
+  // The gate the candidate is at, for an application whose next move is theirs.
+  const next = !old && row.state ? lookup(`applications.next.${row.state}`) : undefined;
   // The form's URL the finder recorded, or the one the candidate pasted since.
   const [form, setForm] = useState({ url: row.form_url, error: row.form_url_error });
   const [pasted, setPasted] = useState("");
@@ -187,6 +192,14 @@ function ApplicationRow({
       </div>
       {old && <span className={`${pill} text-muted`}>{t("applications.origin.old_workflow")}</span>}
       {state && <span className={pill}>{state}</span>}
+      {!hasError && row.running && (
+        <span role="status" className={`${pill} flex items-center gap-2`}>
+          {/* motion-safe: the spin stops with prefers-reduced-motion */}
+          <Mark className="size-5 motion-safe:animate-spin" />
+          {lookup(`applications.running.${row.running}`) ?? row.running}
+        </span>
+      )}
+      {!hasError && !row.running && next &&<span className={`${pill} text-link`}>{next}</span>}
       {row.reasons.map((reason) => (
         <span key={reason} className={`${pill} text-muted`}>
           {lookup(`reason.${reason}`) ?? reason}
@@ -244,6 +257,11 @@ function ApplicationRow({
       {dropFailed && (
         <p role="alert" className="basis-full text-sm text-minus">
           {t("applications.drop_failed")}
+        </p>
+      )}
+      {row.draft_error && (
+        <p role="alert" className="basis-full text-sm text-minus">
+          {t("applications.draft.error", { error: serverMessage(row.draft_error, lookup) })}
         </p>
       )}
       {row.state === "answers_checked" && (row.fill_error || !extensionConnected) && (

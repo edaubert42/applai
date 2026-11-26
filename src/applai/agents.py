@@ -9,6 +9,9 @@ The same agent never runs twice at once on one offer or application: a run locks
 AgentRunner.lock() and the lock is released when the run ends, however it ends. Locks
 live in this process, the only one ApplAI runs.
 
+AgentRunner.running() says, without locking anything, which agent runs now on which
+application: the Applications dashboard reads it.
+
 An agent's input may hold the candidate's data. It reaches the CLI on stdin, not on the
 command line, and an AgentError names the agent and the kind of failure, never the input
 nor what the CLI printed, which may quote it.
@@ -19,8 +22,8 @@ import subprocess
 import threading
 import time
 from collections import deque
-from collections.abc import Iterable
-from contextlib import suppress
+from collections.abc import Generator, Iterable
+from contextlib import contextmanager, suppress
 from enum import StrEnum
 from typing import Annotated, Any, Protocol
 
@@ -141,7 +144,36 @@ class AgentRunner:
         self.max_parallel_agents = max_parallel_agents
         self._slots = threading.BoundedSemaphore(max_parallel_agents)
         self._locked: set[tuple[str, str]] = set()
+        # How many runs of each agent are on each application right now (see running()).
+        self._running: dict[tuple[str, int], int] = {}
         self._guard = threading.Lock()
+
+    def running(self) -> dict[int, str]:
+        """The agent running now on each application that has one: an observation, no lock.
+
+        Of two agents on one application, the one that started first."""
+        with self._guard:
+            running: dict[int, str] = {}
+            for agent, application_id in self._running:
+                running.setdefault(application_id, agent)
+            return running
+
+    @contextmanager
+    def _observed(self, agent: str, application_id: int | None) -> Generator[None]:
+        """Count the run on its application from here to the end of the block, however it ends."""
+        if application_id is None:
+            yield
+            return
+        key = (agent, application_id)
+        with self._guard:
+            self._running[key] = self._running.get(key, 0) + 1
+        try:
+            yield
+        finally:
+            with self._guard:
+                self._running[key] -= 1
+                if not self._running[key]:
+                    del self._running[key]
 
     def lock(
         self, agent: str, *, offer_id: int | None = None, application_id: int | None = None
@@ -170,10 +202,10 @@ class AgentRunner:
         if (database is None) != (offer_id is None):
             raise ValueError("run_agent takes the database and offer_id together, or neither")
         if database is None or offer_id is None:
-            return self._run(spec)
+            return self._run(spec, application_id)
         started_at, clock = utc_now(), time.monotonic()
         try:
-            result = self._run(spec)
+            result = self._run(spec, application_id)
         except Exception as error:
             outcome = error.kind.value if isinstance(error, AgentError) else UNEXPECTED
             record_run(
@@ -210,8 +242,8 @@ class AgentRunner:
         )
         return result.model_copy(update={"run_id": run_id})
 
-    def _run(self, spec: AgentSpec) -> AgentResult:
-        with self._slots:
+    def _run(self, spec: AgentSpec, application_id: int | None) -> AgentResult:
+        with self._observed(spec.name, application_id), self._slots:
             result = self.backend.run(spec)
         # Checked here, not in each backend, so no backend can return what the schema refuses.
         validator = Draft202012Validator(spec.json_schema)

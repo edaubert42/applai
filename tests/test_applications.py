@@ -1,17 +1,29 @@
+import threading
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
+from applai.agents import (
+    AgentError,
+    AgentResult,
+    AgentRunner,
+    AgentSpec,
+    FailureKind,
+    FakeBackend,
+    Usage,
+)
 from applai.app import create_app
 from applai.database import open_database
 from applai.models import Application, Offer, OfferOrigin, StateChange
 from applai.orchestrator import ApplicationState
+from applai.scan import Watch
 
 GROUPS = ["in_progress", "waiting", "sent", "dropped"]
 
@@ -154,6 +166,8 @@ def test_a_row_has_the_offers_company_title_link_and_the_last_change(
         "form_url": None,
         "form_url_error": None,
         "fill_error": None,
+        "draft_error": None,
+        "running": None,
         "reasons": [],
         "tab_open": None,
     }
@@ -216,6 +230,8 @@ def test_an_old_workflow_offer_is_a_row_in_progress_with_its_origin_and_notion_s
         "form_url": None,
         "form_url_error": None,
         "fill_error": None,
+        "draft_error": None,
+        "running": None,
         "reasons": [],
         "tab_open": None,
     }
@@ -269,3 +285,75 @@ def test_accepting_an_offer_puts_its_application_in_progress(engine: Engine, cli
 
     [row] = _board(client)["in_progress"]
     assert (row["offer_id"], row["state"], row["origin"]) == (offer_id, "created", "applai")
+
+
+def _runner_client(tmp_path: Path, backend: FakeBackend) -> tuple[AgentRunner, TestClient]:
+    runner = AgentRunner(backend)
+    watch = Watch(http=httpx2.Client(), runner=runner, ms_client_id=None)
+    app = create_app(tmp_path, frontend_dir=tmp_path / "no-frontend", watch=watch)
+    return runner, TestClient(app, base_url="http://127.0.0.1")
+
+
+def _spec(agent: str) -> AgentSpec:
+    return AgentSpec(
+        name=agent,
+        model="sonnet",
+        system_prompt="Work on the form of Brindille Logistique.",
+        json_schema={"type": "object"},
+        input="Form of Brindille Logistique",
+    )
+
+
+def _application_id(engine: Engine, offer_id: int) -> int:
+    with Session(engine) as session:
+        return session.scalars(select(Application.id).where(Application.offer_id == offer_id)).one()
+
+
+def test_a_row_names_the_agent_running_on_it_until_its_run_ends(engine: Engine, tmp_path: Path):
+    hold = threading.Event()
+    backend = FakeBackend([AgentResult(output={}, usage=Usage(model="sonnet"))], hold)
+    runner, client = _runner_client(tmp_path, backend)
+    running = _application_id(engine, _application(engine, "chef-de-quai", "answers_checked"))
+    _application(engine, "assistant-douane", "answers_checked")
+
+    with client:
+        thread = threading.Thread(
+            target=lambda: runner.run_agent(_spec("filling"), application_id=running), daemon=True
+        )
+        thread.start()
+        assert backend.started.wait(10)
+
+        during = {row["title"]: row["running"] for row in _board(client)["in_progress"]}
+        hold.set()
+        thread.join(10)
+        after = {row["title"]: row["running"] for row in _board(client)["in_progress"]}
+
+    assert during == {"Chef de quai": "filling", "Assistant douane": None}
+    assert after == {"Chef de quai": None, "Assistant douane": None}
+
+
+def test_a_run_that_fails_leaves_its_row_not_running_and_in_the_same_state(
+    engine: Engine, tmp_path: Path
+):
+    runner, client = _runner_client(tmp_path, FakeBackend([AgentError("review", FailureKind.EXIT)]))
+    application_id = _application_id(engine, _application(engine, "chef-de-quai", "filled"))
+
+    with client:
+        with pytest.raises(AgentError):
+            runner.run_agent(_spec("review"), application_id=application_id)
+        [row] = _board(client)["in_progress"]
+
+    assert (row["running"], row["state"]) == (None, "filled")
+
+
+def test_a_row_carries_why_drafting_failed(engine: Engine, client: TestClient):
+    offer_id = _application(engine, "chef-de-quai", "form_captured")
+    with Session(engine) as session, session.begin():
+        application = session.scalars(
+            select(Application).where(Application.offer_id == offer_id)
+        ).one()
+        application.draft_error = "the agent broke"
+
+    [row] = _board(client)["in_progress"]
+
+    assert row["draft_error"] == "the agent broke"

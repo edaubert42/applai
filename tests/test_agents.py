@@ -275,6 +275,101 @@ def test_the_fake_backend_returns_its_results_in_order_and_records_the_specs():
         runner.run_agent(SPEC)
 
 
+def _on_application(agent: str = "drafting") -> AgentSpec:
+    return SPEC.model_copy(update={"name": agent})
+
+
+def _result() -> AgentResult:
+    return AgentResult(output=OUTPUT, usage=Usage(model="haiku"))
+
+
+def _run_in_thread(
+    runner: AgentRunner, spec: AgentSpec, application_id: int | None
+) -> threading.Thread:
+    thread = threading.Thread(
+        target=lambda: runner.run_agent(spec, application_id=application_id), daemon=True
+    )
+    thread.start()
+    return thread
+
+
+def test_the_runner_says_which_agent_runs_on_which_application_while_it_runs():
+    hold = threading.Event()
+    backend = FakeBackend([_result(), _result()], hold)
+    runner = AgentRunner(backend)
+    assert runner.running() == {}
+
+    first = _run_in_thread(runner, _on_application("filling"), 4)
+    second = _run_in_thread(runner, _on_application("review"), 7)
+    _wait_until(lambda: len(backend.specs) == 2)
+
+    assert runner.running() == {4: "filling", 7: "review"}
+    hold.set()
+    first.join(10)
+    second.join(10)
+    assert runner.running() == {}
+
+
+def test_a_run_on_no_application_is_not_listed():
+    hold = threading.Event()
+    backend = FakeBackend([_result()], hold)
+    runner = AgentRunner(backend)
+
+    thread = _run_in_thread(runner, SPEC, None)
+    _wait_until(lambda: backend.started.is_set())
+
+    assert runner.running() == {}
+    hold.set()
+    thread.join(10)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        AgentError("drafting", FailureKind.EXIT),
+        RuntimeError("the backend broke"),
+        AgentResult(output={"score": "high"}, usage=Usage(model="haiku")),  # refused by the schema
+    ],
+)
+def test_a_failed_run_is_no_longer_running_and_the_agent_can_run_again(
+    failure: AgentError | RuntimeError | AgentResult,
+):
+    backend = FakeBackend([failure, _result()])
+    runner = AgentRunner(backend)
+
+    with pytest.raises((AgentError, RuntimeError)):
+        runner.run_agent(_on_application(), application_id=4)
+
+    assert runner.running() == {}
+    assert runner.run_agent(_on_application(), application_id=4).output == OUTPUT
+    assert runner.running() == {}
+
+
+def test_an_application_stays_running_until_its_last_run_ends():
+    holds = [threading.Event(), threading.Event()]
+    started: list[threading.Event] = []
+
+    class OneAfterTheOther:
+        def run(self, spec: AgentSpec) -> AgentResult:
+            started.append(threading.Event())
+            started[-1].set()
+            holds[len(started) - 1].wait()
+            return _result()
+
+    runner = AgentRunner(OneAfterTheOther())
+    first = _run_in_thread(runner, _on_application(), 4)
+    _wait_until(lambda: len(started) == 1)
+    second = _run_in_thread(runner, _on_application(), 4)  # the same agent, as no lock forbids it
+    _wait_until(lambda: len(started) == 2)
+
+    holds[0].set()
+    first.join(10)
+    assert runner.running() == {4: "drafting"}
+    holds[1].set()
+    second.join(10)
+    assert runner.running() == {}
+
+
 @pytest.mark.usefixtures("logged_in_claude")
 def test_the_real_claude_cli_answers_a_tiny_schema():
     spec = AgentSpec(

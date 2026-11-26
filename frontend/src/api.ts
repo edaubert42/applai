@@ -73,6 +73,9 @@ export interface Row {
   form_url: string | null;
   form_url_error: string | null;
   fill_error: string | null;
+  draft_error: string | null;
+  /** The agent running on it now (its name), or null. */
+  running: string | null;
   /** Why the candidate dropped it; empty for any other application. */
   reasons: DropReason[];
   /** Whether the filled form's tab is open; null: unknown, or no tab to wait for. */

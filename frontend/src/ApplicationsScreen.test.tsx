@@ -248,6 +248,95 @@ describe("the Applications dashboard", () => {
   });
 });
 
+describe("who acts next on an application", () => {
+  const rowOf = (title: string) => within(screen.getByRole("heading", { name: title }).closest("li") as HTMLElement);
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("shows a spinning mark and the stage's name on a row an agent runs on, in %s", async (language, words) => {
+    const agents = ["form_capture", "drafting", "drafting_judge", "cv_tailoring", "filling", "review"] as const;
+    const rows = agents.map((agent, i) => aRow({ id: i + 1, offer_id: i + 1, title: `Poste ${agent}`, state: "created", running: agent }));
+    await openScreen(applicationsRoutes({ in_progress: rows }), language);
+
+    for (const agent of agents) {
+      const status = rowOf(`Poste ${agent}`).getByRole("status");
+      expect(status.textContent).toBe(words[`applications.running.${agent}`]);
+      const mark = status.querySelector("svg") as SVGElement;
+      // Tailwind's motion-safe: variant spins it only unless the candidate asked for reduced motion.
+      expect([...mark.classList]).toContain("motion-safe:animate-spin");
+      expect([...mark.classList]).not.toContain("animate-spin");
+    }
+    expect(words["applications.running.drafting_judge"]).toBe(words["applications.running.drafting"]);
+  });
+
+  it.each(["fr", "en"] as const)("shows no spinner on a row no agent runs on, in %s", async (language) => {
+    await openScreen(applicationsRoutes({ in_progress: [aRow({ state: "created" })] }), language);
+
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("names the gate on a row whose next move is the candidate's, in %s", async (language, words) => {
+    const gates = ["drafted", "reviewed", "form_checked", "validated"] as const;
+    const rows = gates.map((state, i) => aRow({ id: i + 1, offer_id: i + 1, title: `Poste ${state}`, state }));
+    await openScreen(applicationsRoutes({ waiting: rows }), language);
+
+    for (const state of gates) {
+      expect(rowOf(`Poste ${state}`).getByText(words[`applications.next.${state}`])).toBeTruthy();
+    }
+  });
+
+  it("words the four gates in French as the issue does", () => {
+    expect([fr["applications.next.drafted"], fr["applications.next.reviewed"]]).toEqual([
+      "À vous : vérifier les textes",
+      "À vous : vérifier le formulaire",
+    ]);
+    expect([fr["applications.next.form_checked"], fr["applications.next.validated"]]).toEqual([
+      "À vous : validation finale",
+      "À vous : envoyer",
+    ]);
+  });
+
+  it("shows no gate pill on a row the candidate has nothing to do on", async () => {
+    const filled = aRow({ state: "filled" });
+    const sent = aRow({ id: 2, offer_id: 2, title: "Envoyée", state: "sent" });
+    await openScreen(applicationsRoutes({ in_progress: [filled], sent: [sent] }));
+
+    expect(screen.queryByText(/^À vous/)).toBeNull();
+  });
+
+  it("shows the running agent, not the gate, while an agent works on a waiting row", async () => {
+    const row = aRow({ state: "drafted", running: "drafting_judge" });
+    await openScreen(applicationsRoutes({ waiting: [row] }));
+
+    expect(rowOf("Chef de quai").getByRole("status").textContent).toBe(fr["applications.running.drafting_judge"]);
+    expect(screen.queryByText(fr["applications.next.drafted"])).toBeNull();
+  });
+
+  it.each([
+    ["fr", fr],
+    ["en", en],
+  ] as const)("shows a failure and no spinner on a row with a draft_error or a fill_error, in %s", async (language, words) => {
+    const drafting = aRow({ id: 1, offer_id: 1, title: "Poste rédaction", state: "form_captured", running: "drafting", draft_error: "drafting_failed" });
+    const filling = aRow({ id: 2, offer_id: 2, title: "Poste remplissage", state: "answers_checked", running: "filling", fill_error: "fill_not_loaded" });
+    await openScreen(applicationsRoutes({ in_progress: [drafting, filling] }), language);
+
+    const failedDrafting = rowOf("Poste rédaction");
+    expect(failedDrafting.getByRole("alert").textContent).toBe(
+      fill(words["applications.draft.error"], { error: "drafting_failed" }),
+    );
+    expect(failedDrafting.queryByRole("status")).toBeNull();
+    const failedFilling = rowOf("Poste remplissage");
+    expect(failedFilling.getByRole("alert").textContent).toBe(
+      fill(words["applications.fill.error"], { error: words["message.fill_not_loaded"] }),
+    );
+    expect(failedFilling.queryByRole("status")).toBeNull();
+  });
+});
+
 describe("dropping an application", () => {
   const states = ["created", "form_captured", "drafted", "answers_checked", "filled", "reviewed", "form_checked", "validated"];
   const open = states.map((state, i) => aRow({ id: i + 1, offer_id: i + 1, title: `Poste ${state}`, state }));
