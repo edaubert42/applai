@@ -278,7 +278,7 @@ async function requestEmpty(method: string, path: string, body?: unknown): Promi
   if (!response.ok) throw new ApiError(method, path, response.status);
 }
 
-/** GET /api/health; demo: the public demo, whose fills are replayed without the extension. */
+/** GET /api/health: demo is true when ApplAI runs as the public demo (applai demo). */
 export interface Health {
   status: string;
   database_revision: string | null;
