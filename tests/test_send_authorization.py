@@ -180,3 +180,35 @@ def test_a_dropped_application_is_never_listed_for_filling_or_sending_again(
         apps = [session.get_one(Application, i) for i in (to_fill, to_send)]
         assert [a.state for a in apps] == ["dropped", "dropped"]
         assert apps[1].send_authorized_at is None
+
+
+def test_sent_outside_gives_the_extension_nothing_to_read_fill_or_send(
+    engine: Engine, client: TestClient
+):
+    to_read, to_fill = _app(engine, "created"), _app(engine, "answers_checked")
+    to_fill_again, to_send = _app(engine, "filled"), _app(engine, "validated")
+    plan = [{"field": 0, "label": "Nom complet", "kind": "fill", "value": "Jeanne Dupont"}]
+    with Session(engine) as session, session.begin():
+        for app_id in (to_fill, to_fill_again):
+            session.get_one(Application, app_id).fill_plan = plan
+    assert client.post(f"/api/applications/{to_fill_again}/fill-again").status_code == 204
+    assert client.post(f"/api/applications/{to_send}/authorize-send").status_code == 204
+    queues = ("forms", "fills", "sends")
+
+    def listed() -> list[list[int]]:
+        answers = [client.get(f"/api/browser/{q}", headers=EXTENSION).json() for q in queues]
+        return [sorted(item["application_id"] for item in answer) for answer in answers]
+
+    assert listed() == [[to_read], [to_fill, to_fill_again], [to_send]]
+
+    for app_id in (to_read, to_fill, to_fill_again, to_send):
+        assert client.post(f"/api/applications/{app_id}/sent-outside").status_code == 204
+
+    assert listed() == [[], [], []]
+    assert client.post(f"/api/browser/sends/{to_send}", headers=EXTENSION).status_code == 409
+    with Session(engine) as session:
+        apps = [session.get_one(Application, i) for i in (to_read, to_fill, to_fill_again, to_send)]
+        assert [a.state for a in apps] == ["sent"] * 4
+        assert apps[3].send_authorized_at is None
+        labels = session.scalars(select(Label).where(Label.decision == "sent").order_by(Label.id))
+        assert [label.application_id for label in labels] == [a.id for a in apps]

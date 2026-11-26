@@ -81,8 +81,13 @@ export default function ReviewScreen({ onScanEnded }: { onScanEnded: () => void 
       document.querySelector<HTMLElement>(`[data-row-id="${refocus.current}"]`)?.focus();
       refocus.current = null;
     }
-    if (open !== null) document.getElementById(`offer-${open}`)?.scrollIntoView?.({ block: "nearest" });
   }, [open]);
+
+  // The decline panel is far shorter than its card, and the next card far taller: show the top again.
+  useEffect(() => {
+    const id = declining ?? open;
+    if (id !== null) document.getElementById(`offer-${id}`)?.scrollIntoView?.({ block: "start" });
+  }, [open, declining]);
 
   function moveBetweenRows(step: 1 | -1) {
     const all = Array.from(document.querySelectorAll<HTMLElement>("[data-row-id]"));
@@ -190,7 +195,7 @@ export default function ReviewScreen({ onScanEnded }: { onScanEnded: () => void 
         id={`offer-${card.id}`}
         data-offer-id={card.id}
         aria-labelledby={`offer-${card.id}-title`}
-        className="space-y-5.5 rounded-card border border-border bg-surface p-7"
+        className="scroll-mt-4 space-y-5.5 rounded-card border border-border bg-surface p-7"
       >
         {card.id === decliningCard?.id ? (
           <>

@@ -12,11 +12,33 @@ import TraceScreen from "./TraceScreen";
 
 const CHECKABLE = ["reviewed", "form_checked", "validated"];
 
-/** The Applications dashboard, or the Correct screen of the application being corrected. */
-export default function ApplicationsScreen() {
+/**
+ * The Applications dashboard, or the Correct screen of the application being corrected.
+ * landing: open on the trace of the application waiting for the candidate's texts (the demo's first
+ * visit), or on the board when none waits; onLanded says it is done, so a later visit opens the board.
+ */
+export default function ApplicationsScreen({ landing = false, onLanded }: { landing?: boolean; onLanded?: () => void }) {
   const [correcting, setCorrecting] = useState<Row | null>(null);
   const [validating, setValidating] = useState<Row | null>(null);
   const [tracing, setTracing] = useState<Row | null>(null);
+  const [arriving, setArriving] = useState(landing);
+  useEffect(() => {
+    if (!arriving) return;
+    let current = true;
+    api.applications().then(
+      ({ waiting }) => waiting.find((row) => row.id !== null && row.state === "drafted") ?? null,
+      () => null, // the board shows its own error
+    ).then((row) => {
+      if (!current) return;
+      setTracing(row);
+      setArriving(false);
+      onLanded?.();
+    });
+    return () => {
+      current = false;
+    };
+  }, [arriving, onLanded]);
+  if (arriving) return null;
   // The board loads again each time it comes back, so a closed gate shows in the state.
   if (correcting) {
     const back = () => setCorrecting(null);
@@ -164,6 +186,28 @@ function ApplicationRow({
   const [dropFailed, setDropFailed] = useState(false);
   const [retryBusy, setRetryBusy] = useState(false);
   const [retryFailed, setRetryFailed] = useState(false);
+  // « J'ai postulé »: asked first, as a send cannot be taken back (ADR 0003).
+  const [confirmSent, setConfirmSent] = useState(false);
+  const [sentBusy, setSentBusy] = useState(false);
+  const [sentFailed, setSentFailed] = useState(false);
+
+  function markSentOutside(id: number) {
+    if (sentBusy) return; // clicked again while the call is on its way
+    setSentBusy(true);
+    setSentFailed(false);
+    api.markSentOutside(id).then(
+      () => {
+        setSentBusy(false);
+        onStale(); // the board shows the row under Sent
+      },
+      (error: unknown) => {
+        setSentBusy(false);
+        // 409: the application moved on meanwhile; the board shows where it stands.
+        if (error instanceof ApiError && error.status === 409) onStale();
+        else setSentFailed(true);
+      },
+    );
+  }
 
   function retryStage(id: number, stage: RetryStage) {
     if (retryBusy) return; // clicked again while the retry is on its way
@@ -296,6 +340,34 @@ function ApplicationRow({
       {dropFailed && (
         <p role="alert" className="basis-full text-sm text-minus">
           {t("applications.drop_failed")}
+        </p>
+      )}
+      {canDrop && !confirmSent && (
+        <button type="button" onClick={() => setConfirmSent(true)} className={button}>
+          {t("applications.sent_outside.open")}
+        </button>
+      )}
+      {canDrop && confirmSent && (
+        <div className="flex basis-full flex-wrap items-center gap-3">
+          <p className="basis-full">{t("applications.sent_outside.question")}</p>
+          <button type="button" disabled={sentBusy} onClick={() => markSentOutside(id)} className={button}>
+            {t("applications.sent_outside.confirm")}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmSent(false);
+              setSentFailed(false);
+            }}
+            className={button}
+          >
+            {t("decline.cancel")}
+          </button>
+        </div>
+      )}
+      {sentFailed && (
+        <p role="alert" className="basis-full text-sm text-minus">
+          {t("applications.sent_outside.failed")}
         </p>
       )}
       {row.draft_error && (

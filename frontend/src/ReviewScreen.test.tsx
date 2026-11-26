@@ -44,6 +44,29 @@ function decisions(calls: { method: string; path: string; body: unknown }[]) {
   return calls.filter((call) => call.path.endsWith("/decision")).map((c) => [c.path, c.body]);
 }
 
+describe("the scroll", () => {
+  it("puts the top of the card back on screen when « Pas intéressé » opens, and on the next offer", async () => {
+    const scrolls: [string, unknown][] = [];
+    Element.prototype.scrollIntoView = function (this: Element, options?: unknown) {
+      scrolls.push([this.id, options]);
+    };
+    try {
+      await openScreen();
+      scrolls.length = 0;
+      fireEvent.click(screen.getByRole("button", { name: fr["card.notInterested"] }));
+      expect(scrolls).toEqual([["offer-1", { block: "start" }]]);
+
+      scrolls.length = 0;
+      fireEvent.keyDown(document, { key: "1" });
+      fireEvent.keyDown(document, { key: "Enter" });
+      await screen.findByRole("article", { name: /Développeuse web/ });
+      expect(scrolls).toEqual([["offer-2", { block: "start" }]]);
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+});
+
 describe("a card", () => {
   it.each([
     ["fr", fr, "une alerte WTTJ"],
