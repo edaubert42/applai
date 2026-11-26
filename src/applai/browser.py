@@ -26,6 +26,11 @@ Filling: an answers_checked application with a fill plan (applai.filling) is lis
 actions; the extension fetches the files they attach, fills the form without sending it,
 then sends back each field's state and a screenshot, and the application moves to filled. A
 fill that fails is kept as its fill_error, and asked for again only after the next scan.
+Fill again: a form filled once whose tab the candidate closed is listed again, with the same
+plan, from their ask (POST /api/applications/{id}/fill-again) until the extension reports it.
+The application keeps its state, and its send authorization is cleared at the ask: the candidate
+authorizes again on the new tab. A fill again that fails is kept as its fill_error, and listed
+again only at the candidate's next ask.
 
 Tabs: each minute the extension posts the URLs of the tabs of its ApplAI group, no other tab;
 Applications shows whether each filled form's tab is open (applai.applications). Without a
@@ -360,6 +365,11 @@ def _form_failed(application: Application, reason: str, now: datetime) -> None:
         application.form_url_error = f"form_{reason}"
 
 
+# The states of a form filled once, which the candidate may ask to fill again.
+FILL_AGAIN_STATES = (ApplicationState.FILLED, ApplicationState.REVIEWED,
+                     ApplicationState.FORM_CHECKED, ApplicationState.VALIDATED)  # fmt: skip
+
+
 class FillToDo(BaseModel):
     application_id: int
     url: str
@@ -390,14 +400,19 @@ class FillFailed(BaseModel):
 
 
 def _fill_waiting(application: Application, last_scan: datetime | None) -> bool:
-    """answers_checked with a plan, and not failed since the last scan started."""
+    """With a plan and a form's URL: answers_checked and not failed since the last scan started,
+    or filled once and asked to fill again."""
     failed = application.fill_failed_at
     return (
         application.user_id == LOCAL_USER_ID
-        and application.state == ApplicationState.ANSWERS_CHECKED
         and application.fill_plan is not None
         and application.form_url is not None
-        and (failed is None or (last_scan is not None and last_scan > failed))
+        and (
+            application.state in FILL_AGAIN_STATES
+            if application.fill_again_at is not None
+            else application.state == ApplicationState.ANSWERS_CHECKED
+            and (failed is None or (last_scan is not None and last_scan > failed))
+        )
     )
 
 
@@ -417,7 +432,10 @@ def fills(request: Request) -> list[FillToDo]:
         last_scan = _last_scan(session)
         checked = session.scalars(
             select(Application)
-            .where(Application.state == ApplicationState.ANSWERS_CHECKED)
+            .where(
+                (Application.state == ApplicationState.ANSWERS_CHECKED)
+                | Application.fill_again_at.is_not(None)
+            )
             .order_by(Application.id)
         )
         return [
@@ -455,23 +473,30 @@ def fill_sent(
     application_id: int, body: FormFilled, request: Request, later: BackgroundTasks
 ) -> None:
     """Store the form as the extension filled it, and its screenshot; move it to filled,
-    then review it in the background with the watch's runner (applai.review_form)."""
+    then review it in the background with the watch's runner (applai.review_form). A fill
+    again replaces the fields and the screenshot, and its application keeps its state."""
     screenshot = _png(body.screenshot) if body.screenshot else None
     state = request.app.state
     with Session(state.engine) as session:
         application = _waiting_fill(session, application_id)
+        again = application.fill_again_at is not None
         application.filled_fields = [field.model_dump() for field in body.fields]
-        application.fill_error = None
+        application.fill_error, application.fill_again_at = None, None
         try:
-            move(session, application, ApplicationState.FILLED, Actor.FILLING)
+            if not again:
+                move(session, application, ApplicationState.FILLED, Actor.FILLING)
         except TransitionError as error:  # another post moved it meanwhile
             raise HTTPException(409, str(error)) from None
         if screenshot is not None:
             directory = state.data_dir / "applications" / str(application_id)
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "filled.png").write_bytes(screenshot)
+        elif again:  # the old tab's image would sit beside the new fields
+            (state.data_dir / "applications" / str(application_id) / "filled.png").unlink(
+                missing_ok=True
+            )
         session.commit()
-    if state.watch is not None:
+    if not again and state.watch is not None:
         later.add_task(
             review_in_background, state.engine, state.data_dir, state.watch.runner, application_id
         )
@@ -489,11 +514,14 @@ def _png(screenshot: str) -> bytes:
 
 @router.post("/fills/{application_id}/failure", status_code=204)
 def fill_failed(application_id: int, body: FillFailed, request: Request) -> None:
-    """Record a form the extension could not fill; asked for again after the next scan."""
+    """Record a form the extension could not fill; asked for again after the next scan, or,
+    for a fill again, at the candidate's next ask."""
     with Session(request.app.state.engine) as session:
         application = _waiting_fill(session, application_id)
-        application.fill_error = f"fill_{body.reason}"
+        again = "again_" if application.fill_again_at is not None else ""
+        application.fill_error = f"fill_{again}{body.reason}"
         application.fill_failed_at = utc(request.app.state.clock())
+        application.fill_again_at = None
         session.commit()
 
 

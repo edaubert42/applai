@@ -82,6 +82,8 @@ class FormReview(BaseModel):
     has_screenshot: bool
     send_authorized: bool = False
     send_error: str | None = None
+    fill_error: str | None = None  # why the last fill, or fill again, failed (applai.browser)
+    fill_again: bool = False  # asked, and the extension has not reported it yet
     cv_warning: str | None = None  # of the CV Filling rendered (applai.cv_tailoring)
 
 
@@ -221,5 +223,6 @@ def read_review(session: Session, user_id: int, application_id: int, data_dir: P
         problems=problems, review_error=app.review_error,
         has_screenshot=screenshot_path(data_dir, app.id) is not None,
         send_authorized=app.send_authorized_at is not None, send_error=app.send_error,
+        fill_error=app.fill_error, fill_again=app.fill_again_at is not None,
         cv_warning=app.cv_warning,
     )  # fmt: skip
