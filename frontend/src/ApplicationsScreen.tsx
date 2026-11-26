@@ -12,11 +12,33 @@ import TraceScreen from "./TraceScreen";
 
 const CHECKABLE = ["reviewed", "form_checked", "validated"];
 
-/** The Applications dashboard, or the Correct screen of the application being corrected. */
-export default function ApplicationsScreen() {
+/**
+ * The Applications dashboard, or the Correct screen of the application being corrected.
+ * landing: open on the trace of the application waiting for the candidate's texts (the demo's first
+ * visit), or on the board when none waits; onLanded says it is done, so a later visit opens the board.
+ */
+export default function ApplicationsScreen({ landing = false, onLanded }: { landing?: boolean; onLanded?: () => void }) {
   const [correcting, setCorrecting] = useState<Row | null>(null);
   const [validating, setValidating] = useState<Row | null>(null);
   const [tracing, setTracing] = useState<Row | null>(null);
+  const [arriving, setArriving] = useState(landing);
+  useEffect(() => {
+    if (!arriving) return;
+    let current = true;
+    api.applications().then(
+      ({ waiting }) => waiting.find((row) => row.id !== null && row.state === "drafted") ?? null,
+      () => null, // the board shows its own error
+    ).then((row) => {
+      if (!current) return;
+      setTracing(row);
+      setArriving(false);
+      onLanded?.();
+    });
+    return () => {
+      current = false;
+    };
+  }, [arriving, onLanded]);
+  if (arriving) return null;
   // The board loads again each time it comes back, so a closed gate shows in the state.
   if (correcting) {
     const back = () => setCorrecting(null);

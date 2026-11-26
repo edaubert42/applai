@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DROP_REASONS, api, type FormReview, type Row } from "./api";
 import DeclinePanel from "./DeclinePanel";
+import { useDemo } from "./demo";
 import Paragraphs from "./Paragraphs";
 import { serverMessage } from "./server-message";
 import { useSettings } from "./settings";
@@ -32,6 +33,7 @@ export default function FinalValidationScreen({
   row, onBack, onDone,
 }: { row: Row; onBack: () => void; onDone: () => void }) {
   const { t, lookup } = useSettings();
+  const demo = useDemo();
   const id = row.id;
   const [review, setReview] = useState<FormReview | null>(null);
   const [failed, setFailed] = useState(id === null);
@@ -211,13 +213,18 @@ export default function FinalValidationScreen({
             {review.state === "validated" && (
               <>
                 <a href={review.form_url ?? review.url} target="_blank" rel="noreferrer" className={button}>{t("validation.open_form")}</a>
-                <button
-                  type="button" disabled={busy || review.send_authorized || review.fill_again} className={button}
-                  onClick={() => run(() => api.authorizeSend(id), () => setReview((old) => old && { ...old, send_authorized: true, send_error: null }))}
-                >
-                  {t(review.send_authorized ? "validation.send_authorized" : "validation.authorize_send")}
-                </button>
-                <button type="button" disabled={busy} onClick={() => run(() => api.markSent(id), onDone)} className={button}>{t("validation.mark_sent")}</button>
+                {/* The demo sends nothing (ADR 0003): the API refuses both anyway. */}
+                {!demo && (
+                  <>
+                    <button
+                      type="button" disabled={busy || review.send_authorized || review.fill_again} className={button}
+                      onClick={() => run(() => api.authorizeSend(id), () => setReview((old) => old && { ...old, send_authorized: true, send_error: null }))}
+                    >
+                      {t(review.send_authorized ? "validation.send_authorized" : "validation.authorize_send")}
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => run(() => api.markSent(id), onDone)} className={button}>{t("validation.mark_sent")}</button>
+                  </>
+                )}
               </>
             )}
             {canFillAgain && (
