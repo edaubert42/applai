@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
+from applai import linkedin
 from applai.database import open_database
 from applai.linkedin import (
     COMMAND_VARIABLE,
@@ -364,8 +365,16 @@ def test_a_run_reads_every_offer_through_one_server_started_once(
 
 @pytest.mark.parametrize("end", ["daily limit", "stop", "failures in a row"])
 def test_no_server_process_is_left_after_the_run_ends(
-    engine: Engine, server: FictionalServer, end: str
+    engine: Engine, server: FictionalServer, end: str, monkeypatch: pytest.MonkeyPatch
 ):
+    kept: list[LinkedInServer] = []  # the run's server outlives the run: only closing stops it
+
+    class KeptServer(LinkedInServer):
+        def __init__(self, command: str) -> None:
+            super().__init__(command)
+            kept.append(self)
+
+    monkeypatch.setattr(linkedin, "LinkedInServer", KeptServer)
     jobs = (*JOBS, "4000000004")
     server.serve({} if end == "failures in a row" else {job_id: _job(POSTING) for job_id in jobs})
     offer_ids = [_offer(engine, job_id) for job_id in jobs]
@@ -382,6 +391,7 @@ def test_no_server_process_is_left_after_the_run_ends(
     with Session(engine) as session:
         describe_linkedin_offers(session, clock, clock.sleep, stop=stop)
 
+    assert len(kept) == 1
     assert len(server.calls()) == (FAILURES_IN_A_ROW if end == "failures in a row" else 2)
     assert len(server.starts()) == 1
     assert [pid for pid in server.starts() if _alive(pid)] == []

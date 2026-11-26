@@ -1,4 +1,4 @@
-"""A fictional LinkedIn MCP server over stdio, for tests: linkedin_mcp_server.py JOBS CALLS [STARTS].
+"""A fictional LinkedIn MCP server over stdio, for tests: python THIS_FILE JOBS CALLS [STARTS].
 
 JOBS is a JSON file mapping a job id to what get_job_details returns; an id it lacks makes
 the tool fail. Every tool call is appended to CALLS, one JSON line each, before it runs.

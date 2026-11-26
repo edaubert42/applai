@@ -2,8 +2,10 @@
 
 describe_linkedin_offers() reads every new LinkedIn offer, oldest first, with the server's
 get_job_details tool, and moves each new → described, like applai.details does for public
-pages. The server is the command line in APPLAI_LINKEDIN_MCP, started for each call over
-stdio with only the MCP SDK's safe environment variables. A call that fails, or gives no
+pages. The server is the command line in APPLAI_LINKEDIN_MCP, run over stdio with only the
+MCP SDK's safe environment variables: started on a run's first call and kept open across its
+waits until the run ends, as it opens a browser; started again on the next call when it dies
+or fails. read_linkedin_offer() starts one per call. A call that fails, or gives no
 text, records its error on the offer, which stays new and is read again on a later run,
 after the offers never tried; after FAILURES_IN_A_ROW of them the run stops reading.
 
@@ -19,8 +21,8 @@ import os
 import re
 import shlex
 import time
-from collections.abc import AsyncIterator, Callable, Sequence
-from contextlib import ExitStack, asynccontextmanager, closing
+from collections.abc import AsyncGenerator, Callable, Sequence
+from contextlib import ExitStack, asynccontextmanager, closing, suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -45,7 +47,7 @@ STOPPED = (
     f"{FAILURES_IN_A_ROW} calls failed in a row, so the scan stopped reading LinkedIn:"
     " LinkedIn may be limiting the account"
 )
-TIMEOUT = 120.0  # seconds, the server's start included: it may open a browser
+TIMEOUT = 120.0  # seconds for the server's start, and again for each call: it may open a browser
 _JOB_ID = re.compile(r"/jobs/view/(?:[^/]*-)?(\d+)/?$")
 
 type Progress = Callable[[int, int], None]  # offers a run went through, and offers it has
@@ -106,10 +108,8 @@ class LinkedInServer:
         """Stop the server, if started; the next call starts it again."""
         opened, self._open = self._open, ExitStack()
         self._portal = self._client = None
-        try:
+        with suppress(Exception):  # a dead server's own errors on the way out: it is stopped
             opened.close()
-        except Exception:  # a dead server's own errors on the way out: its process is stopped
-            pass
 
 
 def call_tool(command: str, tool: str, arguments: dict[str, Any], timeout: float = TIMEOUT) -> str:
@@ -314,7 +314,7 @@ def _posting(text: str) -> str:
 
 
 @asynccontextmanager
-async def _session(argv: list[str], timeout: float) -> AsyncIterator[ClientSession]:
+async def _session(argv: list[str], timeout: float) -> AsyncGenerator[ClientSession]:
     """The started server, open until the block ends; starting it fails after timeout."""
     server = StdioServerParameters(command=argv[0], args=argv[1:])
     async with stdio_client(server) as (read, write), ClientSession(read, write) as client:
