@@ -47,6 +47,8 @@ An issue is `hard` when any of these holds; otherwise it is normal:
 
 The owner questions a `hard` issue (numbered questions, a recommended answer each) before labeling it `ready-for-agent`: most review rounds come from an unclear issue, not from the code.
 
+Whoever writes or labels an issue first reads the code each acceptance criterion touches, and puts in that questioning the questions the coder would ask: a state or transition that does not exist, a criterion an ADR contradicts, a step the issue leaves to no one.
+
 | Agent | Normal | `hard` |
 |---|---|---|
 | Coder | Sonnet 5.5, effort high | Opus 5.5, effort high |
