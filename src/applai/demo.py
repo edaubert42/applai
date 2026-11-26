@@ -3,18 +3,19 @@
 demo/candidate/offers/ holds fictional offers, each an offer case of the Drafting bench
 (applai.bench.drafting). run_demo() runs the real pipeline on them in a new database: Triage
 reads each; an offer it leaves triaged with a score of at least review_min_score is accepted,
-as the candidate would, its form is its questions as textareas and the cover letter's field
-when asked, and it is drafted (Drafting, the judge, CV tailoring). The others are only
-triaged. Nothing fills a form, nothing is sent.
+as the candidate would, its form is the demo's own (applai.demo_fill), and it is drafted
+(Drafting, the judge, CV tailoring). The others are only triaged. Nothing is sent.
 
 applai demo serves the demo (demo_app): each start builds the board again in a new
 database, so whatever a visitor changed is gone at the next one.
 
 applai demo record runs it with the real agents through a Recorder and writes every run to
 demo/candidate/recordings.json: the runs the file holds are answered from it, so only the
-missing ones call Claude, and the file keeps the others.
+missing ones call Claude, and the file keeps the others. It also plans the fill of every
+drafted application, its answers checked as drafted, and records the fills demo/fills lacks.
 """
 
+import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -24,7 +25,7 @@ from jsonschema import Draft202012Validator
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from applai import correct
+from applai import correct, demo_fill
 from applai.agents import (
     AgentError,
     AgentResult,
@@ -38,11 +39,13 @@ from applai.agents import (
     write_recordings,
 )
 from applai.app import create_app
-from applai.bench.drafting import OfferCase, case_fields, load_cases
+from applai.bench.drafting import OfferCase, load_cases
 from applai.bench.triage import DEMO_DIR, BenchError
 from applai.correct import AnswerDecision, AnswerRequest
+from applai.cv import CvError
 from applai.database import open_database
 from applai.drafting import DraftingError, draft_application
+from applai.filling import FillingError, plan_fill
 from applai.models import LOCAL_USER_ID, Application, CvChange, DraftAnswer, Offer, OfferState
 from applai.orchestrator import Actor, ApplicationState, move
 from applai.profile import Profile, load_profile
@@ -115,9 +118,11 @@ def demo_app(database_dir: Path, backup_dir: Path) -> tuple[FastAPI, list[str]]:
     failed building it, by offer (run_demo).
 
     Its agents replay the recordings, its watch reaches no network and never scans, and it
-    sends nothing (applai.app): demo/candidate is only read. The board is built without the
+    sends nothing (applai.app). It serves a copy of demo/candidate in database_dir, where a
+    fill writes its files: demo/candidate is only read. The board is built without the
     replay's wait; a visitor waits it.
     """
+    data_dir = shutil.copytree(DEMO_DIR, database_dir / "candidate")
     recordings = read_recordings(RECORDINGS)
     database = open_database(database_dir, backup_dir)
     try:
@@ -126,7 +131,7 @@ def demo_app(database_dir: Path, backup_dir: Path) -> tuple[FastAPI, list[str]]:
         database.dispose()
     watch = Watch(http=httpx2.Client(transport=httpx2.MockTransport(_refuse)),
                   runner=AgentRunner(ReplayBackend(recordings)), ms_client_id=None)  # fmt: skip
-    app = create_app(DEMO_DIR, watch=watch, database_dir=database_dir, backup_dir=backup_dir,
+    app = create_app(data_dir, watch=watch, database_dir=database_dir, backup_dir=backup_dir,
                      demo=True)  # fmt: skip
     return app, failures
 
@@ -155,7 +160,8 @@ def _run_offer(
         application = session.scalars(
             select(Application).where(Application.offer_id == offer_id)
         ).one()
-        application.form_fields = case_fields(case)
+        application.form_fields = demo_fill.demo_fields(case)
+        application.form_url = f"/demo/forms/{application.id}"
         move(session, application, ApplicationState.FORM_CAPTURED, Actor.FORM_CAPTURE)
         application_id = application.id
     draft_application(runner, database, application_id, profile, DEMO_DIR)
@@ -203,8 +209,33 @@ def record(backend: Backend, path: Path) -> tuple[Recorder, list[str]]:
             database = open_database(data_dir, backup_dir)
             try:
                 failures = run_demo(AgentRunner(recorder), database)
+                failures += _record_fills(AgentRunner(recorder), database, Path(data_dir))
             finally:
                 database.dispose()
     finally:
         write_recordings(path, recorder.recordings)
     return recorder, failures
+
+
+def _record_fills(runner: AgentRunner, database: Engine, data_dir: Path) -> list[str]:
+    """Check the answers of the drafted application too, plan every checked application's fill
+    and record the fills demo/fills lacks (applai.demo_fill). What failed, by application."""
+    profile = load_profile(DEMO_DIR)
+    state = Application.state
+    with Session(database) as session, session.begin():
+        drafted = select(Application.id).where(state == ApplicationState.DRAFTED)
+        for application_id in session.scalars(drafted).all():
+            _check_answers(session, application_id)
+        checked = select(Application.id).where(state == ApplicationState.ANSWERS_CHECKED)
+        ids = session.scalars(checked.order_by(Application.id)).all()
+    failures: list[str] = []
+    for application_id in ids:
+        try:
+            plan_fill(runner, database, data_dir, application_id, profile)
+        except (AgentError, FillingError, CvError) as error:  # they quote no answer
+            failures.append(f"application {application_id}: {error}")
+    with Session(database) as session:
+        planned = select(Application).where(Application.id.in_(ids),
+                                            Application.fill_plan.is_not(None))  # fmt: skip
+        plans = [(a.id, a.form_fields or [], a.fill_plan or []) for a in session.scalars(planned)]
+    return failures + demo_fill.record_fills(data_dir, plans)

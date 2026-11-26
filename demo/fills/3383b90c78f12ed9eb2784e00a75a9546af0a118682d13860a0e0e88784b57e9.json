@@ -1,0 +1,8 @@
+[
+{"field": 0, "value": "J'attends de mon prochain poste qu'il me permette de mettre à profit six ans de data engineering, acquis chez Brindille Logistique puis chez Ventolune Énergie. Je souhaite continuer à rendre les traitements de données plus rapides et plus fiables, comme lorsque j'ai réduit le pipeline nocturne de Ventolune Énergie de 6 heures à 40 minutes grâce à des chargements incrémentaux. Je cherche aussi un poste où mon travail sert directement aux équipes sur le terrain, comme la prévision des délais de livraison que j'ai construite chez Brindille Logistique et qu'utilisent 120 entrepôts.", "file": null, "unfilled": null},
+{"field": 1, "value": null, "file": "cover_letter.pdf", "unfilled": null},
+{"field": 2, "value": "Jeanne", "file": null, "unfilled": null},
+{"field": 3, "value": "Dupont", "file": null, "unfilled": null},
+{"field": 4, "value": "jeanne.dupont@example.org", "file": null, "unfilled": null},
+{"field": 5, "value": "+33 6 00 00 00 00", "file": null, "unfilled": null}
+]

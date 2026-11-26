@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Candidature (démo ApplAI)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; color: #161616; }
+  label { display: block; margin-top: 1rem; font-weight: 600; }
+  input, textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 0.3rem; font: inherit; }
+  textarea { min-height: 7rem; }
+  button { margin-top: 1.5rem; padding: 0.5rem 1rem; font: inherit; }
+</style>
+</head>
+<body>
+<h1>Candidature</h1>
+<p>Formulaire fictif de la démo ApplAI : son bouton n’envoie rien.</p>
+<form onsubmit="return false">
+{%- for field in fields %}
+  <label for="field-{{ loop.index0 }}">{{ field.label }}</label>
+  {%- if field.type == "textarea" %}
+  <textarea id="field-{{ loop.index0 }}" name="field-{{ loop.index0 }}"></textarea>
+  {%- else %}
+  <input id="field-{{ loop.index0 }}" name="field-{{ loop.index0 }}" type="{{ {'phone': 'tel'}.get(field.type, field.type) }}">
+  {%- endif %}
+{%- endfor %}
+  <button type="submit">Envoyer ma candidature</button>
+</form>
+</body>
+</html>

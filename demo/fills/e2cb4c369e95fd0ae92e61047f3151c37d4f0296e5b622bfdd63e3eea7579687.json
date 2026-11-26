@@ -1,0 +1,8 @@
+[
+{"field": 0, "value": "I have been a data engineer for six years, first in logistics at Brindille Logistique, then in energy at Ventolune Énergie. At Brindille Logistique, I built the delivery-time forecast used by 120 warehouses, which is close to the pipelines behind your delivery-time estimates. At Ventolune Énergie, I cut the nightly pipeline from 6 hours to 40 minutes with incremental loads, and I want to bring that work on reliable pipelines to Lavande Freight.", "file": null, "unfilled": null},
+{"field": 1, "value": "At Brindille Logistique, where I worked as a data engineer, I built the delivery-time forecast. This forecast was used by 120 warehouses.", "file": null, "unfilled": null},
+{"field": 2, "value": "Jeanne", "file": null, "unfilled": null},
+{"field": 3, "value": "Dupont", "file": null, "unfilled": null},
+{"field": 4, "value": "jeanne.dupont@example.org", "file": null, "unfilled": null},
+{"field": 5, "value": "+33 6 00 00 00 00", "file": null, "unfilled": null}
+]

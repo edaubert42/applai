@@ -1,0 +1,8 @@
+[
+{"field": 0, "value": "Je suis data engineer depuis six ans, d'abord chez Brindille Logistique puis chez Ventolune Énergie, et la logistique est un domaine que je connais de l'intérieur. Chez Brindille Logistique, j'ai construit la prévision des délais de livraison utilisée par 120 entrepôts, un travail proche des prévisions de charge que vous voulez mettre en place pour vos entrepôts. Construire vos pipelines de données de livraison me permettrait de remettre cette expérience au service d'un logisticien.", "file": null, "unfilled": null},
+{"field": 1, "value": "Chez Ventolune Énergie, j'ai repris le pipeline nocturne, qui prenait 6 heures. En passant à des chargements incrémentaux, je l'ai ramené à 40 minutes.", "file": null, "unfilled": null},
+{"field": 2, "value": "Jeanne", "file": null, "unfilled": null},
+{"field": 3, "value": "Dupont", "file": null, "unfilled": null},
+{"field": 4, "value": "jeanne.dupont@example.org", "file": null, "unfilled": null},
+{"field": 5, "value": "+33 6 00 00 00 00", "file": null, "unfilled": null}
+]

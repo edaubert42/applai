@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from applai import demo
+from applai import demo, demo_fill
 from applai.agents import (
     AgentError,
     AgentResult,
@@ -93,6 +93,7 @@ class Models:
 def recordings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "recordings.json"
     monkeypatch.setattr(demo, "RECORDINGS", path)
+    monkeypatch.setattr(demo_fill, "FILLS", tmp_path / "fills")
     return path
 
 
@@ -151,6 +152,53 @@ def test_an_output_the_schema_refuses_is_not_recorded_and_the_next_record_asks_a
 
     assert retry.specs[0] == bad
     assert recording_key(bad) in read_recordings(recordings)
+
+
+def test_record_fills_each_checked_demo_form_with_playwright_once(recordings: Path):
+    models = Models()
+
+    main(["demo", "record"], runner=AgentRunner(models))
+
+    fills = recordings.parent / "fills"
+    states = {path.stem: json.loads(path.read_text()) for path in fills.glob("*.json")}
+    drafted = Counter(spec.name for spec in models.specs)["drafting"]
+    # All but the dropped one; the two forms that ask only a letter share their plan.
+    assert len(states) == drafted - 2
+    assert sorted(path.stem for path in fills.glob("*.png")) == sorted(states)
+    assert all((fills / f"{key}.png").read_bytes().startswith(b"\x89PNG") for key in states)
+    for fields in states.values():
+        assert not [field for field in fields if field.get("unfilled")]
+        assert {"Jeanne", "Dupont", "jeanne.dupont@example.org"} <= {f.get("value") for f in fields}
+    letters = [f["file"] for fields in states.values() for f in fields if f.get("file")]
+    assert letters and set(letters) == {"cover_letter.pdf"}
+    assert pii.main([str(path) for path in fills.glob("*.json")]) == 0
+    written = {path: path.stat().st_mtime_ns for path in fills.iterdir()}
+
+    main(["demo", "record"], runner=AgentRunner(Models()))
+
+    assert {path: path.stat().st_mtime_ns for path in fills.iterdir()} == written
+
+
+def test_a_form_not_filled_whole_is_printed_not_recorded_and_the_next_record_fills_it(
+    recordings: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    form_html = demo_fill.form_html
+
+    def changed(fields: list[dict[str, Any]]) -> str:  # each label changed since the plan
+        return form_html([{**field, "label": f"{field['label']} (modifié)"} for field in fields])
+
+    monkeypatch.setattr(demo_fill, "form_html", changed)
+
+    main(["demo", "record"], runner=AgentRunner(Models()))
+
+    assert "fields not filled" in capsys.readouterr().out
+    fills = recordings.parent / "fills"
+    assert not fills.exists() or list(fills.iterdir()) == []
+    monkeypatch.setattr(demo_fill, "form_html", form_html)
+
+    main(["demo", "record"], runner=AgentRunner(Models()))
+
+    assert len(list(fills.glob("*.json"))) == len(list(fills.glob("*.png"))) > 0
 
 
 def test_the_recordings_pass_the_privacy_checks_which_read_their_text(
