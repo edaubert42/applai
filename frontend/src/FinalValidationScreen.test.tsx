@@ -88,11 +88,27 @@ describe("FinalValidationScreen", () => {
     expect(screen.getByText("Python, SQL")).toBeTruthy();
     expect(screen.getByText("cv-camille.pdf")).toBeTruthy();
     expect(screen.getByText(words["validation.field.missing_file"])).toBeTruthy();
-    const pdfs = screen.getAllByRole("link", { name: words["validation.field.see_pdf"] });
-    expect(pdfs.map((a) => a.getAttribute("href"))).toEqual(["/api/applications/1/files/cv", "/api/applications/1/files/cover_letter"]);
-    expect(pdfs[0]?.getAttribute("target")).toBe("_blank");
-    expect(pdfs[0]?.getAttribute("rel")).toBe("noreferrer");
+    const cv = screen.getByRole("link", { name: words["validation.field.see_cv"] });
+    const letter = screen.getByRole("link", { name: words["validation.field.see_cover_letter"] });
+    expect(cv.getAttribute("href")).toBe("/api/applications/1/files/cv");
+    expect(letter.getAttribute("href")).toBe("/api/applications/1/files/cover_letter");
+    for (const eye of [cv, letter]) {
+      expect(eye.getAttribute("target")).toBe("_blank");
+      expect(eye.getAttribute("rel")).toBe("noreferrer");
+      expect(eye.querySelector("svg[data-icon='eye']")).not.toBeNull();
+    }
     expect(screen.getByAltText(words["validation.screenshot.alt"]).getAttribute("src")).toBe("/api/applications/1/screenshot");
+  });
+
+  it("shows no eye button for a file field with no slot", async () => {
+    const review = aFormReview({
+      fields: [aReviewedField({ field: 0, label: "Portfolio", type: "file", value: null, file: null, slot: null })],
+    });
+    const { words } = await openValidation({}, "fr", review);
+
+    expect(screen.getByText(words["validation.field.missing_file"])).toBeTruthy();
+    expect(screen.queryByRole("link", { name: words["validation.field.see_cv"] })).toBeNull();
+    expect(screen.queryByRole("link", { name: words["validation.field.see_cover_letter"] })).toBeNull();
   });
 
   it("shows clean message when no problem, omits screenshot when absent, and alerts on load error", async () => {
