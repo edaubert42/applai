@@ -7,6 +7,9 @@ as the candidate would, its form is its questions as textareas and the cover let
 when asked, and it is drafted (Drafting, the judge, CV tailoring). The others are only
 triaged. Nothing fills a form, nothing is sent.
 
+applai demo serves the demo (demo_app): each start builds the board again in a new
+database, so whatever a visitor changed is gone at the next one.
+
 applai demo record runs it with the real agents through a Recorder and writes every run to
 demo/candidate/recordings.json: the runs the file holds are answered from it, so only the
 missing ones call Claude, and the file keeps the others.
@@ -15,10 +18,13 @@ missing ones call Claude, and the file keeps the others.
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import httpx2
+from fastapi import FastAPI
 from jsonschema import Draft202012Validator
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
+from applai import correct
 from applai.agents import (
     AgentError,
     AgentResult,
@@ -26,20 +32,25 @@ from applai.agents import (
     AgentSpec,
     Backend,
     FailureKind,
+    ReplayBackend,
     read_recordings,
     recording_key,
     write_recordings,
 )
+from applai.app import create_app
 from applai.bench.drafting import OfferCase, case_fields, load_cases
 from applai.bench.triage import DEMO_DIR, BenchError
+from applai.correct import AnswerDecision, AnswerRequest
 from applai.database import open_database
 from applai.drafting import DraftingError, draft_application
-from applai.models import LOCAL_USER_ID, Application, Offer, OfferState
+from applai.models import LOCAL_USER_ID, Application, CvChange, DraftAnswer, Offer, OfferState
 from applai.orchestrator import Actor, ApplicationState, move
 from applai.profile import Profile, load_profile
-from applai.review import Decision, DecisionRequest, decide
+from applai.review import Decision, DecisionRequest, Reason, decide
+from applai.scan import Watch
 from applai.settings import review_min_score
 from applai.triage import TriageError, triage_offer
+from applai.validation import DropRequest, drop_application
 
 OFFERS = DEMO_DIR / "offers"
 RECORDINGS = DEMO_DIR / "recordings.json"
@@ -59,7 +70,9 @@ def run_demo(runner: AgentRunner, database: Engine) -> list[str]:
     """Run every demo offer through the pipeline, in a new database; what failed, by offer.
 
     A failed run or a refused draft stays on its offer or application, as in ApplAI, and the
-    next offer runs.
+    next offer runs. Then the candidate acts on the drafted applications, in offer order: the
+    first waits for them (« vérifier les textes »), they check the answers of the next ones,
+    which wait for Filling, and drop the last.
     """
     profile = load_profile(DEMO_DIR)
     min_score = review_min_score(DEMO_DIR)
@@ -69,7 +82,53 @@ def run_demo(runner: AgentRunner, database: Engine) -> list[str]:
             _run_offer(runner, database, name, case, profile, min_score)
         except (AgentError, TriageError, DraftingError) as error:  # they quote no offer
             failures.append(f"{name}: {error}")
+    with Session(database) as session, session.begin():
+        drafted = list(session.scalars(
+            select(Application.id).where(Application.state == ApplicationState.DRAFTED)
+            .order_by(Application.id)
+        ))  # fmt: skip
+        for application_id in drafted[1:-1]:
+            _check_answers(session, application_id)
+        if len(drafted) > 1:
+            drop = DropRequest(reasons=[Reason.SALARY], note="Fourchette sous mes attentes.")
+            drop_application(session, LOCAL_USER_ID, drafted[-1], drop)
     return failures
+
+
+def _check_answers(session: Session, application_id: int) -> None:
+    accept = AnswerRequest(decision=AnswerDecision.ACCEPT)
+    answers = select(DraftAnswer.id).where(DraftAnswer.application_id == application_id)
+    for answer_id in session.scalars(answers).all():
+        correct.decide(session, LOCAL_USER_ID, application_id, answer_id, accept)
+    changes = select(CvChange.id).where(CvChange.application_id == application_id)
+    for change_id in session.scalars(changes).all():
+        correct.decide_cv_change(session, LOCAL_USER_ID, application_id, change_id, accept)
+    correct.check_answers(session, LOCAL_USER_ID, application_id)
+
+
+def _refuse(request: httpx2.Request) -> httpx2.Response:
+    raise httpx2.ConnectError("The demo reaches no network.", request=request)
+
+
+def demo_app(database_dir: Path, backup_dir: Path) -> tuple[FastAPI, list[str]]:
+    """The demo's app, on a new database in database_dir its board was built in, and what
+    failed building it, by offer (run_demo).
+
+    Its agents replay the recordings, its watch reaches no network and never scans, and it
+    sends nothing (applai.app): demo/candidate is only read. The board is built without the
+    replay's wait; a visitor waits it.
+    """
+    recordings = read_recordings(RECORDINGS)
+    database = open_database(database_dir, backup_dir)
+    try:
+        failures = run_demo(AgentRunner(ReplayBackend(recordings, max_wait_s=0)), database)
+    finally:
+        database.dispose()
+    watch = Watch(http=httpx2.Client(transport=httpx2.MockTransport(_refuse)),
+                  runner=AgentRunner(ReplayBackend(recordings)), ms_client_id=None)  # fmt: skip
+    app = create_app(DEMO_DIR, watch=watch, database_dir=database_dir, backup_dir=backup_dir,
+                     demo=True)  # fmt: skip
+    return app, failures
 
 
 def _run_offer(

@@ -15,7 +15,10 @@ from sqlalchemy.orm import Session
 
 from applai import agents, cli, demo
 from applai.app import create_app
+from applai.bench.triage import DEMO_DIR
 from applai.models import Application, Label
+from applai.orchestrator import Actor, move
+from applai.orchestrator import ApplicationState as S
 
 ENV = {
     "APPLAI_NOTION_TOKEN": "secret-notion-token",
@@ -79,10 +82,10 @@ def _rows(board: dict[str, list[dict[str, Any]]]) -> dict[str, list[tuple[Any, .
 def test_applai_demo_serves_the_demo_candidate_and_reaches_no_real_service(
     monkeypatch: pytest.MonkeyPatch, isolated: list[object]
 ):
-    before = _files(demo.DEMO_DIR)
+    before = _files(DEMO_DIR)
 
     def visit(client: TestClient) -> dict[str, Any]:
-        assert os.environ["APPLAI_DATA_DIR"] == str(demo.DEMO_DIR)
+        assert os.environ["APPLAI_DATA_DIR"] == str(DEMO_DIR)
         assert not {"APPLAI_NOTION_TOKEN", "APPLAI_MS_CLIENT_ID", "APPLAI_LINKEDIN_MCP",
                     "APPLAI_BACKUP_DIR"} & set(os.environ)  # fmt: skip
         assert client.get("/api/health").json()["demo"] is True
@@ -90,7 +93,7 @@ def test_applai_demo_serves_the_demo_candidate_and_reaches_no_real_service(
         app: FastAPI = client.app  # pyright: ignore[reportAssignmentType]
         database = Path(str(app.state.engine.url.database))
         # A visitor accepts an offer: its form is looked for, through no network.
-        offer = client.get("/api/review", params={"view": "to_review"}).json()[0]
+        offer = client.get("/api/review", params={"view": "screened_out"}).json()[0]
         decided = client.post(f"/api/offers/{offer['id']}/decision",
                               json={"decision": "interested"})  # fmt: skip
         assert decided.status_code == 201
@@ -102,16 +105,17 @@ def test_applai_demo_serves_the_demo_candidate_and_reaches_no_real_service(
     seen = _run_demo(monkeypatch, visit)
 
     assert seen["health"] == 200
-    assert not seen["database"].is_relative_to(demo.DEMO_DIR)
+    assert not seen["database"].is_relative_to(DEMO_DIR)
     assert not seen["database"].exists()  # the temporary directory went with the demo
     assert isolated == []
-    assert _files(demo.DEMO_DIR) == before  # demo/candidate is only read
+    assert _files(DEMO_DIR) == before  # demo/candidate is only read
 
 
 def test_applai_serve_never_runs_in_demo_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("APPLAI_DATA_DIR", str(demo.DEMO_DIR))
+    monkeypatch.setenv("APPLAI_DATA_DIR", str(DEMO_DIR))
 
-    assert cli.server().config.app.state.demo is False  # pyright: ignore[reportAttributeAccessIssue]
+    served: FastAPI = cli.server().config.app  # pyright: ignore[reportAssignmentType]
+    assert served.state.demo is False
     with TestClient(create_app(tmp_path), base_url="http://127.0.0.1") as client:
         assert client.get("/api/health").json()["demo"] is False
 
@@ -133,8 +137,9 @@ def test_the_board_has_applications_in_progress_waiting_and_dropped_with_their_r
     assert [row["state"] for row in board["dropped"]] == ["dropped"]
     assert board["sent"] == []
     drafted = ["triage", "drafting", "drafting_judge", "cv_tailoring"]
-    for state, gates in [("drafted", ["accepted"]), ("answers_checked", ["accepted", "answers_checked"]),
-                         ("dropped", ["accepted", "dropped"])]:  # fmt: skip
+    gates_by_state = {"drafted": ["accepted"], "answers_checked": ["accepted", "answers_checked"],
+                      "dropped": ["accepted", "dropped"]}  # fmt: skip
+    for state, gates in gates_by_state.items():
         steps = traces[state]["steps"]
         assert [s["agent"] for s in steps if s["kind"] == "run"] == drafted, state
         assert {s["outcome"] for s in steps if s["kind"] == "run"} == {"ok"}, state
@@ -143,12 +148,16 @@ def test_the_board_has_applications_in_progress_waiting_and_dropped_with_their_r
 
 
 def _validated(app: FastAPI) -> int:
-    """Stand in for Filling and Review, which the demo has no recordings of: a validated one."""
+    """Stand in for Filling, Review and the gates, which the demo has no recordings of."""
     with Session(app.state.engine) as session, session.begin():
         application = session.scalars(select(Application).where(
-            Application.state == "drafted")).first()  # fmt: skip
+            Application.state == "answers_checked")).first()  # fmt: skip
         assert application is not None
-        application.state, application.form_url = "validated", "https://jobs.example.org/form"
+        application.form_url = "https://jobs.example.org/form"
+        steps = [(S.FILLED, Actor.FILLING), (S.REVIEWED, Actor.REVIEW),
+                 (S.FORM_CHECKED, Actor.CANDIDATE), (S.VALIDATED, Actor.CANDIDATE)]  # fmt: skip
+        for state, actor in steps:
+            move(session, application, state, actor)
         return application.id
 
 
@@ -163,9 +172,10 @@ def test_sending_answers_403_in_demo_mode_and_the_application_does_not_move(
             ("sent", client.post(f"/api/applications/{application_id}/sent")),
             ("sends", client.get("/api/browser/sends")),
             ("send done", client.post(f"/api/browser/sends/{application_id}")),
-            ("send failed", client.post(f"/api/browser/sends/{application_id}/failure",
-                                        json={"reason": "captcha"})),  # fmt: skip
-        ]
+            ("send failed", client.post(
+                f"/api/browser/sends/{application_id}/failure", json={"reason": "captcha"}
+            )),
+        ]  # fmt: skip
         with Session(app.state.engine) as session:
             application = session.get_one(Application, application_id)
             assert (application.state, application.send_authorized_at) == ("validated", None)
