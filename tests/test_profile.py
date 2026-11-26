@@ -329,9 +329,15 @@ def test_the_fictional_data_directory_has_no_real_contact_details():
     assert pii_main(_demo_files()) == 0
 
 
+# Read at import: the autouse no_real_services fixture clears APPLAI_DATA_DIR before each test.
+_DENYLIST_ENV = {
+    var: os.environ[var] for var in ("APPLAI_DENYLIST", "APPLAI_DATA_DIR") if var in os.environ
+}
+
+
 def _denylist_configured() -> bool:
     try:
-        load_patterns(os.environ)
+        load_patterns(_DENYLIST_ENV)
     except DenylistNotConfiguredError:
         return False
     return True
@@ -341,5 +347,9 @@ def _denylist_configured() -> bool:
     not _denylist_configured(),
     reason="the denylist is private: set APPLAI_DATA_DIR locally; CI runs it in its privacy job",
 )
-def test_the_fictional_data_directory_has_none_of_the_candidates_terms():
+def test_the_fictional_data_directory_has_none_of_the_candidates_terms(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    for var, value in _DENYLIST_ENV.items():
+        monkeypatch.setenv(var, value)
     assert denylist_main(_demo_files()) == 0
