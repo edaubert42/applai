@@ -479,3 +479,38 @@ def test_post_sent_writes_back_to_notion_and_stays_sent_on_notion_error(
         assert len(notion.requests) == before
     with Session(engine) as s:
         assert [s.get_one(Application, i).state for i in ids] == [ApplicationState.SENT] * 3
+
+
+def test_sent_outside_writes_back_to_notion_once_and_a_failed_write_shows_and_keeps_sent(
+    data_dir: Path, engine: Engine, notion: FakeNotion, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("applai.notion.NOTION_API", notion.url)
+    notion.rows = []
+    with Session(engine) as s:
+        offer = Offer(user_id=1, url=ML_ENGINEER, title="ML engineer", company="Verger Numérique")
+        s.add(offer)
+        s.flush()
+        application = Application(
+            user_id=1, offer_id=offer.id, state=ApplicationState.CREATED,
+            form_url_error="page_no_form",
+        )  # fmt: skip
+        s.add(application)
+        s.commit()
+        app_id = application.id
+
+    secret = "upstream-secret"
+    notion.write_answer = (503, {"object": "error", "message": secret})
+    app = create_app(data_dir, frontend_dir=data_dir / "no-frontend")
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        assert client.post(f"/api/applications/{app_id}/sent-outside").status_code == 204
+        assert [path for path, _, _ in notion.requests if path == "/v1/pages"] == ["/v1/pages"]
+        row = next(r for r in client.get("/api/services").json()["applai"] if r["id"] == "notion")
+        assert row["state"] == "red" and "503" in (row["last_error"] or "")
+        _assert_private(row["last_error"] or "", secret)
+
+        before = len(notion.requests)
+        assert client.post(f"/api/applications/{app_id}/sent-outside").status_code == 409
+        assert client.post(f"/api/applications/{app_id}/sent").status_code == 409
+        assert len(notion.requests) == before
+    with Session(engine) as s:
+        assert s.get_one(Application, app_id).state == ApplicationState.SENT

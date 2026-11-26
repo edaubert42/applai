@@ -72,9 +72,16 @@ _APPLICATION_STAGES: dict[tuple[str, str], Actor] = {
     (_A.VALIDATED, _A.SENT): Actor.CANDIDATE,
 }
 _TERMINAL_APPLICATION = {_A.SENT, _A.DROPPED}
+# From any stage the candidate drops an application, or records a send they made outside
+# ApplAI (applai.validation); ApplAI's own route to sent stays validated -> sent.
 APPLICATION_TRANSITIONS: Mapping[tuple[str, str], Actor] = MappingProxyType(
     _APPLICATION_STAGES
-    | {(state, _A.DROPPED): Actor.CANDIDATE for state in _A if state not in _TERMINAL_APPLICATION}
+    | {
+        (state, end): Actor.CANDIDATE
+        for state in _A
+        if state not in _TERMINAL_APPLICATION
+        for end in _TERMINAL_APPLICATION
+    }
 )
 
 

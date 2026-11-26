@@ -233,6 +233,49 @@ def test_drop_moves_any_non_terminal_state_records_reasons_and_refuses_terminal_
     assert client.post("/api/applications/99999/drop", json=drop).status_code == 404
 
 
+def test_an_application_without_a_form_is_marked_sent_outside_applai_with_a_label_saying_so(
+    engine: Engine, client: TestClient
+):
+    app_id = _app(engine, state="created", form_url=None, fill_plan=None)
+    with Session(engine) as session, session.begin():
+        session.get_one(Application, app_id).form_url_error = "page_no_form"
+
+    assert client.post(f"/api/applications/{app_id}/sent").status_code == 409
+    assert client.post(f"/api/applications/{app_id}/sent-outside").status_code == 204
+
+    state, [change], [label] = _state_and_labels(engine, app_id)
+    assert (state, change.from_state, change.to_state, change.actor) == (
+        "sent", "created", "sent", "candidate",
+    )  # fmt: skip
+    assert (label.level, label.decision, label.reasons, label.correction) == (
+        "application", "sent", ["outside_applai"], False,
+    )  # fmt: skip
+    assert [r["id"] for r in client.get("/api/applications").json()["sent"]] == [app_id]
+    steps = client.get(f"/api/applications/{app_id}/trace").json()["steps"]
+    assert [(s["to_state"], s["reasons"]) for s in steps] == [("sent", ["outside_applai"])]
+
+
+def test_sent_outside_works_from_each_stage_and_a_terminal_application_answers_409_unchanged(
+    engine: Engine, client: TestClient
+):
+    for origin in ("form_captured", "drafted", "filled"):
+        app_id = _app(engine, state=origin)
+        assert client.post(f"/api/applications/{app_id}/sent-outside").status_code == 204
+        state, [change], [label] = _state_and_labels(engine, app_id)
+        assert (state, change.from_state, label.reasons) == ("sent", origin, ["outside_applai"])
+    for terminal in ("sent", "dropped"):
+        done = _app(engine, state=terminal)
+        assert client.post(f"/api/applications/{done}/sent-outside").status_code == 409
+        assert _state_and_labels(engine, done) == (terminal, [], [])
+    foreign, evil = _app(engine, state="drafted", user_id=2), {"Origin": "https://evil.example"}
+    assert client.post(f"/api/applications/{foreign}/sent-outside").status_code == 404
+    assert client.post("/api/applications/99999/sent-outside").status_code == 404
+    guarded = _app(engine, state="drafted")
+    url = f"/api/applications/{guarded}/sent-outside"
+    assert client.post(url, headers=evil).status_code == 403
+    assert _state_and_labels(engine, guarded) == ("drafted", [], [])
+
+
 def test_an_offer_closed_drop_is_not_a_correction_and_other_reasons_with_it_still_are(
     engine: Engine, client: TestClient
 ):

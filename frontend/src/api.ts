@@ -285,7 +285,15 @@ async function requestEmpty(method: string, path: string, body?: unknown): Promi
   if (!response.ok) throw new ApiError(method, path, response.status);
 }
 
+/** GET /api/health: demo is true when ApplAI runs as the public demo (applai demo). */
+export interface Health {
+  status: string;
+  database_revision: string | null;
+  demo: boolean;
+}
+
 export const api = {
+  health: () => request<Health>("GET", "/api/health"),
   cards: (view: View) => request<Card[]>("GET", `/api/review?view=${view}`),
   decide: (id: number, decision: Decision) =>
     request<unknown>("POST", `/api/offers/${id}/decision`, decision),
@@ -316,6 +324,8 @@ export const api = {
   authorizeSend: (id: number) => requestEmpty("POST", `/api/applications/${id}/authorize-send`),
   fillAgain: (id: number) => requestEmpty("POST", `/api/applications/${id}/fill-again`),
   markSent: (id: number) => requestEmpty("POST", `/api/applications/${id}/sent`),
+  /** Record a send the candidate already made outside ApplAI: ApplAI sends nothing. */
+  markSentOutside: (id: number) => requestEmpty("POST", `/api/applications/${id}/sent-outside`),
   dropApplication: (id: number, reasons: DropReason[], note?: string) =>
     requestEmpty("POST", `/api/applications/${id}/drop`, note ? { reasons, note } : { reasons }),
   /** Start a failed stage again: Drafting, Filling or Review runs in the background (202). */
