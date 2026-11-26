@@ -210,5 +210,5 @@ def test_sent_outside_gives_the_extension_nothing_to_read_fill_or_send(
         apps = [session.get_one(Application, i) for i in (to_read, to_fill, to_fill_again, to_send)]
         assert [a.state for a in apps] == ["sent"] * 4
         assert apps[3].send_authorized_at is None
-        labels = session.scalars(select(Label).where(Label.decision == "sent")).all()
-        assert sorted(label.application_id for label in labels) == sorted(a.id for a in apps)
+        labels = session.scalars(select(Label).where(Label.decision == "sent").order_by(Label.id))
+        assert [label.application_id for label in labels] == [a.id for a in apps]

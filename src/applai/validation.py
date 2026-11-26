@@ -3,10 +3,10 @@
 After Review checks a filled form, the candidate checks the form in Chrome (recording any
 fields corrected by hand as a correction at the form level, ADR 0004), validates the full
 application, and marks it sent once submitted by hand (ADR 0003) — or marks a non-terminal
-application sent outside ApplAI, a send the candidate already made without it, or drops it, saying why with the offer's decline reasons or offer_closed. A drop is a
-correction at the full-application level unless the offer closing is its only reason, which
-says nothing about the answers or the form. Functions write in the caller's session and do
-not commit.
+application sent outside ApplAI, a send the candidate already made without it, or drops it,
+saying why with the offer's decline reasons or offer_closed. A drop is a correction at the
+full-application level unless the offer closing is its only reason, which says nothing about
+the answers or the form. Functions write in the caller's session and do not commit.
 """
 
 from typing import Annotated, Literal
