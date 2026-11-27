@@ -238,17 +238,24 @@ def test_sending_answers_403_in_demo_mode_and_the_application_does_not_move(
                 f"/api/browser/sends/{application_id}/failure", json={"reason": "captcha"}
             )),
         ]  # fmt: skip
+        offer = client.get("/api/review", params={"view": "screened_out"}).json()[0]
+        already = {"decision": "not_interested", "reasons": ["already_applied"]}
+        answers.append(
+            ("already applied", client.post(f"/api/offers/{offer['id']}/decision", json=already))
+        )
         with Session(app.state.engine) as session:
             application = session.get_one(Application, application_id)
             assert (application.state, application.send_authorized_at) == ("validated", None)
             assert session.scalars(select(Label).where(Label.decision == "sent")).all() == []
+            assert session.scalars(select(Label).where(Label.offer_id == offer["id"])).all() == []
+        assert client.get("/api/review", params={"view": "screened_out"}).json()[0] == offer
         return [(name, a.status_code, a.json()["detail"]) for name, a in answers]
 
     answers = _run_demo(monkeypatch, visit)
 
     assert [(name, code) for name, code, _ in answers] == [
         ("authorize-send", 403), ("sent", 403), ("sent outside", 403), ("sends", 403),
-        ("send done", 403), ("send failed", 403),
+        ("send done", 403), ("send failed", 403), ("already applied", 403),
     ]  # fmt: skip
     assert {detail for _, _, detail in answers} == {"Refused: nothing is sent in the demo."}
 

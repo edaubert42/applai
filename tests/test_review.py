@@ -444,3 +444,119 @@ def test_screened_out_cards_of_rule_screened_offers_show_their_triage_when_they_
     assert [card["title"] for card in cards] == ["Data trainee", "Sales engineer"]
     assert (cards[0]["score"], cards[0]["rule"], cards[0]["cons"][-1]) == (62, "fixed_term", con)
     assert (cards[1]["score"], cards[1]["rule"]) == (None, "title_word:sales")
+
+
+def _already_applied(client: TestClient, offer_id: int, **body: Any):
+    return _decide(client, offer_id, "not_interested", reasons=["already_applied"], **body)
+
+
+def _rows(engine: Engine) -> tuple[list[Application], list[Label], list[StateChange]]:
+    with Session(engine) as session:
+        apps = list(session.scalars(select(Application).order_by(Application.id)))
+        changes = list(session.scalars(select(StateChange).order_by(StateChange.id)))
+        return apps, _labels(engine), changes
+
+
+@pytest.mark.parametrize(
+    ("state", "score", "rule"),
+    [
+        ("triaged", 82, None),  # To review
+        ("later", 82, None),  # Later
+        ("screened_out", None, "contract"),  # Screened out, by a rule
+        ("triaged", 30, None),  # Screened out, below the threshold
+    ],
+)
+def test_an_offer_declined_as_already_applied_ends_with_its_application_sent(
+    engine: Engine, client: TestClient, state: str, score: int | None, rule: str | None
+):
+    offer_id = _offer(engine, "data-engineer", state, score=score, rule=rule)
+
+    response = _already_applied(client, offer_id, note="Postulé sur leur site en octobre.")
+
+    assert response.status_code == 201
+    assert _state(engine, offer_id) == "accepted"
+    [application], [offer_label, sent_label], changes = _rows(engine)
+    assert application.state == "sent"
+    assert [(c.application_id, c.from_state, c.to_state, c.actor) for c in changes] == [
+        (None, state, "accepted", "candidate"),
+        (application.id, None, "created", "candidate"),
+        (application.id, "created", "sent", "candidate"),
+    ]
+    assert (offer_label.level, offer_label.decision, offer_label.reasons) == (
+        "offer", "not_interested", ["already_applied"],
+    )  # fmt: skip
+    assert (offer_label.note, offer_label.correction) == ("Postulé sur leur site en octobre.", False)
+    assert (sent_label.application_id, sent_label.decision, sent_label.reasons) == (
+        application.id, "sent", ["outside_applai"],
+    )  # fmt: skip
+    assert sent_label.correction is False
+    board = client.get("/api/applications").json()
+    assert [row["id"] for row in board["sent"]] == [application.id]
+    assert all(_titles(client, view) == [] for view in ("to_review", "later", "screened_out"))
+
+
+@pytest.mark.parametrize("first", ["interested", "not_interested"])
+def test_already_applied_on_an_accepted_or_declined_offer_answers_409_and_writes_nothing(
+    engine: Engine, client: TestClient, first: str
+):
+    offer_id = _offer(engine, "data-engineer", "triaged", score=82)
+    reasons = {"reasons": ["salary"]} if first == "not_interested" else {}
+    assert _decide(client, offer_id, first, **reasons).status_code == 201
+    apps, labels, changes = _rows(engine)
+
+    assert _already_applied(client, offer_id).status_code == 409
+    assert _already_applied(client, offer_id).status_code == 409
+
+    again, labels_again, changes_again = _rows(engine)
+    assert [a.state for a in again] == [a.state for a in apps] == ["created"] * len(apps)
+    assert (len(labels_again), len(changes_again)) == (len(labels), len(changes))
+    assert _state(engine, offer_id) == ("accepted" if first == "interested" else "declined")
+
+
+def test_a_failed_step_of_an_already_applied_save_writes_nothing_and_a_retry_works(
+    tmp_path: Path, engine: Engine
+):
+    offer_id = _offer(engine, "data-engineer", "triaged", score=82)
+    with engine.begin() as connection:  # the last write of the save fails, as a full disk would
+        connection.exec_driver_sql(
+            "CREATE TRIGGER fail_sent_label BEFORE INSERT ON labels"
+            " WHEN NEW.level = 'application' BEGIN SELECT RAISE(ABORT, 'disk full'); END"
+        )
+    app = create_app(tmp_path, frontend_dir=tmp_path / "no-frontend")
+    with TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False) as client:
+        assert _already_applied(client, offer_id).status_code == 500
+
+        assert _state(engine, offer_id) == "triaged"
+        assert _rows(engine) == ([], [], [])
+        assert _titles(client, "to_review") == ["Data engineer"]
+
+        with engine.begin() as connection:
+            connection.exec_driver_sql("DROP TRIGGER fail_sent_label")
+        assert _already_applied(client, offer_id).status_code == 201
+    [application], labels, _ = _rows(engine)
+    assert (application.state, len(labels)) == ("sent", 2)
+
+
+@pytest.mark.parametrize("reasons", [["already_applied", "salary"], ["expired", "already_applied"]])
+def test_already_applied_with_another_reason_answers_422(
+    engine: Engine, client: TestClient, reasons: list[str]
+):
+    offer_id = _offer(engine, "data-engineer", "triaged", score=82)
+
+    assert _decide(client, offer_id, "not_interested", reasons=reasons).status_code == 422
+
+    assert _state(engine, offer_id) == "triaged"
+    assert _rows(engine) == ([], [], [])
+
+
+@pytest.mark.parametrize("reasons", [["already_applied"], ["already_applied", "salary"]])
+def test_a_drop_cannot_use_already_applied(engine: Engine, client: TestClient, reasons: list[str]):
+    offer_id = _offer(engine, "data-engineer", "triaged", score=82)
+    assert _decide(client, offer_id, "interested").status_code == 201
+    [application], _, _ = _rows(engine)
+
+    response = client.post(f"/api/applications/{application.id}/drop", json={"reasons": reasons})
+
+    assert response.status_code == 422
+    [application], labels, _ = _rows(engine)
+    assert (application.state, [label.decision for label in labels]) == ("created", ["interested"])
