@@ -212,3 +212,31 @@ def test_a_pasted_http_url_is_recorded_and_clears_the_error_another_scheme_is_re
     assert response.status_code == 200
     assert (_row(client)["form_url"], _row(client)["form_url_error"]) == (LEVER, None)
     assert client.put("/api/applications/999/form-url", json={"url": LEVER}).status_code == 404
+
+
+def test_an_offer_declined_as_already_applied_starts_no_capture_and_gives_the_extension_nothing(
+    tmp_path: Path, engine: Engine, client: TestClient, pages: dict[str, str], asked: list[str]
+):
+    extension_id = "kfbcmpgnoaljdhiekfbcmpgnoaljdhie"
+    (tmp_path / "settings.yaml").write_text(f"extension_id: {extension_id}\n")
+    pages[BOARD] = f'<a href="{LEVER}">Postuler</a>'
+    with Session(engine) as session, session.begin():
+        offer = Offer(user_id=1, url=BOARD, title="Data engineer", company="Pivoine Analytics",
+                      state="later")  # fmt: skip
+        session.add(offer)
+        session.flush()
+        offer_id = offer.id
+    decline = {"decision": "not_interested", "reasons": ["already_applied"]}
+
+    assert client.post(f"/api/offers/{offer_id}/decision", json=decline).status_code == 201
+
+    with Session(engine) as session:
+        application = session.scalars(select(Application)).one()
+        assert (application.state, application.form_url, application.form_url_error) == (
+            "sent", None, None,
+        )  # fmt: skip
+    assert asked == []
+    extension = {"Origin": f"chrome-extension://{extension_id}"}
+    for queue in ("forms", "fills", "sends"):
+        answer = client.get(f"/api/browser/{queue}", headers=extension)
+        assert (queue, answer.status_code, answer.json()) == (queue, 200, [])

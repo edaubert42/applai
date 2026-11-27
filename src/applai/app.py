@@ -213,7 +213,11 @@ def decision(
 
     An accepted offer's application then gets its form's URL in the background, with the
     watch's HTTP client (applai.capture); without the watch, the candidate pastes it.
+    A decline as already_applied also records its application sent outside ApplAI, in the same
+    transaction, and writes back to Notion: nothing is looked for or sent (ADR 0003).
     """
+    if body.already_applied and request.app.state.demo:  # it records a send, as sent-outside
+        raise HTTPException(403, "Refused: nothing is sent in the demo.")
     try:
         with session.begin():
             label = decide(session, LOCAL_USER_ID, offer_id, body, min_score)
@@ -221,10 +225,15 @@ def decision(
             application_id = session.scalar(
                 select(Application.id).where(Application.offer_id == offer_id)
             )
+            if body.already_applied and application_id is not None:
+                validation.mark_sent_outside(session, LOCAL_USER_ID, application_id)
     except OfferNotFound:
         raise HTTPException(status_code=404, detail="no such offer") from None
     except TransitionError as error:
         raise HTTPException(status_code=409, detail=str(error)) from None
+    if body.already_applied and application_id is not None:
+        s = request.app.state
+        later.add_task(notion.write_sent_in_background, s.engine, s.data_dir, application_id)
     watch: Watch | None = request.app.state.watch
     if body.decision == Decision.INTERESTED and application_id and watch:
         later.add_task(find_form, request.app.state.engine, application_id, watch.http)

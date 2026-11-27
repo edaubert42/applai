@@ -10,6 +10,11 @@ screening sets aside the offers it screens out. So declining a proposed offer is
 correction, also after the candidate put it in later, and so is accepting an offer set
 aside. Putting an offer in later never is one (ADR 0004). A decline whose only reason is
 expired says nothing about the Triage, so it is not one.
+
+A decline as already_applied, a reason that stands alone, says the candidate applied outside
+ApplAI: decide() accepts the offer instead, which creates its application, and the caller
+records the send (applai.validation.mark_sent_outside) in the same transaction. Its label
+keeps the decline and its reason, and is never a correction: it says nothing about the Triage.
 """
 
 from datetime import UTC, datetime
@@ -50,6 +55,7 @@ class Reason(StrEnum):
     LOCATION = "location"
     EXPIRED = "expired"
     OTHER = "other"
+    ALREADY_APPLIED = "already_applied"  # outside ApplAI: the offer goes to the sent applications
 
 
 _TARGET = {
@@ -64,7 +70,7 @@ class OfferNotFound(Exception):
 
 
 class DecisionRequest(BaseModel):
-    """A decision; only a decline has reasons, and it has at least one."""
+    """A decision; only a decline has reasons, at least one, and already_applied alone."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -79,7 +85,13 @@ class DecisionRequest(BaseModel):
             raise ValueError("not_interested needs at least one reason")
         if not declines and self.reasons:
             raise ValueError("only not_interested has reasons")
+        if self.already_applied and len(self.reasons) > 1:
+            raise ValueError("already_applied goes with no other reason")
         return self
+
+    @property
+    def already_applied(self) -> bool:
+        return Reason.ALREADY_APPLIED in self.reasons
 
 
 class Card(BaseModel):
@@ -194,12 +206,13 @@ def decide(
     set_aside = offer.state == OfferState.SCREENED_OUT or (
         triage is not None and triage.score < min_score
     )
-    only_expired = set(request.reasons) == {Reason.EXPIRED}
+    says_nothing = set(request.reasons) in ({Reason.EXPIRED}, {Reason.ALREADY_APPLIED})
     correction = (
-        request.decision == Decision.NOT_INTERESTED and proposed and not only_expired
+        request.decision == Decision.NOT_INTERESTED and proposed and not says_nothing
     ) or (request.decision == Decision.INTERESTED and set_aside)
 
-    move(session, offer, _TARGET[request.decision], Actor.CANDIDATE)
+    target = OfferState.ACCEPTED if request.already_applied else _TARGET[request.decision]
+    move(session, offer, target, Actor.CANDIDATE)
     label = Label(
         user_id=user_id,
         offer_id=offer_id,

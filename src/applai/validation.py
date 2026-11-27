@@ -11,7 +11,7 @@ the answers or the form. Functions write in the caller's session and do not comm
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from applai.capture import MAX_FIELDS, MAX_LABEL
@@ -39,13 +39,22 @@ class FormCheckedRequest(BaseModel):
 
 
 class DropRequest(BaseModel):
-    """Why the candidate drops an application: at least one reason, and a note."""
+    """Why the candidate drops an application: at least one reason, and a note.
+
+    already_applied is not one: mark_sent_outside records that case."""
 
     model_config = ConfigDict(extra="forbid")
     reasons: list[Reason | Literal["offer_closed"]] = Field(
         min_length=1, max_length=len(Reason) + 1
     )
     note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("reasons")
+    @classmethod
+    def _not_already_applied(cls, reasons: list[str]) -> list[str]:
+        if Reason.ALREADY_APPLIED in reasons:
+            raise ValueError("already_applied is not a drop: record the send outside ApplAI")
+        return reasons
 
 
 def _record(

@@ -3,7 +3,16 @@
 export type View = "to_review" | "later" | "screened_out";
 export const VIEWS: readonly View[] = ["to_review", "later", "screened_out"];
 
-export type Reason = "company" | "mission" | "experience" | "skills" | "salary" | "location" | "expired" | "other";
+export type Reason =
+  | "company"
+  | "mission"
+  | "experience"
+  | "skills"
+  | "salary"
+  | "location"
+  | "expired"
+  | "other"
+  | "already_applied";
 export const REASONS: readonly Reason[] = [
   "company",
   "mission",
@@ -13,13 +22,17 @@ export const REASONS: readonly Reason[] = [
   "location",
   "expired",
   "other",
+  "already_applied", // alone: the offer goes to the sent applications
 ];
 
 /** Why the candidate drops an application: an offer's decline reasons, or the offer closed. */
-export type DropReason = Reason | "offer_closed";
+export type DropReason = Exclude<Reason, "already_applied"> | "offer_closed";
 // An application's offer is already accepted: its closed offer is offer_closed, not expired.
+// An application sent outside ApplAI is recorded by « J'ai postulé », not dropped.
 export const DROP_REASONS: readonly DropReason[] = [
-  ...REASONS.filter((reason) => reason !== "expired"),
+  ...REASONS.filter(
+    (reason): reason is Exclude<Reason, "already_applied"> => reason !== "expired" && reason !== "already_applied",
+  ),
   "offer_closed",
 ];
 

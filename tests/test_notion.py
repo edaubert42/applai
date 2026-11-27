@@ -514,3 +514,43 @@ def test_sent_outside_writes_back_to_notion_once_and_a_failed_write_shows_and_ke
         assert len(notion.requests) == before
     with Session(engine) as s:
         assert s.get_one(Application, app_id).state == ApplicationState.SENT
+
+
+def test_an_offer_declined_as_already_applied_writes_back_to_notion_once_and_keeps_sent_on_error(
+    data_dir: Path, engine: Engine, notion: FakeNotion, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("applai.notion.NOTION_API", notion.url)
+    notion.rows = [_row(DATA_ENGINEER, "Data engineer", "Brindille Logistique", "À préparer")]
+    with Session(engine) as s:
+        offers = [
+            Offer(user_id=1, url=DATA_ENGINEER, title="Data engineer",
+                  company="Brindille Logistique", state="triaged"),
+            Offer(user_id=1, url=ML_ENGINEER, title="ML engineer",
+                  company="Verger Numérique", state="later"),
+        ]  # fmt: skip
+        s.add_all(offers)
+        s.commit()
+        ids = [o.id for o in offers]
+    decline = {"decision": "not_interested", "reasons": ["already_applied"]}
+
+    app = create_app(data_dir, frontend_dir=data_dir / "no-frontend")
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        assert client.post(f"/api/offers/{ids[0]}/decision", json=decline).status_code == 201
+        writes = [(m, p) for m, (p, _, _) in zip(notion.methods, notion.requests, strict=True)]
+        assert writes[-1] == ("PATCH", f"/v1/pages/{PAGE_ID}")
+        assert [m for m, _ in writes].count("PATCH") == 1 and len(notion.rows) == 1
+
+        secret = "upstream-secret"
+        notion.write_answer = (503, {"object": "error", "message": secret})
+        assert client.post(f"/api/offers/{ids[1]}/decision", json=decline).status_code == 201
+        assert [p for p, _, _ in notion.requests].count("/v1/pages") == 1
+        row = next(r for r in client.get("/api/services").json()["applai"] if r["id"] == "notion")
+        assert row["state"] == "red" and "503" in (row["last_error"] or "")
+        _assert_private(row["last_error"] or "", secret)
+
+        before = len(notion.requests)
+        assert client.post(f"/api/offers/{ids[1]}/decision", json=decline).status_code == 409
+        assert len(notion.requests) == before
+    with Session(engine) as s:
+        states = s.scalars(select(Application.state).order_by(Application.offer_id)).all()
+        assert states == [ApplicationState.SENT] * 2
