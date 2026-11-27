@@ -313,6 +313,8 @@
   "message.fill_again_not_allowed": "l’extension ApplAI n’a pas accès au site de ce formulaire. Vérifiez qu’elle est activée dans Chrome, puis remplissez à nouveau",
   "message.fill_again_not_loaded": "le formulaire ne s’est pas chargé. Vérifiez que l’extension ApplAI est activée dans Chrome, puis remplissez à nouveau",
   "message.fill_again_not_filled": "le formulaire n’a pas pu être rempli. Vérifiez que l’extension ApplAI est activée dans Chrome, puis remplissez à nouveau",
+  "message.fill_not_turned": "une page du formulaire n’a pas pu être tournée. Elle reste ouverte dans son onglet ; nouvel essai après la prochaine recherche",
+  "message.fill_again_not_turned": "une page du formulaire n’a pas pu être tournée. Elle reste ouverte dans son onglet : complétez-la, ou remplissez à nouveau",
   "message.send_no_tab": "aucun onglet de Chrome n’affiche ce formulaire.",
   "message.send_captcha": "un captcha bloque l’envoi. Résolvez-le dans Chrome.",
   "message.send_no_button": "aucun bouton d’envoi n’a été trouvé sur le formulaire.",

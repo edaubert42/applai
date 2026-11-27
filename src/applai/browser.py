@@ -35,6 +35,10 @@ Filling: an answers_checked application with a fill plan (applai.filling) is lis
 actions; the extension fetches the files they attach, fills the form without sending it,
 then sends back each field's state and a screenshot, and the application moves to filled. A
 fill that fails is kept as its fill_error, and asked for again only after the next scan.
+A form read page by page is served its last page stored; the extension fills it, turns it
+(extension/pages.js) and reports it: the state stays and the next page is listed in the forms,
+from that page's tab. The page it does not turn, its final page, moves it to filled from
+answers_checked; from form_captured it is drafted, then served again once planned.
 Fill again: a form filled once whose tab the candidate closed is listed again, with the same
 plan, from their ask (POST /api/applications/{id}/fill-again) until the extension reports it.
 The application keeps its state, and its send authorization is cleared at the ask: the candidate
@@ -102,6 +106,7 @@ class PageFailed(BaseModel):
 class FormToRead(BaseModel):
     application_id: int
     url: str
+    page: int | None = None  # a form read page by page: the next page, once the last is turned
 
 
 class FormSent(BaseModel):
@@ -299,21 +304,45 @@ def _form_waiting(application: Application, last_scan: datetime | None) -> bool:
     )
 
 
-@router.get("/forms")
+@router.get("/forms", response_model_exclude_none=True)  # a form's first read: no page
 def forms(request: Request) -> list[FormToRead]:
-    """The forms waiting for the extension."""
+    """The forms waiting for the extension, and the next page of those read page by page."""
     with Session(request.app.state.engine) as session:
         last_scan = _last_scan(session)
-        created = session.scalars(
+        waiting = session.scalars(
             select(Application)
-            .where(Application.state == ApplicationState.CREATED)
+            .where(Application.state.in_([ApplicationState.CREATED, *_PAGED_STATES]))
             .order_by(Application.id)
         )
         return [
-            FormToRead(application_id=a.id, url=a.form_url)
-            for a in created
-            if a.form_url is not None and _form_waiting(a, last_scan)
+            FormToRead(application_id=a.id, url=a.form_url, page=_next_page(a, last_scan))
+            for a in waiting
+            if a.form_url is not None
+            and (_form_waiting(a, last_scan) or _next_page(a, last_scan) is not None)
         ]
+
+
+# Where a form read page by page is filled and turned, before and after the answers gate.
+_PAGED_STATES = (ApplicationState.FORM_CAPTURED, ApplicationState.ANSWERS_CHECKED)
+
+
+def _turned(application: Application) -> bool:
+    """Whether the extension filled and turned the last page stored of a form read page by
+    page: it reported that page's fields, and it was not the final page."""
+    fields, last = application.form_fields or [], _last_page(application.form_fields)
+    if application.state not in _PAGED_STATES or last is None:
+        return False
+    on = _page_range(fields, last)
+    return any(entry["field"] in on for entry in application.filled_fields or [])
+
+
+def _next_page(application: Application, last_scan: datetime | None) -> int | None:
+    """The page after a turned one, unless reading it failed since the last scan started."""
+    failed = application.form_failed_at
+    if not _turned(application) or (failed is not None and not (last_scan and last_scan > failed)):
+        return None
+    page = (_last_page(application.form_fields) or 0) + 1
+    return page if _page_waiting(application, page) else None
 
 
 @router.post("/forms/{application_id}", status_code=204)
@@ -511,25 +540,28 @@ class FieldFilled(BaseModel):
 class FormFilled(BaseModel):
     fields: list[FieldFilled] = Field(max_length=MAX_FIELDS)
     screenshot: str | None = Field(None, max_length=MAX_SCREENSHOT)  # a PNG, in base64
+    page: int | None = Field(None, ge=1, le=MAX_FIELDS)  # page by page: the page served
+    final: bool = False  # that page shows a send button or is a review page: it is not turned
 
 
 class FillFailed(BaseModel):
-    reason: Literal["not_allowed", "not_loaded", "not_filled"]
+    reason: Literal["not_allowed", "not_loaded", "not_filled", "not_turned"]
 
 
 def _fill_waiting(application: Application, last_scan: datetime | None) -> bool:
-    """With a plan and a form's URL: answers_checked and not failed since the last scan started,
-    filled once and asked to fill again, or form_captured with a last page code planned and no
-    fill_error since it was posted."""
+    """With a plan and a form's URL: answers_checked, or form_captured with a last page code
+    planned and no fill_error but a failure's, not failed since the last scan started and the
+    last page not turned; or filled once and asked to fill again."""
     failed = application.fill_failed_at
+    retry = failed is None or (last_scan is not None and last_scan > failed)
     if application.fill_again_at is not None:
         ready = application.state in FILL_AGAIN_STATES
     elif application.state == ApplicationState.FORM_CAPTURED:
-        ready = application.fill_error is None and _last_page_by_code(application.form_fields)
+        planned = application.fill_error is None or failed is not None  # a profile's error: not
+        ready = planned and retry and _last_page_by_code(application.form_fields)
     else:
-        ready = application.state == ApplicationState.ANSWERS_CHECKED and (
-            failed is None or (last_scan is not None and last_scan > failed)
-        )
+        ready = application.state == ApplicationState.ANSWERS_CHECKED and retry
+    ready = ready and (application.fill_again_at is not None or not _turned(application))
     return (
         application.user_id == LOCAL_USER_ID
         and application.fill_plan is not None
@@ -608,14 +640,37 @@ def fill_sent(
 ) -> None:
     """Store the form as the extension filled it, and its screenshot; move it to filled,
     then review it in the background with the watch's runner (applai.review_form). A fill
-    again replaces the fields and the screenshot, and its application keeps its state."""
+    again replaces the fields and the screenshot, and its application keeps its state.
+    Page by page, each page served is reported, its fields stored among the others'. A page
+    turned keeps the state: its next page is read (forms). The final page before the answers
+    gate is drafted, then served again once planned, and filled from there."""
     screenshot = _png(body.screenshot) if body.screenshot else None
     state = request.app.state
     with Session(state.engine) as session:
         application = _waiting_fill(session, application_id)
         again = application.fill_again_at is not None
-        application.filled_fields = [field.model_dump() for field in body.fields]
-        application.fill_error, application.fill_again_at = None, None
+        fields, filled = application.form_fields or [], [f.model_dump() for f in body.fields]
+        if body.page != _last_page(fields):
+            raise HTTPException(409, f"Application {application_id} waits for another page.")
+        if body.page is not None:  # the page's own fields, counted from the form's first
+            on = _page_range(fields, body.page)
+            kept = [f for f in application.filled_fields or [] if f["field"] not in on]
+            ours = [{**f, "field": f["field"] + on.start} for f in filled if f["field"] < len(on)]
+            filled = sorted([*kept, *ours], key=lambda f: f["field"])
+        application.fill_error = None
+        if body.page is not None and not body.final and not again:
+            application.filled_fields = filled
+            session.commit()
+            return
+        if application.state == ApplicationState.FORM_CAPTURED:
+            application.fill_plan = None  # not served until planned after the answers gate
+            session.commit()
+            if state.watch is not None:
+                later.add_task(draft_in_background, state.engine, state.data_dir,
+                               state.watch.runner, application_id)  # fmt: skip
+            return
+        application.filled_fields = filled
+        application.fill_again_at = None
         try:
             if not again:
                 move(session, application, ApplicationState.FILLED, Actor.FILLING)
@@ -654,8 +709,7 @@ def fill_failed(application_id: int, body: FillFailed, request: Request) -> None
         application = _waiting_fill(session, application_id)
         again = "again_" if application.fill_again_at is not None else ""
         application.fill_error = f"fill_{again}{body.reason}"
-        if application.state != ApplicationState.FORM_CAPTURED:  # there, a post again retries
-            application.fill_failed_at = utc(request.app.state.clock())
+        application.fill_failed_at = utc(request.app.state.clock())
         application.fill_again_at = None
         session.commit()
 

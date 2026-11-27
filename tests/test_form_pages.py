@@ -1,6 +1,7 @@
 """A form spread over several pages at one URL: the extension posts each page with its number,
 code plans the pages it fills alone, and the first page with an open question is drafted."""
 
+import base64
 import json
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
@@ -437,3 +438,85 @@ def test_a_stored_pages_error_clears_at_the_answers_gate(data_dir: Path, engine:
     assert (checked.status_code, again.status_code) == (204, 409)
     assert (row["state"], row["form_url_error"]) == ("answers_checked", None)
     assert _get(engine, application_id).form_fields == fields
+
+
+# A form turned page by page by the extension (#285): it reports each page it filled, and the
+# page it stops on, which shows a send button or is a review page, is the final page.
+CITY_ONLY = [_field("Ville", "text")]
+CONFIRM = [_field("Confirmez votre e-mail", "email")]
+SHOT = base64.b64encode(b"\x89PNG\r\n\x1a\n").decode()  # a PNG's signature, as ApplAI checks it
+NO_PROBLEM = AgentResult(output={"problems": []}, usage=Usage(model="claude-sonnet-5-5"))
+
+
+def _report(client: TestClient, application_id: int, page: int, **more: Any) -> int:
+    """The extension's report of a page it filled: each served action's field, filled."""
+    [fill] = [fill for fill in _fills(client) if fill["application_id"] == application_id]
+    fields = [{"field": action["field"], "value": action["value"]} for action in fill["actions"]]
+    body = {"fields": fields, "page": page, **more}
+    return client.post(f"/api/browser/fills/{application_id}", json=body,
+                       headers=EXTENSION).status_code  # fmt: skip
+
+
+def _forms(client: TestClient) -> list[dict[str, Any]]:
+    return client.get("/api/browser/forms", headers=EXTENSION).json()
+
+
+def test_a_3_page_form_with_no_open_question_is_filled_page_by_page_then_reviewed(
+    data_dir: Path, engine: Engine
+):
+    application_id = _application(engine)
+    asked = {"application_id": application_id, "url": LEVER}
+
+    with _client(data_dir, NO_PROBLEM) as (client, model):
+        _post(client, application_id, PAGE_1, 1)
+        turned = [_report(client, application_id, 1)]
+        after_1 = (_forms(client), _fills(client))
+        repeated = client.post(f"/api/browser/fills/{application_id}",
+                               json={"fields": [], "page": 1}, headers=EXTENSION)  # fmt: skip
+        _post(client, application_id, CITY_ONLY, 2)
+        turned.append(_report(client, application_id, 2))
+        after_2 = _forms(client)
+        _post(client, application_id, CONFIRM, 3)
+        final = _report(client, application_id, 3, final=True, screenshot=SHOT)
+        drafted = (_get(engine, application_id).state, _fills(client))
+        gate = client.post(f"/api/applications/{application_id}/answers-checked")
+        again = [fill["page"] for fill in _fills(client)]
+        filled = _report(client, application_id, 3, final=True, screenshot=SHOT)
+
+    assert (turned, final, gate.status_code, filled) == ([204, 204], 204, 204, 204)
+    assert after_1 == ([{**asked, "page": 2}], [])  # page 1 is not filled twice
+    assert repeated.status_code == 409
+    assert after_2 == [{**asked, "page": 3}]
+    assert drafted == ("drafted", [])  # no open question: drafted at once, filled after the gate
+    assert again == [3]  # the final page, in the tab left open
+    application = _get(engine, application_id)
+    assert application.state == "reviewed"
+    assert [spec.name for spec in model.specs] == ["review"]
+    every = range(len(PAGE_1) + len(CITY_ONLY) + len(CONFIRM))
+    filled_fields = application.filled_fields or []
+    assert [entry["field"] for entry in filled_fields] == list(every)
+    assert all(entry["value"] for entry in filled_fields)
+
+
+def test_a_failed_page_turn_keeps_the_state_and_is_served_again_after_the_next_scan(
+    data_dir: Path, engine: Engine
+):
+    application_id = _application(engine)
+    failure = f"/api/browser/fills/{application_id}/failure"
+
+    with _client(data_dir) as (client, _):
+        _post(client, application_id, PAGE_1, 1)
+        failed = client.post(failure, json={"reason": "not_turned"}, headers=EXTENSION)
+        [row] = client.get("/api/applications").json()["in_progress"]
+        held = (_fills(client), _forms(client))
+        with Session(engine) as session, session.begin():  # the next scan starts
+            later = datetime(2026, 11, 20, 13, 0)
+            session.add(Scan(user_id=1, by_hand=False, started_at=later, errors=[]))
+        retried = [fill["page"] for fill in _fills(client)]
+
+    assert failed.status_code == 204
+    assert (row["state"], row["fill_error"]) == ("form_captured", "fill_not_turned")
+    assert held == ([], [])  # nothing is filled or read again before the next scan
+    assert retried == [1]
+    application = _get(engine, application_id)
+    assert (application.state, application.filled_fields) == ("form_captured", None)

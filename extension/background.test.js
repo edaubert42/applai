@@ -7,6 +7,7 @@ import { fillForm } from "./fill.js";
 import { readForm, readHtml, readText } from "./forms.js";
 import manifest from "./manifest.json" with { type: "json" };
 import { hideOverlay, showOverlay } from "./overlay.js";
+import { turnPage } from "./pages.js";
 import { isConfirmed, submitForm } from "./send.js";
 
 const OFFER = "https://ecole-des-tilleuls.jobteaser.com/fr/job-offers/4521-data-engineer";
@@ -171,9 +172,9 @@ function chromeWith(calls, { status = "complete", fields = FIELDS, text = "", gr
     },
     tabGroups: fake.tabGroups,
     scripting: {
-      executeScript: async ({ target, func }) =>
+      executeScript: async ({ target, func, args }) =>
         fake.overlay(target.tabId, func) ||
-        (calls.push(["run", target, func]) && [{ result: func === readText ? text : fields }]),
+        (calls.push(["run", target, func, ...(args ? [args] : [])]) && [{ result: func === readText ? text : fields }]),
     },
   };
 }
@@ -197,6 +198,7 @@ test("it opens each form in an inactive tab, reads it there, closes the tab and 
     [`${APPLAI}/api/browser/forms`, {}],
     ["open", { url: LEVER, active: false }],
     ["run", { tabId: 3 }, readForm],
+    ["run", { tabId: 3 }, turnPage, [false]], // whether its page turns: no, it is read at once
     ["close", 3],
     [`${APPLAI}/api/browser/forms/5`, { ...SENT, body: JSON.stringify({ fields: FIELDS }) }],
   ]);
@@ -236,13 +238,15 @@ test("a form with no control it knows sends the page's text, and only reads in t
     ["run", { tabId: 3 }, readForm],
     ["run", { tabId: 3 }, readForm],
     ["run", { tabId: 3 }, readText],
+    ["run", { tabId: 3 }, turnPage, [false]],
     ["close", 3],
     [`${APPLAI}/api/browser/forms/5`, { ...SENT, body: JSON.stringify({ fields: [], text }) }],
   ]);
-  // Only the two readers run in the page; that neither dispatches an input, click or submit
-  // event is tested on a fictional page by the frontend (frontend/src/extension-forms.test.ts).
+  // Only the two readers run in the page, and turnPage told not to click; that none dispatches
+  // an input, click or submit event is tested on fictional pages by the frontend
+  // (frontend/src/extension-forms.test.ts, extension-pages.test.ts).
   const run = new Set(calls.filter(([kind]) => kind === "run").map(([, , func]) => func));
-  assert.deepEqual(run, new Set([readForm, readText]));
+  assert.deepEqual(run, new Set([readForm, readText, turnPage]));
 });
 
 const PLAN = [
@@ -337,6 +341,135 @@ test("a failed fill closes its tab: a timeout reports not_loaded, a throwing scr
   const throwing = await fillFormsWith([{ application_id: 15, url: LEVER, actions: PLAN }], { throws: true });
   assert.deepEqual(throwing.filter(([k]) => k === "close"), [["close", 9]]);
   assert.deepEqual(throwing.at(-1), [`${APPLAI}/api/browser/fills/15/failure`, { ...SENT, body: JSON.stringify({ reason: "not_filled" }) }]);
+});
+
+// A form at one URL whose pages a tab turns: turns[page] is what turnPage finds there ("next",
+// "final" or "none"); a page in stuck does not change when its button is clicked.
+function pagedChrome(calls, { turns = { 1: "next", 2: "next", 3: "final" }, stuck = [], open = {}, stored = {} } = {}) {
+  const at = new Map(Object.entries(open).map(([id, page]) => [Number(id), page])); // tab -> page shown
+  let opened = 9;
+  return {
+    runtime: { getManifest: () => manifest },
+    tabGroups: undefined, // grouping is tested above
+    tabs: {
+      create: async (options) => calls.push(["open", options]) && at.set(++opened, 1) && { id: opened, windowId: 1 },
+      get: async (id) => { if (!at.has(id)) throw new Error("No tab"); return { id, status: "complete", windowId: 1 }; },
+      remove: async (id) => calls.push(["close", id]) && at.delete(id),
+      query: async () => [],
+      update: async () => ({}),
+      captureVisibleTab: async () => "data:image/png;base64,iVBORw0KGgo=",
+    },
+    storage: { local: {
+      get: async (key) => ({ [key]: stored[key] }),
+      set: async (items) => Object.assign(stored, items),
+    } },
+    scripting: {
+      executeScript: async ({ target: { tabId }, func, args = [] }) => {
+        const page = at.get(tabId);
+        if (func === readForm) return [{ result: [{ label: `Page ${page}`, type: "text", required: true, options: [] }] }];
+        if (func === fillForm) return calls.push(["fill", tabId, page]) && [{ result: [{ field: 0, value: "Lyon" }] }];
+        if (func !== turnPage) return [{ result: null }]; // the frame
+        const found = turns[page] ?? "none";
+        if (found === "next" && args[0] && !stuck.includes(page)) at.set(tabId, page + 1);
+        return [{ result: found }];
+      },
+    },
+  };
+}
+
+const CITY = [{ field: 0, label: "Ville", kind: "fill", value: "Lyon" }];
+
+async function pagedWith(loop, asked, options) {
+  const calls = [];
+  await loop(async (url, init) => {
+    calls.push([url, init]);
+    if (url === `${APPLAI}/api/browser/forms` || url === `${APPLAI}/api/browser/fills`) return Response.json(asked);
+    return new Response(null, { status: 204 });
+  }, pagedChrome(calls, options), async () => {});
+  return calls;
+}
+
+test("a form whose first page turns is posted as page 1, and its tab kept for the fill", async () => {
+  const stored = {};
+  const calls = await pagedWith(readForms, [{ application_id: 4, url: LEVER }], { stored });
+
+  const fields = [{ label: "Page 1", type: "text", required: true, options: [] }];
+  assert.deepEqual(calls.slice(1), [
+    ["open", { url: LEVER, active: false }],
+    [`${APPLAI}/api/browser/forms/4`, { ...SENT, body: JSON.stringify({ fields, page: 1 }) }],
+  ]);
+  assert.deepEqual(stored, { "page-tab:4": { tabId: 10, page: 1 } });
+});
+
+test("a page filled and turned is reported with its number; the final page with its screenshot", async () => {
+  const stored = { "page-tab:4": { tabId: 9, page: 1 } };
+  const first = await pagedWith(fillForms, [{ application_id: 4, url: LEVER, page: 1, actions: CITY }], { open: { 9: 1 }, stored });
+  const turned = structuredClone(stored);
+  stored["page-tab:4"].page = 3;
+  const final = await pagedWith(fillForms, [{ application_id: 4, url: LEVER, page: 3, actions: CITY }], { open: { 9: 3 }, stored });
+
+  const filled = [{ field: 0, value: "Lyon" }];
+  assert.deepEqual(first.slice(1), [
+    ["fill", 9, 1],
+    [`${APPLAI}/api/browser/fills/4`, { ...SENT, body: JSON.stringify({ fields: filled, page: 1 }) }],
+  ]);
+  assert.deepEqual(final.at(-1), [`${APPLAI}/api/browser/fills/4`, {
+    ...SENT, body: JSON.stringify({ fields: filled, screenshot: "iVBORw0KGgo=", page: 3, final: true }),
+  }]);
+  assert.deepEqual(turned, { "page-tab:4": { tabId: 9, page: 2 } }); // the tab shows page 2
+  assert.equal(final.some(([kind]) => kind === "close"), false); // Send uses it (ADR 0003)
+});
+
+test("a page turn that fails is reported as not_turned, and its tab stays open on that page", async () => {
+  for (const options of [{ turns: { 1: "none" } }, { stuck: [1] }]) {
+    const stored = { "page-tab:4": { tabId: 9, page: 1 } };
+    const calls = await pagedWith(fillForms, [{ application_id: 4, url: LEVER, page: 1, actions: CITY }], { ...options, open: { 9: 1 }, stored });
+
+    assert.deepEqual(calls.slice(1), [
+      ["fill", 9, 1],
+      [`${APPLAI}/api/browser/fills/4/failure`, { ...SENT, body: JSON.stringify({ reason: "not_turned" }) }],
+    ]);
+    assert.deepEqual(stored, { "page-tab:4": { tabId: 9, page: 1 } });
+  }
+});
+
+test("a retry fills from the page its tab shows; with the tab closed, from page 1, refilling nothing", async () => {
+  const fill = [{ application_id: 4, url: LEVER, page: 2, actions: CITY }];
+  const kept = await pagedWith(fillForms, fill, { open: { 9: 2 }, stored: { "page-tab:4": { tabId: 9, page: 2 } } });
+  const closed = await pagedWith(fillForms, fill, { stored: { "page-tab:4": { tabId: 9, page: 2 } } });
+
+  assert.deepEqual(kept.filter(([kind]) => ["open", "fill"].includes(kind)), [["fill", 9, 2]]);
+  assert.deepEqual(closed.filter(([kind]) => ["open", "fill"].includes(kind)), [
+    ["open", { url: LEVER, active: false }],
+    ["fill", 10, 2], // page 1 is turned, not filled again
+  ]);
+  assert.equal(closed.at(-1)[0], `${APPLAI}/api/browser/fills/4`);
+});
+
+test("the next page of a form is read in the tab kept for it; a page not reached is reported with its number", async () => {
+  const asked = [{ application_id: 4, url: LEVER, page: 2 }];
+  const calls = await pagedWith(readForms, asked, { open: { 9: 2 }, stored: { "page-tab:4": { tabId: 9, page: 2 } } });
+  const closed = await pagedWith(readForms, asked, { turns: { 1: "none" } }); // the tab was closed
+
+  const fields = [{ label: "Page 2", type: "text", required: true, options: [] }];
+  assert.deepEqual(calls.slice(1), [
+    [`${APPLAI}/api/browser/forms/4`, { ...SENT, body: JSON.stringify({ fields, page: 2 }) }],
+  ]);
+  assert.deepEqual(closed.slice(1), [
+    ["open", { url: LEVER, active: false }], // left open, as any tab of a form read page by page
+    [`${APPLAI}/api/browser/forms/4/failure`, { ...SENT, body: JSON.stringify({ reason: "not_read", page: 2 }) }],
+  ]);
+});
+
+test("a later page ApplAI refuses is reported as not read, with its number", async () => {
+  const calls = [];
+  await readForms(async (url, init) => {
+    calls.push([url, init]);
+    if (url === `${APPLAI}/api/browser/forms`) return Response.json([{ application_id: 4, url: LEVER, page: 2 }]);
+    return new Response(null, { status: url.endsWith("/failure") ? 204 : 422 });
+  }, pagedChrome(calls, { open: { 9: 2 }, stored: { "page-tab:4": { tabId: 9, page: 2 } } }), async () => {});
+
+  assert.deepEqual(calls.at(-1), [`${APPLAI}/api/browser/forms/4/failure`, { ...SENT, body: JSON.stringify({ reason: "not_read", page: 2 }) }]);
 });
 
 function fakeDom({ captcha = false, buttons = [], text = "Formulaire", href = LEVER, onClick } = {}) {
@@ -548,7 +681,7 @@ test("a fill that throws removes the frame, then closes the tab", async () => {
 test("a form read shows the frame while it reads, and removes it before it closes the tab", async () => {
   const { log } = await readFormsWith([{ application_id: 5, url: LEVER }]);
 
-  assert.deepEqual(steps(log, ["overlay", "run", "close"]), ["overlay show", "run readForm", "overlay hide", "close"]);
+  assert.deepEqual(steps(log, ["overlay", "run", "close"]), ["overlay show", "run readForm", "run turnPage", "overlay hide", "close"]);
 });
 
 test("sendForms shows the frame while it submits, and removes it whether or not the click went through", async () => {
