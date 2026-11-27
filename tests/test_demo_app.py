@@ -62,14 +62,20 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[object]:
     return connections
 
 
-def _run_demo(monkeypatch: pytest.MonkeyPatch, visit: Callable[[TestClient], Any]) -> Any:
-    """Run `applai demo` and visit its app instead of serving it; what the visit returns."""
+def _run_demo(
+    monkeypatch: pytest.MonkeyPatch,
+    visit: Callable[[TestClient], Any],
+    address: tuple[str, int] = ("127.0.0.1", 8000),
+    base_url: str = "http://127.0.0.1",
+) -> Any:
+    """Run `applai demo`, check it would listen on address, and visit its app at base_url
+    instead of serving it; what the visit returns."""
     seen: list[Any] = []
 
     def serve(server: uvicorn.Server) -> None:
-        assert (server.config.host, server.config.port) == ("127.0.0.1", 8000)
+        assert (server.config.host, server.config.port) == address
         app: FastAPI = server.config.app  # pyright: ignore[reportAssignmentType]
-        with TestClient(app, base_url="http://127.0.0.1") as client:
+        with TestClient(app, base_url=base_url) as client:
             seen.append(visit(client))
 
     monkeypatch.setattr(uvicorn.Server, "run", serve)
@@ -124,6 +130,55 @@ def test_applai_serve_never_runs_in_demo_mode(tmp_path: Path, monkeypatch: pytes
         assert client.get("/api/health").json()["demo"] is False
 
 
+PUBLIC = "applai-demo.example.org"  # the name Railway gives the hosted demo
+
+
+def test_the_hosted_demo_listens_on_port_and_answers_its_public_host_over_https_only(
+    monkeypatch: pytest.MonkeyPatch, isolated: list[object]
+):
+    monkeypatch.setenv("PORT", "8123")
+    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", PUBLIC)
+
+    def visit(client: TestClient) -> tuple[Any, ...]:
+        def add(origin: str, url: str) -> int:
+            offer = client.post("/api/offers", json={"url": url}, headers={"Origin": origin})
+            return offer.status_code
+
+        own = add(f"https://{PUBLIC}", "https://jobs.example.org/offre-1")
+        foreign = [add(origin, "https://jobs.example.org/offre-2")
+                   for origin in ("https://evil.example.org", f"http://{PUBLIC}")]  # fmt: skip
+        added = [o["url"] for o in client.get("/api/offers", params={"state": "new"}).json()]
+        other_host = client.get("/api/applications", headers={"Host": "evil.example.org"})
+        board = client.get("/api/applications").json()
+        return own, foreign, added, other_host.status_code, board
+
+    own, foreign, added, other_host, board = _run_demo(
+        monkeypatch, visit, address=("0.0.0.0", 8123), base_url=f"https://{PUBLIC}"
+    )
+
+    assert own == 201
+    assert foreign == [403, 403]
+    assert added == ["https://jobs.example.org/offre-1"]  # a refused write adds nothing
+    assert other_host == 400
+    assert board["waiting"]
+    assert isolated == []
+
+
+@pytest.mark.parametrize("port", ["huit-mille", "0", "70000"])
+def test_the_demo_with_an_invalid_port_stops_and_names_port(
+    monkeypatch: pytest.MonkeyPatch, isolated: list[object], port: str
+):
+    monkeypatch.setenv("PORT", port)
+
+    def serve(_: uvicorn.Server) -> None:
+        pytest.fail("the demo served")
+
+    monkeypatch.setattr(uvicorn.Server, "run", serve)
+
+    with pytest.raises(SystemExit, match="PORT"):
+        cli.main(["demo"])
+
+
 def test_the_board_has_a_sent_application_with_every_stage_in_its_trace(
     monkeypatch: pytest.MonkeyPatch, isolated: list[object]
 ):
@@ -136,8 +191,9 @@ def test_the_board_has_a_sent_application_with_every_stage_in_its_trace(
     seen = _run_demo(monkeypatch, visit)
 
     board, traces = seen["board"], seen["traces"]
-    assert [row["state"] for row in board["waiting"]] == ["drafted"]  # « vérifier les textes »
-    assert {row["state"] for row in board["in_progress"]} == {"reviewed"}
+    # A reviewed application waits for the candidate's final validation.
+    assert sorted(row["state"] for row in board["waiting"]) == ["drafted", "reviewed", "reviewed"]
+    assert board["in_progress"] == []
     assert [row["state"] for row in board["sent"]] == ["sent"]
     assert [row["state"] for row in board["dropped"]] == ["dropped"]
     drafted = ["triage", "drafting", "drafting_judge", "cv_tailoring"]
@@ -158,9 +214,16 @@ def test_the_board_has_a_sent_application_with_every_stage_in_its_trace(
     assert isolated == []
 
 
+def _drafted(client: TestClient) -> dict[str, Any]:
+    """The board's application whose texts wait for the candidate (« vérifier les textes »)."""
+    waiting = client.get("/api/applications").json()["waiting"]
+    return next(row for row in waiting if row["state"] == "drafted")
+
+
 def _validated(client: TestClient) -> int:
     """Take a reviewed application of the board through the form and final validation gates."""
-    application_id = client.get("/api/applications").json()["in_progress"][0]["id"]
+    waiting = client.get("/api/applications").json()["waiting"]
+    application_id = next(row["id"] for row in waiting if row["state"] == "reviewed")
     for gate in ("form-checked", "validate"):
         assert client.post(f"/api/applications/{application_id}/{gate}").status_code == 204
     return application_id
@@ -183,19 +246,26 @@ def test_sending_answers_403_in_demo_mode_and_the_application_does_not_move(
                 f"/api/browser/sends/{application_id}/failure", json={"reason": "captcha"}
             )),
         ]  # fmt: skip
+        offer = client.get("/api/review", params={"view": "screened_out"}).json()[0]
+        already = {"decision": "not_interested", "reasons": ["already_applied"]}
+        answers.append(
+            ("already applied", client.post(f"/api/offers/{offer['id']}/decision", json=already))
+        )
         with Session(app.state.engine) as session:
             application = session.get_one(Application, application_id)
             assert (application.state, application.send_authorized_at) == ("validated", None)
             sent = session.scalars(select(Label.application_id).where(Label.decision == "sent"))
             assert list(sent) == [sent_before[0]["id"]]  # the board's own, from the build
+            assert session.scalars(select(Label).where(Label.offer_id == offer["id"])).all() == []
         assert client.get("/api/applications").json()["sent"] == sent_before
+        assert client.get("/api/review", params={"view": "screened_out"}).json()[0] == offer
         return [(name, a.status_code, a.json()["detail"]) for name, a in answers]
 
     answers = _run_demo(monkeypatch, visit)
 
     assert [(name, code) for name, code, _ in answers] == [
         ("authorize-send", 403), ("sent", 403), ("sent outside", 403), ("sends", 403),
-        ("send done", 403), ("send failed", 403),
+        ("send done", 403), ("send failed", 403), ("already applied", 403),
     ]  # fmt: skip
     assert {detail for _, _, detail in answers} == {"Refused: nothing is sent in the demo."}
 
@@ -205,10 +275,10 @@ def test_restarting_gives_the_same_data_back_whatever_a_visitor_changed(
 ):
     def change(client: TestClient) -> dict[str, Any]:
         board = client.get("/api/applications").json()
-        waiting = board["waiting"][0]["id"]
+        waiting = _drafted(client)["id"]
         dropped = client.post(f"/api/applications/{waiting}/drop", json={"reasons": ["salary"]})
         assert dropped.status_code == 204
-        assert client.get("/api/applications").json()["waiting"] == []
+        assert waiting in [row["id"] for row in client.get("/api/applications").json()["dropped"]]
         return board
 
     first = _run_demo(monkeypatch, change)
@@ -221,7 +291,7 @@ def test_a_visitors_run_with_no_recording_shows_as_an_error_and_the_answer_stays
     monkeypatch: pytest.MonkeyPatch, isolated: list[object]
 ):
     def visit(client: TestClient) -> list[Any]:
-        waiting = client.get("/api/applications").json()["waiting"][0]["id"]
+        waiting = _drafted(client)["id"]
         answer = client.get(f"/api/applications/{waiting}/draft").json()["answers"][0]["id"]
         reject = {"decision": "reject", "reason": "Trop long."}
         tries = [client.post(f"/api/applications/{waiting}/draft/{answer}", json=reject)
@@ -271,7 +341,7 @@ def test_a_checked_application_is_filled_as_recorded_reviewed_and_shown_in_final
 ):
     def visit(client: TestClient) -> list[Any]:
         app: FastAPI = client.app  # pyright: ignore[reportAssignmentType]
-        waiting = client.get("/api/applications").json()["waiting"][0]["id"]
+        waiting = _drafted(client)["id"]
         url = f"/api/applications/{waiting}"
         assert _check(client, waiting) == 204
         with Session(app.state.engine) as session:
@@ -300,7 +370,7 @@ def test_the_demo_serves_each_applications_form_at_its_form_url(
     monkeypatch: pytest.MonkeyPatch, isolated: list[object]
 ):
     def visit(client: TestClient) -> list[Any]:
-        waiting = client.get("/api/applications").json()["waiting"][0]
+        waiting = _drafted(client)
         form = client.get(waiting["form_url"])
         app: FastAPI = client.app  # pyright: ignore[reportAssignmentType]
         with Session(app.state.engine) as session:
@@ -325,7 +395,7 @@ def test_a_plan_with_no_recorded_fill_shows_an_error_and_a_retry_fills_it_once(
     monkeypatch.setattr(demo_fill, "FILLS", tmp_path / "fills")
 
     def visit(client: TestClient) -> list[Any]:
-        waiting = client.get("/api/applications").json()["waiting"][0]["id"]
+        waiting = _drafted(client)["id"]
         url = f"/api/applications/{waiting}"
         _check(client, waiting)
 
@@ -343,7 +413,7 @@ def test_a_plan_with_no_recorded_fill_shows_an_error_and_a_retry_fills_it_once(
 
     assert failed == unchanged == ("answers_checked", "no_recording")
     assert (retried, again, refused) == (202, 202, 409)  # filled once; another retry is refused
-    assert filled == ("filled", None)
+    assert filled == ("reviewed", None)  # filled, then reviewed as recorded
     assert isolated == []
 
 
@@ -396,7 +466,7 @@ def test_outside_demo_mode_filling_still_waits_for_the_extension(
                      backup_dir=tmp_path / "backups")  # fmt: skip
 
     with TestClient(app, base_url="http://127.0.0.1") as client:
-        waiting = client.get("/api/applications").json()["waiting"][0]["id"]
+        waiting = _drafted(client)["id"]
         assert _check(client, waiting) == 204
         with Session(app.state.engine) as session:
             application = session.get_one(Application, waiting)

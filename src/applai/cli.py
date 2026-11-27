@@ -6,8 +6,8 @@ in to the candidate's mailbox once; applai mail read records the offers of new j
 applai cv build renders the candidate's CV to a PDF and checks it (applai.cv).
 applai retriage reads the triaged offers' pages again and triages them again (applai.retriage).
 applai demo serves the public demo at http://127.0.0.1:8000, on the fictional candidate of
-demo/candidate whatever the environment names; applai demo record runs the agents on the
-demo offers and records their runs (applai.demo).
+demo/candidate whatever the environment names, or on $PORT when Railway hosts it; applai
+demo record runs the agents on the demo offers and records their runs (applai.demo).
 """
 
 import argparse
@@ -38,6 +38,11 @@ from applai.scan import Watch
 BACKUP_DIR_VARIABLE = "APPLAI_BACKUP_DIR"
 HOST = "127.0.0.1"  # this machine only: the app has no authentication
 DEFAULT_PORT = 8000
+# Set by Railway, where the demo is hosted: the port to listen on, from its proxy, on every
+# interface; and the public name the demo is reached by, over https. applai serve reads neither.
+PORT_VARIABLE = "PORT"
+PUBLIC_DOMAIN_VARIABLE = "RAILWAY_PUBLIC_DOMAIN"
+HOSTED = "0.0.0.0"  # the demo only: its data is fictional and it sends nothing (ADR 0007)
 
 _DIRECTORIES = {
     DATA_DIR_VARIABLE: "the candidate's data directory",
@@ -124,11 +129,22 @@ def _demo() -> None:
     os.environ[DATA_DIR_VARIABLE] = str(DEMO_DIR)
     for name in _REAL:
         os.environ.pop(name, None)
+    host, port = HOST, DEFAULT_PORT
+    if os.environ.get(PORT_VARIABLE):
+        host, port = HOSTED, _port(os.environ[PORT_VARIABLE])
     with TemporaryDirectory() as database_dir, TemporaryDirectory() as backup_dir:
-        app, failures = demo.demo_app(Path(database_dir), Path(backup_dir))
+        app, failures = demo.demo_app(
+            Path(database_dir), Path(backup_dir), os.environ.get(PUBLIC_DOMAIN_VARIABLE) or None
+        )
         for failure in failures:
             print(f"Failed: {failure}")
-        uvicorn.Server(uvicorn.Config(app, host=HOST, port=DEFAULT_PORT)).run()
+        uvicorn.Server(uvicorn.Config(app, host=host, port=port)).run()
+
+
+def _port(value: str) -> int:
+    if not value.isdecimal() or not 0 < int(value) < 65536:
+        raise SystemExit(f"{PORT_VARIABLE} is {value!r}: set it to a port, from 1 to 65535.")
+    return int(value)
 
 
 def _cv_build(lang: Literal["fr", "en"], contract: str, photo: bool, out: Path) -> None:

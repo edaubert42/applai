@@ -360,6 +360,25 @@ describe("who acts next on an application", () => {
     expect(failedFilling.queryByRole("status")).toBeNull();
   });
 
+  it("shows a page not read and a page not planned on a form_captured row, with no spinner", async () => {
+    const unread = aRow({ id: 1, offer_id: 1, title: "Poste page", state: "form_captured", running: "drafting", form_url_error: "form_not_loaded" });
+    const unplanned = aRow({ id: 2, offer_id: 2, title: "Poste plan", state: "form_captured", fill_error: "profile.yaml not found" });
+    await openScreen(applicationsRoutes({ in_progress: [unread, unplanned] }));
+
+    expect(rowOf("Poste page").getByRole("alert").textContent).toBe(fr["applications.form_page.error"]);
+    expect(rowOf("Poste page").queryByRole("status")).toBeNull();
+    expect(rowOf("Poste plan").getByRole("alert").textContent).toBe(
+      fill(fr["applications.fill.error"], { error: "profile.yaml not found" }),
+    );
+  });
+
+  it("shows a page after the answers gate not read on an answers_checked row", async () => {
+    const unread = aRow({ id: 1, offer_id: 1, title: "Poste suite", state: "answers_checked", form_url_error: "form_not_loaded" });
+    await openScreen(applicationsRoutes({ in_progress: [unread] }));
+
+    expect(rowOf("Poste suite").getAllByRole("alert").map((alert) => alert.textContent)).toContain(fr["applications.form_page.error"]);
+  });
+
   it.each([
     ["fr", fr],
     ["en", en],
@@ -437,6 +456,8 @@ describe("dropping an application", () => {
     for (const [i, reason] of pills.entries()) {
       expect(screen.getByRole("button", { name: new RegExp(`^${i + 1}\\s*${words[`reason.${reason}`]}$`) })).toBeTruthy();
     }
+    expect(screen.getAllByRole("button", { name: /^\d/ })).toHaveLength(pills.length); // no « Déjà postulé »
+    expect(screen.queryByRole("button", { name: new RegExp(words["reason.already_applied"]) })).toBeNull();
     const save = screen.getByRole("button", { name: words["decline.save"] }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     fireEvent.keyDown(document, { key: "8" });

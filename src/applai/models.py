@@ -168,6 +168,7 @@ class Application(Base):
     form_fields: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     form_failures: Mapped[int] = mapped_column(server_default="0")  # by the extension
     form_failed_at: Mapped[datetime | None]  # the last of them
+    form_failed_page: Mapped[int | None]  # read page by page: the page form_url_error is about
     draft_error: Mapped[str | None]  # why the last Drafting failed (applai.drafting)
     # Filling (applai.filling): the actions planned, then what the extension reports it entered.
     fill_plan: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)

@@ -1,6 +1,9 @@
 import { useEffect, useId, useState } from "react";
-import type { DropReason } from "./api";
+import type { DropReason, Reason } from "./api";
 import { useSettings } from "./settings";
+
+// A reason that stands alone: choosing it clears the others, choosing another clears it.
+const ALONE = "already_applied";
 
 const REASON_LABELS = {
   company: "reason.company",
@@ -11,6 +14,7 @@ const REASON_LABELS = {
   location: "reason.location",
   expired: "reason.expired",
   other: "reason.other",
+  already_applied: "reason.already_applied",
   offer_closed: "reason.offer_closed",
 } as const;
 
@@ -27,7 +31,7 @@ const action = "min-h-11 rounded-pill px-5 font-semibold focus-visible:outline-2
  * to the last) and a note. Enter saves, once a reason is chosen; Escape cancels. Keys typed in
  * another input stay there.
  */
-export default function DeclinePanel<R extends DropReason>({
+export default function DeclinePanel<R extends Reason | DropReason>({
   reasons,
   kind = "decline",
   onSave,
@@ -48,7 +52,10 @@ export default function DeclinePanel<R extends DropReason>({
   const ordered = reasons.filter((reason) => chosen.includes(reason));
 
   function toggle(reason: R) {
-    setChosen((now) => (now.includes(reason) ? now.filter((r) => r !== reason) : [...now, reason]));
+    setChosen((now) => {
+      if (now.includes(reason)) return now.filter((r) => r !== reason);
+      return reason === ALONE ? [reason] : [...now.filter((r) => r !== ALONE), reason];
+    });
   }
 
   useEffect(() => {

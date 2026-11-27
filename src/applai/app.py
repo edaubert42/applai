@@ -213,7 +213,11 @@ def decision(
 
     An accepted offer's application then gets its form's URL in the background, with the
     watch's HTTP client (applai.capture); without the watch, the candidate pastes it.
+    A decline as already_applied also records its application sent outside ApplAI, in the same
+    transaction, and writes back to Notion: nothing is looked for or sent (ADR 0003).
     """
+    if body.already_applied and request.app.state.demo:  # it records a send, as sent-outside
+        raise HTTPException(403, "Refused: nothing is sent in the demo.")
     try:
         with session.begin():
             label = decide(session, LOCAL_USER_ID, offer_id, body, min_score)
@@ -221,10 +225,15 @@ def decision(
             application_id = session.scalar(
                 select(Application.id).where(Application.offer_id == offer_id)
             )
+            if body.already_applied and application_id is not None:
+                validation.mark_sent_outside(session, LOCAL_USER_ID, application_id)
     except OfferNotFound:
         raise HTTPException(status_code=404, detail="no such offer") from None
     except TransitionError as error:
         raise HTTPException(status_code=409, detail=str(error)) from None
+    if body.already_applied and application_id is not None:
+        s = request.app.state
+        later.add_task(notion.write_sent_in_background, s.engine, s.data_dir, application_id)
     watch: Watch | None = request.app.state.watch
     if body.decision == Decision.INTERESTED and application_id and watch:
         later.add_task(find_form, request.app.state.engine, application_id, watch.http)
@@ -742,7 +751,8 @@ _EXTENSION_PATHS = re.compile(r"/api/browser/(pages|forms|fills|sends|tabs)(/.*)
 
 
 class SameOriginWrites:
-    """Refuses with a 403 any write whose Origin is present and is not http:// + its Host.
+    """Refuses with a 403 any write whose Origin is present and is not http:// + its Host, or
+    https:// + it for public_host, the name a hosted demo is reached by behind https.
 
     A browser sends Origin on a cross-site POST, even from a plain form with no script, so
     another site, or another local server on another port, cannot start a scan or decide on
@@ -751,15 +761,17 @@ class SameOriginWrites:
     settings, whatever the method; without Origin they go through like a write.
     """
 
-    def __init__(self, app: ASGIApp, data_dir: Path) -> None:
+    def __init__(self, app: ASGIApp, data_dir: Path, public_host: str | None = None) -> None:
         self.app, self.data_dir = app, data_dir
+        self.public_host = public_host.lower() if public_host else None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         refusal = None
         if scope["type"] == "http":
             headers = Headers(scope=scope)
-            origin, host = headers.get("origin"), headers.get("host", "")
-            foreign = origin is not None and origin.lower() != f"http://{host}".lower()
+            origin, host = headers.get("origin"), headers.get("host", "").lower()
+            scheme = "https" if host == self.public_host else "http"
+            foreign = origin is not None and origin.lower() != f"{scheme}://{host}"
             if _EXTENSION_PATHS.fullmatch(scope["path"]):
                 refusal = self._extension_refusal(origin)
             elif foreign and scope["method"] not in _READ_METHODS:
@@ -812,6 +824,7 @@ def create_app(
     database_dir: Path | None = None,
     backup_dir: Path | None = None,
     demo: bool = False,
+    public_host: str | None = None,
 ) -> FastAPI:
     """The app on the database in database_dir, by default data_dir, serving frontend_dir if
     it exists; backup_dir, by default APPLAI_BACKUP_DIR, keeps the database's copies.
@@ -819,6 +832,8 @@ def create_app(
     Given a watch, it scans on schedule and by hand (applai.scan), at the time clock gives.
     In demo mode (applai.demo) it never scans, refuses to send or authorize a send, and serves
     and replays its own forms' fills instead of waiting for the extension (applai.demo_fill).
+    Given public_host, the name the demo is hosted at behind https, it also answers that host,
+    and takes writes from https:// + it.
     """
 
     @asynccontextmanager
@@ -845,10 +860,11 @@ def create_app(
     app.state.demo = demo
     app.state.plan_fill = demo_fill.fill_in_background if demo else plan_in_background
     # The last added runs first: a request for another host is refused before its Origin is read.
-    app.add_middleware(SameOriginWrites, data_dir=data_dir)
+    app.add_middleware(SameOriginWrites, data_dir=data_dir, public_host=public_host)
     if demo:
         app.add_middleware(NoSendInDemo)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+    hosts = [*ALLOWED_HOSTS, public_host] if public_host else ALLOWED_HOSTS
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
     app.include_router(api)
     app.include_router(browser.router)
     if demo:

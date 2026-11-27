@@ -67,33 +67,35 @@ class Lesson:
     evidence: list[int]
 
 
-def _gh(run: Run, *args: str) -> Any:
+def gh_json(run: Run, *args: str) -> Any:
     done = run(["gh", *args], capture_output=True, text=True)
     done.check_returncode()
     return json.loads(done.stdout)
 
 
-def _list(run: Run, path: str) -> list[dict[str, Any]]:
+def gh_list(run: Run, path: str) -> list[dict[str, Any]]:
     url = f"repos/{{owner}}/{{repo}}/{path}?per_page=100"
-    return [item for page in _gh(run, "api", "--paginate", "--slurp", url) for item in page]
+    return [item for page in gh_json(run, "api", "--paginate", "--slurp", url) for item in page]
 
 
-def _by(item: dict[str, Any], login: str) -> bool:
+def by_login(item: dict[str, Any], login: str) -> bool:
     user: dict[str, Any] = item.get("user") or {}  # None for a deleted account
     return str(user.get("login") or "").casefold() == login.casefold()
 
 
 def findings(run: Run, owner: str, pr: int) -> list[Finding]:
     """What went wrong on one PR, as told by the reviewer, the fixer and the owner only."""
-    comments = _list(run, f"issues/{pr}/comments")
-    notes = comments + _list(run, f"pulls/{pr}/comments") + _list(run, f"pulls/{pr}/reviews")
-    messages = [c["commit"]["message"] for c in _list(run, f"pulls/{pr}/commits")]
+    comments = gh_list(run, f"issues/{pr}/comments")
+    notes = comments + gh_list(run, f"pulls/{pr}/comments") + gh_list(run, f"pulls/{pr}/reviews")
+    messages = [c["commit"]["message"] for c in gh_list(run, f"pulls/{pr}/commits")]
     verdicts = [
         c["body"]
         for c in comments
-        if _by(c, REVIEWER) and c["body"].startswith("Verdict: changes needed")
+        if by_login(c, REVIEWER) and c["body"].startswith("Verdict: changes needed")
     ]
-    corrections = [n["body"] for n in notes if _by(n, owner) and "@claude" in (n["body"] or "")]
+    corrections = [
+        n["body"] for n in notes if by_login(n, owner) and "@claude" in (n["body"] or "")
+    ]
     return (
         [Finding("Reviewer", text) for text in verdicts]
         + [Finding("Fixer, red CI", m) for m in messages if m.startswith("Fix CI:")]
@@ -103,7 +105,7 @@ def findings(run: Run, owner: str, pr: int) -> list[Finding]:
 
 def lesson_issues(run: Run) -> list[LessonIssue]:
     fields = ["--limit", "500", "--json", "number,state,title,body"]
-    found = _gh(run, "issue", "list", "--label", LABEL, "--state", "all", *fields)
+    found = gh_json(run, "issue", "list", "--label", LABEL, "--state", "all", *fields)
     return [
         LessonIssue(i["number"], i["state"].lower(), i["title"], m[1] if m else None)
         for i in found
@@ -116,7 +118,7 @@ def history(run: Run, owner: str, limit: int) -> str:
     lines = ["# Lesson issues", ""]
     lines += [f"- #{i.number} {i.state}, kind `{i.kind}`: {i.title}" for i in lessons] or ["None."]
     fields = ["--limit", str(limit), "--json", "number,title"]
-    prs = _gh(run, "pr", "list", "--state", "merged", "--base", "main", *fields)
+    prs = gh_json(run, "pr", "list", "--state", "merged", "--base", "main", *fields)
     numbers = ", ".join(f"#{pr['number']}" for pr in prs)
     lines += ["", f"# Findings on the last {len(prs)} merged PRs ({numbers})"]
     for pr in prs:

@@ -23,6 +23,8 @@ jobs:
       - run: python3 tools/glossary.py
       # The CV renderer prints its PDF with Chromium (applai.cv).
       - run: uv run playwright install --with-deps chromium
+      # tests/test_secret_scan.py runs the real gitleaks.
+      - run: python3 tools/secret_scan.py install
       - run: uv run pytest
       # Workflows run agents with write access: check their syntax and their security.
       - run: uv run actionlint
@@ -60,9 +62,20 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+      # A wrong SHA-256 fails this step, so nothing below runs.
+      - run: python3 tools/secret_scan.py install
+      # PRs are squash-merged: only the lines the PR adds are scanned, not each commit.
+      # gitleaks reads them on stdin, so .gitleaksignore does not apply here: a false positive
+      # takes an inline `gitleaks:allow` or an allowlist in a gitleaks config.
+      - name: Secrets in the lines the PR adds
+        if: github.event_name == 'pull_request'
+        run: python3 tools/secret_scan.py pr
+      - name: Secrets in each pushed commit
+        if: github.event_name == 'push'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: python3 tools/secret_scan.py push "$BEFORE" "$AFTER"
       - name: Denylist check on tracked files
         env:
           APPLAI_DENYLIST: ${{ secrets.APPLAI_DENYLIST }}

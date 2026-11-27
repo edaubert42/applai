@@ -160,9 +160,11 @@ def _refuse(request: httpx2.Request) -> httpx2.Response:
     raise httpx2.ConnectError("The demo reaches no network.", request=request)
 
 
-def demo_app(database_dir: Path, backup_dir: Path) -> tuple[FastAPI, list[str]]:
+def demo_app(
+    database_dir: Path, backup_dir: Path, public_host: str | None = None
+) -> tuple[FastAPI, list[str]]:
     """The demo's app, on a new database in database_dir its board was built in, and what
-    failed building it, by offer (run_demo).
+    failed building it, by offer (run_demo); public_host is the name it is hosted at, if any.
 
     Its agents replay the recordings, its watch reaches no network and never scans, and it
     sends nothing (applai.app). It serves a copy of demo/candidate in database_dir, where a
@@ -180,7 +182,7 @@ def demo_app(database_dir: Path, backup_dir: Path) -> tuple[FastAPI, list[str]]:
     watch = Watch(http=httpx2.Client(transport=httpx2.MockTransport(_refuse)),
                   runner=AgentRunner(ReplayBackend(recordings)), ms_client_id=None)  # fmt: skip
     app = create_app(data_dir, watch=watch, database_dir=database_dir, backup_dir=backup_dir,
-                     demo=True)  # fmt: skip
+                     demo=True, public_host=public_host)  # fmt: skip
     return app, failures
 
 
