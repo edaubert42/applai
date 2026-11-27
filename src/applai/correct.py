@@ -217,8 +217,11 @@ def decide(
     """Record the candidate's decision on an answer as a label, and set the answer's status.
 
     A rejected answer stays rejected until it is drafted again: it can be rejected again or
-    edited, not accepted, which would accept the text the candidate rejected. Raises NotFound,
-    and GateRefused when the application is not drafted or a rejected answer is accepted.
+    edited, not accepted, which would accept the text the candidate rejected. A label names its
+    answer; a reject's keeps the text rejected. Rejecting again an answer whose redraft failed
+    is a retry: its label takes the new reason, and no second label is recorded. Raises
+    NotFound, and GateRefused when the application is not drafted or a rejected answer is
+    accepted.
     """
     application = _application(session, user_id, application_id)
     answer = session.get(DraftAnswer, answer_id)
@@ -228,13 +231,22 @@ def decide(
         raise GateRefused(f"Application {application_id} is {application.state}, not drafted.")
     if answer.status == AnswerStatus.REJECTED and request.decision == AnswerDecision.ACCEPT:
         raise GateRefused(f"Answer {answer_id} was rejected: edit it or reject it again.")
+    rejects = request.decision == AnswerDecision.REJECT
+    if rejects and answer.status == AnswerStatus.REJECTED:
+        query = select(Label).where(Label.answer_id == answer.id).order_by(Label.id.desc())
+        last = session.scalars(query.limit(1)).first()
+        if last and last.decision == AnswerStatus.REJECTED and last.rejected_text == answer.text:
+            last.note = request.reason
+            session.flush()
+            return answer
     edited = request.text.strip() if request.text else None
     answer.status, answer.edited_text = _STATUS[request.decision], edited
     session.add(
         Label(user_id=user_id, offer_id=application.offer_id, application_id=application.id,
               level=ANSWERS_LEVEL, decision=_STATUS[request.decision], reasons=[],
               note=request.reason, correction=request.decision != AnswerDecision.ACCEPT,
-              diff=word_diff(answer.text, edited) if edited else None)
+              diff=word_diff(answer.text, edited) if edited else None, answer_id=answer.id,
+              rejected_text=answer.text if rejects else None)
     )  # fmt: skip
     session.flush()
     return answer

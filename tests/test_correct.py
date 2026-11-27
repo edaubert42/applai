@@ -277,6 +277,78 @@ def test_a_rejected_answer_whose_redraft_fails_cannot_be_accepted(data_dir: Path
     assert _answer(engine, project).status == "edited"
 
 
+def test_a_rejected_answers_label_keeps_its_id_reason_and_rejected_text(
+    engine: Engine, client: TestClient
+):
+    application_id, [_, project] = _drafted(engine)
+
+    rejected = client.post(f"/api/applications/{application_id}/draft/{project}",
+                           json={"decision": "reject", "reason": REASON})  # fmt: skip
+
+    assert rejected.status_code == 200
+    [label] = _labels(engine)
+    assert (label.answer_id, label.note, label.rejected_text) == (project, REASON, SIX_YEARS)
+    assert _answer(engine, project).text == REDRAFTED
+
+
+def test_the_trace_shows_the_rejected_text_next_to_its_reason(engine: Engine, client: TestClient):
+    application_id, [why, project] = _drafted(engine)
+    url = f"/api/applications/{application_id}"
+    client.post(f"{url}/draft/{why}", json={"decision": "accept"})
+    client.post(f"{url}/draft/{project}", json={"decision": "reject", "reason": REASON})
+    client.post(f"{url}/draft/{project}", json={"decision": "accept"})
+    assert client.post(f"{url}/answers-checked").status_code == 204
+
+    steps = client.get(f"{url}/trace").json()["steps"]
+
+    [gate] = [s for s in steps if s.get("to_state") == "answers_checked"]
+    assert gate["rejections"] == [{"answer_id": project, "reason": REASON, "text": SIX_YEARS}]
+
+
+def test_an_edited_answers_label_names_its_answer_and_keeps_the_diff(
+    engine: Engine, client: TestClient
+):
+    application_id, [why, _] = _drafted(engine)
+
+    edited = client.post(f"/api/applications/{application_id}/draft/{why}",
+                         json={"decision": "edit", "text": f"{SIX_YEARS} Toujours."})  # fmt: skip
+
+    assert edited.status_code == 200
+    [label] = _labels(engine)
+    assert (label.answer_id, label.rejected_text) == (why, None)
+    assert label.diff == [{"op": "equal", "text": SIX_YEARS}, {"op": "insert", "text": "Toujours."}]
+
+
+def test_a_failed_redraft_keeps_one_label_with_the_rejected_text_and_a_retry_adds_none(
+    data_dir: Path, engine: Engine
+):
+    unknown = _result({"1": [{"text": REDRAFTED, "facts": ["F99"]}]})
+    backend = FakeBackend([unknown, REDRAFT])
+    watch = Watch(http=httpx2.Client(), runner=AgentRunner(backend), ms_client_id=None)
+    app = create_app(data_dir, frontend_dir=data_dir / "none", watch=watch)
+    application_id, [_, project] = _drafted(engine)
+    url = f"/api/applications/{application_id}"
+    answer, again = f"{url}/draft/{project}", "Parle des 120 entrepôts."
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        failed = client.post(answer, json={"decision": "reject", "reason": REASON})
+        after_failure = (_answer(engine, project).status, _labels(engine))
+        trace = client.get(f"{url}/trace").json()
+        retried = client.post(answer, json={"decision": "reject", "reason": again})
+
+    assert failed.status_code == 502 and "F99" in failed.json()["detail"]
+    status, [label] = after_failure
+    assert (status, label.answer_id, label.rejected_text) == ("rejected", project, SIX_YEARS)
+    drafting = [s for s in trace["steps"] if s.get("agent") == "drafting"]
+    assert drafting[-1]["outcome"] == "invalid_citation"
+    assert retried.status_code == 200
+    [label] = _labels(engine)
+    assert (label.answer_id, label.note, label.rejected_text) == (project, again, SIX_YEARS)
+    assert again in backend.specs[1].input  # the retry's drafting, with the new reason
+    redrafted = _answer(engine, project)
+    assert (redrafted.status, redrafted.text) == ("pending", REDRAFTED)
+
+
 def test_answers_checked_moves_drafted_once_every_answer_is_accepted_or_edited(
     engine: Engine, client: TestClient
 ):
@@ -379,6 +451,22 @@ def test_short_route_replaces_cover_letter_within_200_words_and_keeps_greeting_a
     assert (label.level, label.decision, label.correction, label.note) == (
         "answers", "rejected", True, "short",
     )  # fmt: skip
+
+
+def test_the_short_letters_label_keeps_the_long_letters_text(data_dir: Path, engine: Engine):
+    short = [[{"text": text, "facts": ["F1"]}] for text in ("Bonjour.", SIX_YEARS, "Merci.")]
+    watch = Watch(http=httpx2.Client(), runner=AgentRunner(FakeBackend([_letter_result(short)])),
+                  ms_client_id=None)  # fmt: skip
+    app = create_app(data_dir, frontend_dir=data_dir / "none", watch=watch)
+    application_id, _, letter_id = _drafted_with_letter(engine)
+    long_letter = _answer(engine, letter_id).text
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        res = client.post(f"/api/applications/{application_id}/draft/{letter_id}/short")
+
+    assert res.status_code == 200 and res.json()["text"] != long_letter
+    [label] = _labels(engine)
+    assert (label.note, label.answer_id, label.rejected_text) == ("short", letter_id, long_letter)
 
 
 def test_short_letter_over_200_words_is_refused_and_earlier_letter_stays(

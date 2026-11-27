@@ -323,7 +323,9 @@ class Label(Base):
     name their application. correction says the decision went against the agents' proposal.
     reasons is a list: a declined offer's or a dropped application's reasons, else empty
     (a form check's lists the fields corrected, applai.validation). diff is an edited answer's,
-    word by word against the drafted text.
+    word by word against the drafted text. An answers label names its answer_id, and a
+    rejected one keeps rejected_text, the text turned down (a short letter's: the long one);
+    labels from before migration 0027 have neither.
     """
 
     __tablename__ = "labels"
@@ -338,6 +340,8 @@ class Label(Base):
     note: Mapped[str | None]
     correction: Mapped[bool]
     diff: Mapped[list[dict[str, str]] | None] = mapped_column(JSON)
+    answer_id: Mapped[int | None] = mapped_column(ForeignKey("draft_answers.id"))
+    rejected_text: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(default=_utc_now)
 
 

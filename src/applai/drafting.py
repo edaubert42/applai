@@ -382,7 +382,7 @@ def redraft_short_letter(
 
     Refuses a short letter over SHORT_LETTER_WORDS words or with invalid citations; on any
     failure the earlier letter, its status and its edited_text stay unchanged and no label is
-    recorded. Only the drafted text is sent to the agent (ADR 0008).
+    recorded. Only the drafted text is sent to the agent (ADR 0008); the label keeps it.
     """
     with Session(database) as session:
         answer = session.get_one(DraftAnswer, answer_id)
@@ -413,15 +413,16 @@ def redraft_short_letter(
         application = session.get_one(Application, answer.application_id)
         if application.state != ApplicationState.DRAFTED or answer.kind != COVER_LETTER:
             raise DraftingError(f"Answer {answer_id} was changed while it was drafted again.")
+        session.add(
+            Label(user_id=application.user_id, offer_id=application.offer_id,
+                  application_id=application.id, level="answers", decision=AnswerStatus.REJECTED,
+                  reasons=[], note="short", correction=True, answer_id=answer.id,
+                  rejected_text=answer.text)  # the long letter, replaced below
+        )  # fmt: skip
         answer.agent_run_id, answer.sentences = run_id, sentences
         answer.text = _text(answer.kind, sentences, sent, profile)
         answer.status, answer.edited_text = AnswerStatus.PENDING, None
         answer.judge_issues = judged.judge_issues
-        session.add(
-            Label(user_id=application.user_id, offer_id=application.offer_id,
-                  application_id=application.id, level="answers", decision=AnswerStatus.REJECTED,
-                  reasons=[], note="short", correction=True)
-        )  # fmt: skip
     return answer
 
 

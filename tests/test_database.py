@@ -1,6 +1,7 @@
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, closing
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,8 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from applai.database import BUSY_TIMEOUT_MS, DatabaseError, open_database
-from applai.models import Application, Base, Label, Offer
+from applai.models import Application, Base, Label, Offer, StateChange
+from applai.trace import application_trace
 
 TABLES = {
     "offers", "applications", "state_changes", "agent_runs", "triages", "mails_read",
@@ -297,6 +299,46 @@ def test_the_answer_labels_migration_keeps_every_offer_label(tmp_path: Path, ope
         3, 7, "not_interested", ["salary"], "Trop loin.",
     )  # fmt: skip
     assert (label.correction, label.application_id, label.diff) == (True, None, None)
+
+
+def test_answer_labels_from_before_the_rejected_text_keep_working_and_show_in_the_trace(
+    tmp_path: Path, open_db: Opener
+):
+    engine = open_db(tmp_path)
+    with Session(engine) as session, session.begin():
+        offer = _offer()
+        session.add(offer)
+        session.flush()
+        application = Application(user_id=1, offer_id=offer.id, state="answers_checked")
+        session.add(application)
+        session.flush()
+        session.add(StateChange(user_id=1, offer_id=offer.id, application_id=application.id,
+                                from_state="drafted", to_state="answers_checked",
+                                actor="candidate", changed_at=datetime(2026, 11, 20)))  # fmt: skip
+        offer_id, application_id = offer.id, application.id
+    with engine.begin() as connection:
+        command.downgrade(_alembic(connection), "0026")
+    engine.dispose()
+    with closing(sqlite3.connect(tmp_path / "applai.db")) as connection, connection:
+        connection.execute(
+            "INSERT INTO labels (id, user_id, offer_id, application_id, level, decision, reasons,"
+            " note, correction, created_at) VALUES (4, 1, ?, ?, 'answers', 'rejected', '[]',"
+            " 'Trop vague.', 1, '2026-11-19')",
+            (offer_id, application_id),
+        )
+
+    engine = open_db(tmp_path)
+
+    with Session(engine) as session:
+        label = session.scalars(select(Label)).one()
+    assert (label.id, label.note, label.answer_id, label.rejected_text) == (
+        4, "Trop vague.", None, None,
+    )  # fmt: skip
+    [gate] = [s for s in application_trace(engine, 1, application_id).steps if s.kind == "gate"]
+    old = {"answer_id": None, "reason": "Trop vague.", "text": None}
+    assert gate.model_dump(include={"corrections", "rejections"}) == {
+        "corrections": 1, "rejections": [old],
+    }  # fmt: skip
 
 
 def test_migrations_head_names_the_last_migration():
