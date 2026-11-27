@@ -22,8 +22,10 @@ A form spread over pages at one URL is posted page by page, each field stored wi
 indices count across pages. Page 1 moves it to form_captured; while it stays there, a page code
 fills alone (applai.filling.by_code_only) is planned by code and served as a fill, and the next
 page may be posted. The first page that is not stops: it is drafted, then the gate runs; each
-page after it is planned by Filling, unless it asks what the gate did not check. A page
-posted again replaces it, unless drafting reads it or a later page's fields would move.
+page after it is planned by Filling, unless it asks what the gate did not check: then it moves
+back to form_captured, is drafted alone and goes through its own gate (applai.drafting.
+gate_page), and no page is posted again. A page posted again replaces it, unless drafting
+reads it or a later page's fields would move.
 A later page that fails or is refused keeps the URL, the pages read and the state; its
 form_url_error clears when that page (form_failed_page) is posted, or at the answers gate
 (applai.correct), past which a stored page is not posted again.
@@ -68,7 +70,10 @@ from applai import details, reread, validation
 from applai.agents import AgentRunner
 from applai.capture import MAX_FIELDS, MAX_LABEL, FormField, read_fields
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
-from applai.drafting import draft_in_background, drafted_fields
+from applai.drafting import Fields as _Fields
+from applai.drafting import draft_in_background, drafted_fields, gate_page
+from applai.drafting import last_page as _last_page
+from applai.drafting import page_range as _page_range
 from applai.filling import FillAction, Slot, by_code, by_code_only, file_path
 from applai.google import describe_google_offer, on_google
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Scan
@@ -353,7 +358,8 @@ def form_sent(
     the background with the watch's runner (applai.drafting). With no fields and the page's
     text, the form_capture agent reads them in the text; none found is a failure. A page
     code fills alone is planned, not drafted; a page after the answers gate is planned by
-    Filling (applai.filling.plan_fill), unless it asks what the gate did not check."""
+    Filling (applai.filling.plan_fill), unless it asks what the gate did not check: then it
+    moves back to form_captured, to be drafted alone."""
     state = request.app.state
     engine, watch, page = state.engine, state.watch, body.page
     fields, reason, draft, plan = body.fields, "no_field", True, False
@@ -374,14 +380,15 @@ def form_sent(
         elif page is None:
             application.form_fields = [field.model_dump() for field in fields]
         elif application.state == ApplicationState.ANSWERS_CHECKED:
+            # The page after the last (_page_waiting); not served until planned again.
+            _clear_page_error(application, page)
+            application.form_fields = [*(application.form_fields or []), *posted]
+            application.fill_plan = application.fill_failed_at = None
             questions, letter = drafted_fields(posted)
-            if questions or letter is not None:  # out of scope: a gate for a later page
-                refused = "asks_after_gate", f"Page {page} asks what the gate did not check."
-            else:  # the page after the last (_page_waiting): Filling plans it again with it
-                _clear_page_error(application, page)
-                application.form_fields = [*(application.form_fields or []), *posted]
-                application.fill_plan = application.fill_failed_at = None  # not served meanwhile
-                draft, plan = False, True
+            asks = bool(questions) or letter is not None
+            # A page that asks what the gate did not check moves back to form_captured below,
+            # for its own gate (applai.drafting.gate_page); else Filling plans the form again.
+            draft, plan, captured = asks, not asks, not asks
         elif _moves_later_pages(application.form_fields or [], posted, page):
             refused = "page_changed", f"Page {page} would move the fields of the pages after it."
         else:
@@ -418,18 +425,10 @@ def _waiting_form(session: Session, application_id: int, page: int | None) -> Ap
     if application is None or application.user_id != LOCAL_USER_ID:
         raise HTTPException(404, "no such application")
     first = page in (None, 1) and _form_waiting(application, _last_scan(session))
-    if not first and not _page_waiting(application, page):
+    reopened = gate_page(session, application) is not None  # no page is posted again past a gate
+    if reopened or (not first and not _page_waiting(application, page)):
         raise HTTPException(409, f"Application {application_id} is not waiting for this form.")
     return application
-
-
-type _Fields = list[dict[str, Any]]  # a form's, as applications.form_fields keeps them
-
-
-def _page_range(fields: _Fields, page: int) -> range:
-    """The indices of a page's fields; an empty range at the end for a page not stored."""
-    on = [index for index, field in enumerate(fields) if field.get("page") == page]
-    return range(on[0], on[-1] + 1) if on else range(len(fields), len(fields))
 
 
 def _page_waiting(application: Application, page: int | None) -> bool:
@@ -444,11 +443,6 @@ def _page_waiting(application: Application, page: int | None) -> bool:
     return application.state == ApplicationState.FORM_CAPTURED and (
         page < last or (page <= last + 1 and _last_page_by_code(application.form_fields))
     )
-
-
-def _last_page(fields: _Fields | None) -> int | None:
-    """The last page stored of a form read page by page; none for a form read at once."""
-    return fields[-1].get("page") if fields else None
 
 
 def _last_page_by_code(fields: _Fields | None) -> bool:

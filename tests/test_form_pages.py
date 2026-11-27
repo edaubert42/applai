@@ -3,6 +3,7 @@ code plans the pages it fills alone, and the first page with an open question is
 
 import base64
 import json
+import shutil
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from datetime import datetime
@@ -13,15 +14,19 @@ from zoneinfo import ZoneInfo
 
 import httpx2
 import pytest
-from demo_profile import profile_without_cv_sources
+from demo_profile import DEMO_DIR, profile_without_cv_sources
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from applai.agents import AgentResult, AgentRunner, FakeBackend, Usage
+from applai.agents import AgentError, AgentResult, AgentRunner, FailureKind, FakeBackend, Usage
 from applai.app import create_app
 from applai.database import open_database
-from applai.models import Application, Offer, Scan
+from applai.drafting import draft_application
+from applai.drafting_judge import JUDGE
+from applai.models import AgentRun, Application, DraftAnswer, Label, Offer, Scan
+from applai.orchestrator import Actor, ApplicationState, move
+from applai.profile import load_profile
 from applai.scan import Watch
 
 NOON = datetime(2026, 11, 20, 12, 0, tzinfo=ZoneInfo("Europe/Paris"))
@@ -74,7 +79,9 @@ def engine(data_dir: Path) -> Iterator[Engine]:
 
 
 @contextmanager
-def _client(data_dir: Path, *results: AgentResult) -> Generator[tuple[TestClient, FakeBackend]]:
+def _client(
+    data_dir: Path, *results: AgentResult | Exception
+) -> Generator[tuple[TestClient, FakeBackend]]:
     """The real app with the watch on and the model mocked."""
     model = FakeBackend(results)
     http = httpx2.Client(transport=httpx2.MockTransport(lambda _: httpx2.Response(404)))
@@ -384,26 +391,6 @@ def test_a_page_after_the_gate_is_planned_by_filling_with_its_choices(
     ]
 
 
-def test_a_page_with_an_open_question_after_the_gate_is_refused_and_shown(
-    data_dir: Path, engine: Engine
-):
-    application_id, fields = _checked(engine)
-
-    with _client(data_dir) as (client, model):
-        refused = _post(client, application_id, [_field(WHY, "textarea")], 3)
-        [row] = client.get("/api/applications").json()["in_progress"]
-        fills = _fills(client)
-        again = _post(client, application_id, [_field("Ville", "text")], 3)
-
-    assert (refused, again) == (409, 204)
-    assert (row["state"], row["form_url_error"]) == ("answers_checked", "form_asks_after_gate")
-    assert [fill["page"] for fill in fills] == [2]  # page 2's fill is still served
-    assert model.specs == []
-    application = _get(engine, application_id)
-    assert (application.form_fields or [])[: len(fields)] == fields
-    assert application.form_url_error is None
-
-
 def test_a_page_failure_after_the_gate_is_shown_and_keeps_the_url(data_dir: Path, engine: Engine):
     application_id, fields = _checked(engine)
     failure = f"/api/browser/forms/{application_id}/failure"
@@ -520,3 +507,198 @@ def test_a_failed_page_turn_keeps_the_state_and_is_served_again_after_the_next_s
     assert retried == [1]
     application = _get(engine, application_id)
     assert (application.state, application.filled_fields) == ("form_captured", None)
+
+
+# A form whose pages 2 and 3 both ask open questions (#291): each page has its own answers gate.
+PROJECT = "Votre projet le plus marquant ?"
+PAGE_3_ASKS = [_field(PROJECT, "textarea")]  # field 6
+PROJECT_TEXT = "J'ai construit la prévision des délais de livraison."
+DRAFTED_3 = AgentResult(output={"answers": {"6": [{"text": PROJECT_TEXT, "facts": ["F3"]}]}},
+                        usage=Usage(model="claude-opus-5-5"))  # fmt: skip
+
+
+def _accept_all(client: TestClient, application_id: int) -> list[int]:
+    """Accept every answer the gate lists, then close it: the fields of the answers listed."""
+    answers = client.get(f"/api/applications/{application_id}/draft").json()["answers"]
+    for answer in answers:
+        client.post(f"/api/applications/{application_id}/draft/{answer['id']}",
+                    json={"decision": "accept"})  # fmt: skip
+    assert client.post(f"/api/applications/{application_id}/answers-checked").status_code == 204
+    return [answer["field_index"] for answer in answers]
+
+
+def _through_page_2(client: TestClient, application_id: int) -> list[int]:
+    """Page 1 filled and turned, page 2 drafted, past its gate, filled and turned: the fields
+    page 2's gate listed."""
+    _post(client, application_id, PAGE_1, 1)
+    _report(client, application_id, 1)
+    _post(client, application_id, PAGE_2_ASKS, 2)
+    listed = _accept_all(client, application_id)
+    _report(client, application_id, 2)
+    return listed
+
+
+def _labels(engine: Engine) -> list[tuple[int | None, str, bool]]:
+    with Session(engine) as session:
+        labels = session.scalars(select(Label).order_by(Label.id))
+        return [(label.answer_id, label.decision, label.correction) for label in labels]
+
+
+def _statuses(engine: Engine, application_id: int) -> dict[int, str]:
+    with Session(engine) as session:
+        query = select(DraftAnswer).where(DraftAnswer.application_id == application_id)
+        return {answer.field_index: answer.status for answer in session.scalars(query)}
+
+
+def test_pages_2_and_3_each_have_their_own_gate_and_page_2s_labels_stay(
+    data_dir: Path, engine: Engine
+):
+    application_id = _application(engine)
+
+    with _client(data_dir, DRAFTED, JUDGED, DRAFTED_3, JUDGED) as (client, _):
+        first = _through_page_2(client, application_id)
+        page_2_labels = _labels(engine)
+        sent = _post(client, application_id, PAGE_3_ASKS, 3)
+        second = _accept_all(client, application_id)
+
+    assert (first, sent, second) == ([5], 204, [6])  # each gate lists its own page's answers
+    labels = _labels(engine)
+    assert labels[: len(page_2_labels)] == page_2_labels
+    assert [decision for _, decision, _ in labels[len(page_2_labels) :]] == ["accepted"]
+    assert _statuses(engine, application_id) == {5: "accepted", 6: "accepted"}
+    assert _get(engine, application_id).state == "answers_checked"
+
+
+def test_no_answer_of_page_3_is_filled_before_page_3s_gate_passes(data_dir: Path, engine: Engine):
+    application_id = _application(engine)
+    early = {"fields": [{"field": 0, "value": PROJECT_TEXT}], "page": 3, "final": True}
+
+    with _client(data_dir, DRAFTED, JUDGED, DRAFTED_3, JUDGED) as (client, _):
+        _through_page_2(client, application_id)
+        _post(client, application_id, PAGE_3_ASKS, 3)
+        drafted = (_get(engine, application_id).state, _fills(client), _forms(client))
+        refused = client.post(f"/api/browser/fills/{application_id}", json=early,
+                              headers=EXTENSION)  # fmt: skip
+        filled_before = _get(engine, application_id).filled_fields or []
+        _accept_all(client, application_id)
+        fills = _fills(client)
+
+    assert drafted == ("drafted", [], [])
+    assert refused.status_code == 409
+    assert 6 not in [entry["field"] for entry in filled_before]
+    answer = {"field": 0, "label": PROJECT, "kind": "fill", "value": PROJECT_TEXT}
+    assert fills == [{"application_id": application_id, "url": LEVER, "page": 3,
+                      "actions": [answer]}]  # fmt: skip
+
+
+def test_drafting_failing_on_page_3_is_shown_and_a_retry_drafts_page_3_alone(
+    data_dir: Path, engine: Engine
+):
+    application_id = _application(engine)
+    failure = AgentError("drafting", FailureKind.EXIT)
+
+    with _client(data_dir, DRAFTED, JUDGED, failure, DRAFTED_3, JUDGED) as (client, model):
+        _through_page_2(client, application_id)
+        filled = _get(engine, application_id).filled_fields
+        sent = _post(client, application_id, PAGE_3_ASKS, 3)
+        [row] = client.get("/api/applications").json()["in_progress"]
+        held = (_fills(client), _forms(client))
+        earlier = (_post(client, application_id, PAGE_1, 1),
+                   _post(client, application_id, PAGE_2_ASKS, 2))  # fmt: skip
+        retried = client.post(f"/api/applications/{application_id}/draft")
+        after = (_fills(client), _forms(client))
+
+    assert (sent, retried.status_code, earlier) == (204, 202, (409, 409))
+    assert (row["state"], row["draft_error"]) == ("form_captured", "agent drafting failed: exit")
+    assert held == after == ([], [])  # nothing filled again, no page read again
+    retry = json.loads(model.specs[-2].input)
+    assert retry["questions"] == [{"field": 6, "label": PROJECT}]
+    assert "cover_letter" not in retry
+    application = _get(engine, application_id)
+    assert (application.state, application.draft_error) == ("drafted", None)
+    assert application.filled_fields == filled  # pages 1 and 2 stay filled
+    assert [entry["field"] for entry in filled or []] == list(range(6))
+    assert _statuses(engine, application_id) == {5: "accepted", 6: "pending"}
+
+
+LETTER = "Lettre de motivation"
+THREE_PAGES = [*_paged(PAGE_1, 1), *_paged([_field(LETTER, "textarea")], 2),
+               *_paged([_field(PROJECT, "textarea")], 3)]  # fmt: skip
+
+
+def _reopened(engine: Engine, state: str) -> tuple[int, int]:
+    """An application past page 2's gate, its letter accepted and its CV tailored, moved back
+    to form_captured by page 3, then put in state: its id, its letter's."""
+    application_id = _application(engine, "answers_checked", form_fields=THREE_PAGES,
+                                  cv_headline="Data engineer", cv_photo="with")  # fmt: skip
+    with Session(engine) as session, session.begin():
+        application = session.get_one(Application, application_id)
+        move(session, application, ApplicationState.FORM_CAPTURED, Actor.FORM_CAPTURE)
+        run = AgentRun(user_id=1, offer_id=application.offer_id, application_id=application_id,
+                       agent="drafting", model="claude-opus-5-5", started_at=NOON,
+                       duration_ms=1, input_tokens=1, output_tokens=1, outcome="ok")  # fmt: skip
+        session.add(run)
+        session.flush()
+        letter = DraftAnswer(user_id=1, application_id=application_id, agent_run_id=run.id,
+                             kind="cover_letter", field_index=4, label=LETTER, sentences=[],
+                             text="Madame, Monsieur,", status="accepted")  # fmt: skip
+        session.add(letter)
+        if state == "drafted":
+            session.add(DraftAnswer(user_id=1, application_id=application_id,
+                                    agent_run_id=run.id, kind="question", field_index=5,
+                                    label=PROJECT, sentences=[], text=PROJECT_TEXT))  # fmt: skip
+            move(session, application, ApplicationState.DRAFTED, Actor.DRAFTING)
+        session.flush()
+        return application_id, letter.id
+
+
+def test_a_later_pages_drafting_reads_that_page_alone_and_does_not_tailor_the_cv_again(
+    tmp_path: Path,
+):
+    shutil.copytree(DEMO_DIR, tmp_path / "demo")  # with its CV sources
+    demo = tmp_path / "demo"
+    engine = open_database(demo)
+    drafted = AgentResult(output={"answers": {"5": [{"text": PROJECT_TEXT, "facts": ["F3"]}]}},
+                          usage=Usage(model="claude-opus-5-5"))  # fmt: skip
+    model = FakeBackend([drafted, JUDGED])
+    try:
+        application_id, _ = _reopened(engine, "form_captured")
+        draft_application(AgentRunner(model), engine, application_id, load_profile(demo), demo)
+        application = _get(engine, application_id)
+    finally:
+        engine.dispose()
+
+    assert [spec.name for spec in model.specs] == ["drafting", JUDGE]
+    sent = json.loads(model.specs[0].input)
+    assert (sent["questions"], "cover_letter" in sent) == ([{"field": 5, "label": PROJECT}], False)
+    assert (application.state, application.cv_headline, application.cv_photo) == (
+        "drafted", "Data engineer", "with",
+    )  # fmt: skip
+
+
+def test_a_later_gate_refuses_decisions_on_earlier_answers_and_on_the_cv(
+    data_dir: Path, engine: Engine
+):
+    application_id, letter_id = _reopened(engine, "drafted")
+    path = f"/api/applications/{application_id}"
+
+    with _client(data_dir) as (client, model):
+        draft = client.get(f"{path}/draft").json()
+        refused = [
+            client.post(f"{path}/draft/{letter_id}", json={"decision": "edit", "text": "Autre."}),
+            client.post(f"{path}/draft/{letter_id}/short"),
+            client.post(f"{path}/cv/photo", json={"photo": "without"}),
+            client.post(f"{path}/cv/headline", json={"text": "Analytics engineer"}),
+        ]
+        _accept_all(client, application_id)
+
+    assert [answer["field_index"] for answer in draft["answers"]] == [5]
+    assert (draft["cv_photo"], draft["cv_changes"]) == (None, [])  # the CV was checked before
+    assert [response.status_code for response in refused] == [409, 409, 409, 409]
+    assert model.specs == []
+    assert _statuses(engine, application_id) == {4: "accepted", 5: "accepted"}
+    assert len(_labels(engine)) == 1  # page 3's answer only
+    application = _get(engine, application_id)
+    assert (application.state, application.cv_photo, application.cv_headline) == (
+        "answers_checked", "with", "Data engineer",
+    )  # fmt: skip
