@@ -1,0 +1,14 @@
+.git
+.venv/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+# Candidate data and secrets never enter the image (docs/adr/0001)
+.env
+.env.*
+data/
+.applai/
+applai-private/
+*.sqlite
+*.sqlite3
+*.db
