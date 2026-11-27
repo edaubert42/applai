@@ -195,7 +195,8 @@ def test_a_start_that_fails_after_the_merge_says_how_to_start_it_by_hand(summary
     assert len(gh.written("pr", "merge")) == 1
     [comment] = gh.written("pr", "comment")
     assert "gh workflow run agent-unblock.yml -f issue=7" in comment[-1]
-    assert "gh workflow run agent-learner.yml -f pr=12" in comment[-1]
+    assert "agent-learner.yml" not in comment[-1]  # refused by hand: no command to give
+    assert "the learner for this PR" in comment[-1]
     # Run again, the job finds the PR merged: it merges nothing twice.
     assert _merge(gh, summary) == 0
     assert len(gh.written("pr", "merge")) == 1

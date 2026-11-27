@@ -80,7 +80,7 @@ def merge(run: Run, number: int, head: str) -> str | None:
     except subprocess.TimeoutExpired:
         return f"the checks did not finish within {WAIT // 60} minutes"
     if checks.returncode != 0:
-        return "a check is red or cancelled"
+        return f"a check is red or cancelled, or gh failed: {checks.stderr.strip()}"
     # Other agents comment as the reviewer's login: its own run, a check, has now posted.
     try:
         comments = gh_list(run, f"issues/{number}/comments")
@@ -102,7 +102,13 @@ def start(run: Run, number: int, issues: list[int]) -> list[str]:
     commands = [f"agent-unblock.yml -f issue={issue}" for issue in issues]
     commands.append(f"agent-learner.yml -f pr={number}")
     failed = [c for c in commands if _gh(run, "workflow", "run", *c.split()).returncode != 0]
-    return [f"gh workflow run {c}" for c in failed]
+    # agent-learner.yml refuses `pr` from anyone but github-actions[bot]: no command by hand.
+    return [
+        f"gh workflow run {c}"
+        if c.startswith("agent-unblock")
+        else "the learner for this PR (no command by hand: it takes `pr` from github-actions only)"
+        for c in failed
+    ]
 
 
 def main(
