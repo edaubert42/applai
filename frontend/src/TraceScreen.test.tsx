@@ -11,10 +11,10 @@ afterEach(() => { vi.unstubAllGlobals(); localStorage.clear(); });
 const words = { fr, en };
 
 const triage: RunStep = { kind: "run", at: "2026-11-10T09:00:00Z", agent: "triage", model: "claude-haiku-5-5", duration_ms: 1500, cost_usd: 0.002, outcome: "ok" };
-const accepted: GateStep = { kind: "gate", at: "2026-11-10T09:05:00Z", to_state: "accepted", decision: "interested", corrections: 0, reasons: [] };
+const accepted: GateStep = { kind: "gate", at: "2026-11-10T09:05:00Z", to_state: "accepted", decision: "interested", corrections: 0, reasons: [], rejections: [] };
 const timedOut: RunStep = { kind: "run", at: "2026-11-10T09:10:00Z", agent: "drafting", model: "claude-opus-5-5", duration_ms: 60000, cost_usd: null, outcome: "timeout" };
 const drafted: RunStep = { kind: "run", at: "2026-11-10T09:12:00Z", agent: "drafting", model: "claude-opus-5-5", duration_ms: 75000, cost_usd: 0.4, outcome: "ok" };
-const answers: GateStep = { kind: "gate", at: "2026-11-10T09:30:00Z", to_state: "answers_checked", decision: null, corrections: 2, reasons: [] };
+const answers: GateStep = { kind: "gate", at: "2026-11-10T09:30:00Z", to_state: "answers_checked", decision: null, corrections: 2, reasons: [], rejections: [] };
 
 const TRACE: ApplicationTrace = {
   steps: [triage, accepted, timedOut, drafted, answers],
@@ -81,6 +81,23 @@ describe("the trace of an application", () => {
     const total = text(await screen.findByTestId("trace-total"));
     expect(total).toContain("2 min 17 s");
     expect(total).toMatch(/0[.,]402/);
+  });
+
+  it("shows each rejected text next to its reason, and a reason alone for an older label", async () => {
+    const rejections = [
+      { answer_id: 3, reason: "Parle du projet de prévision.", text: "Je suis data engineer depuis six ans." },
+      { answer_id: 4, reason: "short", text: "Madame, Monsieur,\n\nUne longue lettre." },
+      { answer_id: null, reason: "Trop vague.", text: null },
+    ];
+    await openTrace({ ...TRACE, steps: [{ ...answers, rejections }] });
+
+    const gate = (await screen.findByText(fr["trace.gate.answers_checked"])).closest("li");
+    const shown = gate ? within(gate).getAllByRole("listitem").map(text) : [];
+    expect(shown).toEqual([
+      fr["trace.rejected"].replace("{reason}", "Parle du projet de prévision.") + "Je suis data engineer depuis six ans.",
+      fr["trace.short"] + "Madame, Monsieur,\n\nUne longue lettre.",
+      fr["trace.rejected"].replace("{reason}", "Trop vague."),
+    ]);
   });
 
   it("shows only the offer's Triage and the acceptance for an application with no run yet", async () => {

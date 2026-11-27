@@ -68,6 +68,20 @@ export default function TraceScreen({ row, onBack }: { row: Row; onBack: () => v
               {step.reasons.map((reason) => lookup(`reason.${reason}`) ?? reason).join(", ")}
             </p>
           )}
+          {step.rejections.length > 0 && (
+            <ul className="mt-2 space-y-2 text-sm">
+              {step.rejections.map((rejection, index) => (
+                <li key={index}>
+                  <p className="text-muted [overflow-wrap:anywhere]">
+                    {rejection.reason === "short" ? t("trace.short") : t("trace.rejected", { reason: rejection.reason ?? "" })}
+                  </p>
+                  {rejection.text && (
+                    <p className="border-l-2 border-raised pl-3 whitespace-pre-line [overflow-wrap:anywhere]">{rejection.text}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </>
     );

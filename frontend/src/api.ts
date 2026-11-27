@@ -137,6 +137,14 @@ export interface GateStep {
   decision: string | null;
   corrections: number;
   reasons: string[];
+  rejections: Rejection[]; // the answers gate's
+}
+
+/** An answer the candidate rejected, or a letter asked shorter (reason "short"). */
+export interface Rejection {
+  answer_id: number | null; // none, as text, for a label older than this field
+  reason: string | null;
+  text: string | null; // the text turned down
 }
 
 export interface ApplicationTrace {

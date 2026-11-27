@@ -183,6 +183,8 @@
   "trace.gate.sent": "Envoi",
   "trace.gate.dropped": "Candidature abandonnée",
   "trace.corrections": "{n} correction(s)",
+  "trace.rejected": "Refusée : {reason}",
+  "trace.short": "Lettre courte demandée à la place de :",
   "trace.total": "Total : {time} d’agents, coût estimé {cost}",
   "settings.error": "L’état des services n’a pas pu être chargé.",
   "settings.appearance": "Apparence",

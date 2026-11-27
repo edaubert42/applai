@@ -70,12 +70,23 @@ class RunStep(_Step):
     outcome: str
 
 
+class Rejection(BaseModel):
+    """An answer the candidate rejected, or a letter they asked shorter (reason "short")."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    answer_id: int | None  # none, as text, for a label from before migration 0027
+    reason: str | None
+    text: str | None  # the text turned down
+
+
 class GateStep(_Step):
     """A decision of the candidate on the timeline, with its label.
 
     to_state is the state the decision moved the offer or the application to. corrections is
     how many corrections the decision holds: the answers and CV changes the candidate changed
     or rejected, the form fields they fixed, else 1 for a decision against the agents' proposal.
+    rejections are the answers gate's, in the order they were made.
     """
 
     kind: Literal["gate"] = "gate"
@@ -83,6 +94,7 @@ class GateStep(_Step):
     decision: str | None  # none at the answers gate, which holds one label per answer
     corrections: int
     reasons: list[str]
+    rejections: list[Rejection] = []
 
 
 class ApplicationTrace(BaseModel):
@@ -119,9 +131,14 @@ def _gate(change: StateChange, labels: list[Label], changes: list[StateChange]) 
             if x.level in _ANSWER_LEVELS and x.created_at <= at
             and (since is None or x.created_at > since)
         ]  # fmt: skip
+        rejections = [
+            Rejection(answer_id=x.answer_id, reason=x.note, text=x.rejected_text)
+            for x in sorted(mine, key=lambda x: x.id)
+            if x.level == "answers" and x.decision == "rejected"
+        ]
         return GateStep(
             at=at, to_state=change.to_state, decision=None,
-            corrections=sum(x.correction for x in mine), reasons=[],
+            corrections=sum(x.correction for x in mine), reasons=[], rejections=rejections,
         )  # fmt: skip
     level = [x for x in labels if x.level == _GATE_LEVELS.get(change.to_state)]
     # move() and its label are written together: the nearest label in time is the gate's.
