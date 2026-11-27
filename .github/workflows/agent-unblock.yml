@@ -1,16 +1,26 @@
 # When an issue is closed as completed, start the coder on each `ready-for-agent` issue
 # it was the last open blocker of (tools/blockers.py). The coder checks the owner's label again.
+# An issue closed by an auto-merge starts no workflow: agent-merge.yml dispatches this one.
 name: Agent unblock
 
 on:
   issues:
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: The issue an auto-merged PR closed
+        required: true
+        type: number
 
 permissions: {}
 
 jobs:
   unblock:
-    if: github.event.issue.state_reason == 'completed'
+    # A dispatch runs main's code; blockers.py checks the issue was closed as completed.
+    if: >-
+      github.event.issue.state_reason == 'completed'
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -24,7 +34,7 @@ jobs:
       - name: Start the coder on issues no longer blocked
         env:
           GH_TOKEN: ${{ github.token }}
-          CLOSED: ${{ github.event.issue.number }}
+          CLOSED: ${{ github.event.issue.number || inputs.issue }}
         run: |
           for issue in $(python3 tools/blockers.py unblocked "$CLOSED"); do
             gh workflow run agent-coder.yml -f issue="$issue"
