@@ -156,8 +156,8 @@ function ApplicationRow({
   // A failure is shown instead of the spinner and of the gate: it is what the candidate must see.
   // Only the errors the row shows: a fill_error past answers_checked shows on final validation.
   const reviewError = row.state === "filled" ? row.review_error : null;
-  // A form read page by page: a page not read, or not planned, before the answers gate.
-  const pageError = row.state === "form_captured" ? row.form_url_error : null;
+  // A form read page by page: a page not read, or not planned, before or after the answers gate.
+  const pageError = row.state === "form_captured" || row.state === "answers_checked" ? row.form_url_error : null;
   const fillError = row.state === "answers_checked" || row.state === "form_captured" ? row.fill_error : null;
   const hasError = row.draft_error !== null || fillError !== null || reviewError !== null || pageError !== null;
   // The stage the candidate can start again: the one whose error the row shows.

@@ -372,6 +372,13 @@ describe("who acts next on an application", () => {
     );
   });
 
+  it("shows a page after the answers gate not read on an answers_checked row", async () => {
+    const unread = aRow({ id: 1, offer_id: 1, title: "Poste suite", state: "answers_checked", form_url_error: "form_not_loaded" });
+    await openScreen(applicationsRoutes({ in_progress: [unread] }));
+
+    expect(rowOf("Poste suite").getAllByRole("alert").map((alert) => alert.textContent)).toContain(fr["applications.form_page.error"]);
+  });
+
   it.each([
     ["fr", fr],
     ["en", en],

@@ -21,10 +21,11 @@ candidate pastes one, which counts from zero again.
 A form spread over pages at one URL is posted page by page, each field stored with its page;
 indices count across pages. Page 1 moves it to form_captured; while it stays there, a page code
 fills alone (applai.filling.by_code_only) is planned by code and served as a fill, and the next
-page may be posted. The first page that is not stops: it is drafted, then the gate runs. A
-page posted again replaces it, unless drafting reads it or a later page's fields would move.
-A later page that fails keeps the URL, the pages read and the state; its form_url_error
-clears when it is posted.
+page may be posted. The first page that is not stops: it is drafted, then the gate runs; each
+page after it is planned by Filling, unless it asks what the gate did not check. A page
+posted again replaces it, unless drafting reads it or a later page's fields would move.
+A later page that fails or is refused keeps the URL, the pages read and the state; its
+form_url_error clears when that page (form_failed_page) is posted.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
 page received for one is read for its text, and the offer is triaged again in the background.
 An ask the extension leaves unanswered for REREAD_WITHIN ends when the pages are listed.
@@ -62,7 +63,7 @@ from applai import details, reread, validation
 from applai.agents import AgentRunner
 from applai.capture import MAX_FIELDS, MAX_LABEL, FormField, read_fields
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
-from applai.drafting import draft_in_background
+from applai.drafting import draft_in_background, drafted_fields
 from applai.filling import FillAction, Slot, by_code, by_code_only, file_path
 from applai.google import describe_google_offer, on_google
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Scan
@@ -321,10 +322,11 @@ def form_sent(
     """Store a waiting application's fields and move it to form_captured, then draft it in
     the background with the watch's runner (applai.drafting). With no fields and the page's
     text, the form_capture agent reads them in the text; none found is a failure. A page
-    code fills alone is planned, not drafted."""
+    code fills alone is planned, not drafted; a page after the answers gate is planned by
+    Filling (applai.filling.plan_fill), unless it asks what the gate did not check."""
     state = request.app.state
     engine, watch, page = state.engine, state.watch, body.page
-    fields, reason, draft = body.fields, "no_field", True
+    fields, reason, draft, plan = body.fields, "no_field", True, False
     if not fields and body.text and watch is not None:
         with Session(engine) as session:  # refused before the model is called
             _waiting_form(session, application_id, page)
@@ -336,18 +338,28 @@ def form_sent(
         application = _waiting_form(session, application_id, page)
         captured = application.state != ApplicationState.CREATED  # a later page, or again
         posted = [{**field.model_dump(), "page": page} for field in fields]
+        refused = None
         if not fields:
-            _form_failed(application, reason, state.clock())
+            _form_failed(application, reason, state.clock(), page)
         elif page is None:
             application.form_fields = [field.model_dump() for field in fields]
-        elif application.state == ApplicationState.ANSWERS_CHECKED and not by_code_only(posted):
-            raise HTTPException(409, f"Page {page} has an open question after the answers gate.")
+        elif application.state == ApplicationState.ANSWERS_CHECKED:
+            questions, letter = drafted_fields(posted)
+            if questions or letter is not None:  # out of scope: a gate for a later page
+                refused = "asks_after_gate", f"Page {page} asks what the gate did not check."
+            else:  # the page after the last (_page_waiting): Filling plans it again with it
+                _clear_page_error(application, page)
+                application.form_fields = [*(application.form_fields or []), *posted]
+                application.fill_plan = application.fill_failed_at = None  # not served meanwhile
+                draft, plan = False, True
         elif _moves_later_pages(application.form_fields or [], posted, page):
-            _form_failed(application, "page_changed", state.clock())
-            session.commit()
-            raise HTTPException(409, f"Page {page} would move the fields of the pages after it.")
+            refused = "page_changed", f"Page {page} would move the fields of the pages after it."
         else:
             draft = _store_page(application, posted, page, state.data_dir)
+        if refused is not None:  # shown on the row until that page is posted
+            _form_failed(application, refused[0], state.clock(), page)
+            session.commit()
+            raise HTTPException(409, refused[1])
         if fields and not captured:
             try:
                 move(session, application, ApplicationState.FORM_CAPTURED, Actor.FORM_CAPTURE)
@@ -357,6 +369,9 @@ def form_sent(
     if fields and draft and watch is not None:
         later.add_task(draft_in_background, state.engine, state.data_dir, watch.runner,
                        application_id)  # fmt: skip
+    if plan and watch is not None:
+        later.add_task(state.plan_fill, engine, state.data_dir, watch.runner, application_id,
+                       state.clock)  # fmt: skip
 
 
 @router.post("/forms/{application_id}/failure", status_code=204)
@@ -364,7 +379,7 @@ def form_failed(application_id: int, body: FormFailed, request: Request) -> None
     """Record a form, or a page of it, the extension could not read."""
     with Session(request.app.state.engine) as session:
         application = _waiting_form(session, application_id, body.page)
-        _form_failed(application, body.reason, request.app.state.clock())
+        _form_failed(application, body.reason, request.app.state.clock(), body.page)
         session.commit()
 
 
@@ -390,12 +405,12 @@ def _page_range(fields: _Fields, page: int) -> range:
 def _page_waiting(application: Application, page: int | None) -> bool:
     """form_captured page by page: a page before the last, or, when code fills the last page
     alone, that one or the next. A last page that waits for drafting is not replaced.
-    answers_checked: the page after the last, to be planned by code (see _store_page)."""
+    answers_checked: the page after the last, once the pages before it are planned."""
     last = _last_page(application.form_fields)
     if application.user_id != LOCAL_USER_ID or page is None or last is None:
         return False
     if application.state == ApplicationState.ANSWERS_CHECKED:
-        return page == last + 1
+        return page == last + 1 and application.fill_plan is not None
     return application.state == ApplicationState.FORM_CAPTURED and (
         page < last or (page <= last + 1 and _last_page_by_code(application.form_fields))
     )
@@ -421,17 +436,16 @@ def _moves_later_pages(fields: _Fields, posted: _Fields, page: int) -> bool:
 
 
 def _store_page(application: Application, posted: _Fields, page: int, data_dir: Path) -> bool:
-    """Store a page's fields in place of its own and clear the page errors; plan the page if
-    code fills it alone, keeping the other pages' actions. Whether it waits for drafting.
+    """Store a page's fields in place of its own and clear its errors; plan the page if code
+    fills it alone, keeping the other pages' actions. Whether it waits for drafting.
     A profile that does not load is kept as the fill_error: the page is not served."""
     fields = application.form_fields or []
     old = _page_range(fields, page)
     last = _last_page(fields) or 0
     application.form_fields = [*fields[: old.start], *posted, *fields[old.stop :]]
-    if page >= last:  # the errors are of the page waiting; an earlier page keeps them
-        application.form_url_error = application.fill_error = None
-    elif application.form_url_error == "form_page_changed":
-        application.form_url_error = None
+    _clear_page_error(application, page)
+    if page >= last:  # the fill served, and its fill_error, are the last page's
+        application.fill_error = None
     application.fill_failed_at = None
     kept = [action for action in application.fill_plan or [] if action["field"] not in old]
     application.fill_plan = kept
@@ -447,13 +461,19 @@ def _store_page(application: Application, posted: _Fields, page: int, data_dir: 
     return False
 
 
-def _form_failed(application: Application, reason: str, now: datetime) -> None:
+def _clear_page_error(application: Application, page: int) -> None:
+    """Clear the form_url_error of a page read page by page, once that page is posted."""
+    if application.form_failed_page in (None, page):
+        application.form_url_error = application.form_failed_page = None
+
+
+def _form_failed(application: Application, reason: str, now: datetime, page: int | None) -> None:
     """Record a form not read, asked for again after the next scan; after the last failure
-    allowed, drop its URL so the candidate pastes one. A page of a form_captured form keeps
-    its URL and its pages: the error shows until that page is posted."""
+    allowed, drop its URL so the candidate pastes one. A later page of a form read page by
+    page keeps its URL, its pages and its state: the error shows until that page is posted."""
     application.form_failed_at = now.astimezone(UTC).replace(tzinfo=None)  # as the scans' times
-    if application.state == ApplicationState.FORM_CAPTURED:
-        application.form_url_error = f"form_{reason}"
+    if application.state != ApplicationState.CREATED:  # form_captured or answers_checked
+        application.form_url_error, application.form_failed_page = f"form_{reason}", page
         return
     application.form_failures += 1
     if application.form_failures >= MAX_FORM_FAILURES:

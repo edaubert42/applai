@@ -326,28 +326,98 @@ def test_a_page_stored_keeps_the_error_of_a_page_not_read(data_dir: Path, engine
         client.post(f"/api/browser/forms/{application_id}/failure",
                     json={"reason": "not_loaded", "page": 3}, headers=EXTENSION)  # fmt: skip
         again = _post(client, application_id, PAGE_1, 1)  # an earlier page, same fields
+        last = _post(client, application_id, PAGE_2, 2)  # the last page stored, again
 
-    assert again == 204
+    assert (again, last) == (204, 204)
     assert _get(engine, application_id).form_url_error == "form_not_loaded"
 
 
-def test_a_page_after_the_gate_is_planned_by_code_and_one_with_a_question_is_refused(
-    data_dir: Path, engine: Engine
-):
-    ask = {"field": 5, "label": WHY, "kind": "fill", "value": "J'ai construit une prévision."}
-    plan = [*PLAN_1, {"field": 4, **CITY}, ask]
-    fields = [*_paged(PAGE_1, 1), *_paged(PAGE_2_ASKS, 2)]
-    application_id = _application(engine, "answers_checked", form_fields=fields, fill_plan=plan)
-    page_3 = [_field("Ville", "text")]
+def test_an_earlier_pages_error_clears_when_that_page_is_posted(data_dir: Path, engine: Engine):
+    application_id = _application(engine)
 
     with _client(data_dir) as (client, _):
-        refused = _post(client, application_id, [_field(WHY, "textarea")], 3)
+        _post(client, application_id, PAGE_1, 1)
+        _post(client, application_id, PAGE_2, 2)
+        client.post(f"/api/browser/forms/{application_id}/failure",
+                    json={"reason": "not_read", "page": 1}, headers=EXTENSION)  # fmt: skip
+        failed = _get(engine, application_id).form_url_error
+        again = _post(client, application_id, PAGE_1, 1)
+
+    assert (failed, again) == ("form_not_read", 204)
+    assert _get(engine, application_id).form_url_error is None
+
+
+CHOICE = {"label": "Disponibilité", "type": "select", "required": True,
+          "options": ["Immédiate", "Sous 3 mois"]}  # fmt: skip
+CHOSEN = AgentResult(output={"choices": {"7": ["Immédiate"]}},
+                     usage=Usage(model="claude-sonnet-5-5"))  # fmt: skip
+
+
+def _checked(engine: Engine) -> tuple[int, list[dict[str, Any]]]:
+    """An answers_checked application whose page 2 asked an open question: its id, its fields."""
+    ask = {"field": 5, "label": WHY, "kind": "fill", "value": "J'ai construit une prévision."}
+    fields = [*_paged(PAGE_1, 1), *_paged(PAGE_2_ASKS, 2)]
+    plan = [*PLAN_1, {"field": 4, **CITY}, ask]
+    return _application(engine, "answers_checked", form_fields=fields, fill_plan=plan), fields
+
+
+def test_a_page_after_the_gate_is_planned_by_filling_with_its_choices(
+    data_dir: Path, engine: Engine
+):
+    application_id, fields = _checked(engine)
+    page_3 = [_field("Ville", "text"), CHOICE]
+
+    with _client(data_dir, CHOSEN) as (client, model):
         skipped = _post(client, application_id, page_3, 4)
         sent = _post(client, application_id, page_3, 3)
         fills = _fills(client)
 
-    assert (refused, skipped, sent) == (409, 409, 204)
+    assert (skipped, sent) == (409, 204)
+    assert [spec.name for spec in model.specs] == ["filling"]
     application = _get(engine, application_id)
     assert application.state == "answers_checked"
     assert application.form_fields == [*fields, *_paged(page_3, 3)]
-    assert [(fill["page"], fill["actions"]) for fill in fills] == [(3, [{"field": 0, **CITY}])]
+    choose = {"field": 1, "label": "Disponibilité", "kind": "choose", "value": ["Immédiate"]}
+    assert [(fill["page"], fill["actions"]) for fill in fills] == [
+        (3, [{"field": 0, **CITY}, choose])
+    ]
+
+
+def test_a_page_with_an_open_question_after_the_gate_is_refused_and_shown(
+    data_dir: Path, engine: Engine
+):
+    application_id, fields = _checked(engine)
+
+    with _client(data_dir) as (client, model):
+        refused = _post(client, application_id, [_field(WHY, "textarea")], 3)
+        [row] = client.get("/api/applications").json()["in_progress"]
+        fills = _fills(client)
+        again = _post(client, application_id, [_field("Ville", "text")], 3)
+
+    assert (refused, again) == (409, 204)
+    assert (row["state"], row["form_url_error"]) == ("answers_checked", "form_asks_after_gate")
+    assert [fill["page"] for fill in fills] == [2]  # page 2's fill is still served
+    assert model.specs == []
+    application = _get(engine, application_id)
+    assert (application.form_fields or [])[: len(fields)] == fields
+    assert application.form_url_error is None
+
+
+def test_a_page_failure_after_the_gate_is_shown_and_keeps_the_url(data_dir: Path, engine: Engine):
+    application_id, fields = _checked(engine)
+    failure = f"/api/browser/forms/{application_id}/failure"
+
+    with _client(data_dir) as (client, _):
+        # More than MAX_FORM_FAILURES.
+        failed = [client.post(failure, json={"reason": "not_loaded", "page": 3},
+                              headers=EXTENSION).status_code for _ in range(3)]  # fmt: skip
+        [row] = client.get("/api/applications").json()["in_progress"]
+        fills = _fills(client)
+
+    assert failed == [204, 204, 204]
+    assert (row["state"], row["form_url"], row["form_url_error"]) == (
+        "answers_checked", LEVER, "form_not_loaded",
+    )  # fmt: skip
+    assert [fill["page"] for fill in fills] == [2]
+    application = _get(engine, application_id)
+    assert (application.form_fields, application.form_failures) == (fields, 0)
