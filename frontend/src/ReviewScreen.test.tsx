@@ -552,11 +552,11 @@ describe("not interested", () => {
     fireEvent.keyDown(document, { key: "ArrowLeft" });
 
     const pills = screen.getAllByRole("button", { name: /^\d/ }).map((pill) => pill.textContent);
-    expect(pills.slice(-2)).toEqual([`7${fr["reason.expired"]}`, `8${fr["reason.other"]}`]);
+    expect(pills.slice(-3, -1)).toEqual([`7${fr["reason.expired"]}`, `8${fr["reason.other"]}`]);
     expect(fr["reason.expired"]).toBe("Offre expirée");
     expect(en["reason.expired"]).toBe("Offer expired");
-    expect(fr["decline.keys"]).toContain("1 à 8");
-    expect(fr["review.keys"]).toContain("1 à 8");
+    expect(fr["decline.keys"]).toContain("1 à 9");
+    expect(fr["review.keys"]).toContain("1 à 9");
 
     const expired = screen.getByRole("button", { name: new RegExp(fr["reason.expired"]) });
     fireEvent.click(expired);
@@ -571,6 +571,36 @@ describe("not interested", () => {
       "/api/offers/1/decision",
       { decision: "not_interested", reasons: ["expired"] },
     ]);
+  });
+
+  it("offers « Déjà postulé » as the ninth reason, alone: it clears the others, another clears it", async () => {
+    const calls = await openScreen();
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+    const pill = (name: string) => screen.getByRole("button", { name: new RegExp(name) });
+    const pressed = () =>
+      screen.getAllByRole("button", { name: /^\d/ }).filter((p) => p.getAttribute("aria-pressed") === "true").map((p) => p.textContent);
+
+    expect(screen.getAllByRole("button", { name: /^\d/ }).at(-1)?.textContent).toBe(`9${fr["reason.already_applied"]}`);
+    expect(fr["reason.already_applied"]).toBe("Déjà postulé");
+    expect(en["reason.already_applied"]).toBe("Already applied");
+    fireEvent.click(pill(fr["reason.salary"]));
+    fireEvent.keyDown(document, { key: "8" });
+    fireEvent.keyDown(document, { key: "9" });
+    expect(pressed()).toEqual([`9${fr["reason.already_applied"]}`]);
+    fireEvent.click(pill(fr["reason.location"]));
+    expect(pressed()).toEqual([`6${fr["reason.location"]}`]);
+    fireEvent.click(pill(fr["reason.already_applied"]));
+    fireEvent.change(screen.getByLabelText(fr["decline.note"]), { target: { value: "Sur leur site" } });
+    fireEvent.click(save());
+
+    await waitFor(() => expect(decisions(calls)).toHaveLength(1));
+    expect(decisions(calls)[0]).toEqual([
+      "/api/offers/1/decision",
+      { decision: "not_interested", reasons: ["already_applied"], note: "Sur leur site" },
+    ]);
+    await waitFor(() => expect(screen.queryByText(fr["decline.title"])).toBeNull());
+    expect(screen.queryByRole("button", { name: /Ingénieur logiciel/ })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Ingénieur logiciel" })).toBeNull();
   });
 
   it("is cancelled by Escape, and by the Cancel button, without a decision", async () => {

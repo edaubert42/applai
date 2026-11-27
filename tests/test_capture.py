@@ -214,7 +214,7 @@ def test_a_pasted_http_url_is_recorded_and_clears_the_error_another_scheme_is_re
     assert client.put("/api/applications/999/form-url", json={"url": LEVER}).status_code == 404
 
 
-def test_an_offer_declined_as_already_applied_starts_no_form_capture_and_gives_the_extension_nothing(
+def test_an_offer_declined_as_already_applied_starts_no_capture_and_gives_the_extension_nothing(
     tmp_path: Path, engine: Engine, client: TestClient, pages: dict[str, str], asked: list[str]
 ):
     extension_id = "kfbcmpgnoaljdhiekfbcmpgnoaljdhie"

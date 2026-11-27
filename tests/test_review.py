@@ -471,7 +471,7 @@ def test_an_offer_declined_as_already_applied_ends_with_its_application_sent(
 ):
     offer_id = _offer(engine, "data-engineer", state, score=score, rule=rule)
 
-    response = _already_applied(client, offer_id, note="Postulé sur leur site en octobre.")
+    response = _already_applied(client, offer_id, note="Postulé sur leur site.")
 
     assert response.status_code == 201
     assert _state(engine, offer_id) == "accepted"
@@ -485,7 +485,7 @@ def test_an_offer_declined_as_already_applied_ends_with_its_application_sent(
     assert (offer_label.level, offer_label.decision, offer_label.reasons) == (
         "offer", "not_interested", ["already_applied"],
     )  # fmt: skip
-    assert (offer_label.note, offer_label.correction) == ("Postulé sur leur site en octobre.", False)
+    assert (offer_label.note, offer_label.correction) == ("Postulé sur leur site.", False)
     assert (sent_label.application_id, sent_label.decision, sent_label.reasons) == (
         application.id, "sent", ["outside_applai"],
     )  # fmt: skip

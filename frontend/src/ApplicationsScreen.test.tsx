@@ -456,6 +456,8 @@ describe("dropping an application", () => {
     for (const [i, reason] of pills.entries()) {
       expect(screen.getByRole("button", { name: new RegExp(`^${i + 1}\\s*${words[`reason.${reason}`]}$`) })).toBeTruthy();
     }
+    expect(screen.getAllByRole("button", { name: /^\d/ })).toHaveLength(pills.length); // no « Déjà postulé »
+    expect(screen.queryByRole("button", { name: new RegExp(words["reason.already_applied"]) })).toBeNull();
     const save = screen.getByRole("button", { name: words["decline.save"] }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     fireEvent.keyDown(document, { key: "8" });
