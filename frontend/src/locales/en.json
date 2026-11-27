@@ -183,6 +183,8 @@
   "trace.gate.sent": "Sent",
   "trace.gate.dropped": "Application dropped",
   "trace.corrections": "{n} correction(s)",
+  "trace.rejected": "Rejected: {reason}",
+  "trace.short": "Short letter asked instead of:",
   "trace.total": "Total: {time} of agents, estimated cost {cost}",
   "settings.error": "The services’ state could not be loaded.",
   "settings.appearance": "Appearance",
