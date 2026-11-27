@@ -91,6 +91,6 @@ def test_the_hosted_demo_answers_its_public_host_within_15_s_from_cold(tmp_path:
         demo.terminate()
         output, _ = demo.communicate(timeout=10)
 
-    assert board["in_progress"], output
+    assert board["sent"], output
     assert write.status_code == 201, output
     assert "Failed:" not in output
