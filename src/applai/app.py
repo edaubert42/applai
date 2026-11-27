@@ -412,6 +412,10 @@ def short_cover_letter(
     if answer.kind != COVER_LETTER:
         raise HTTPException(409, f"Answer {answer_id} is not a cover letter.")
     try:
+        correct.refuse_earlier(session, application, answer)
+    except correct.GateRefused as error:
+        raise HTTPException(409, str(error)) from None
+    try:
         updated = redraft_short_letter(watch.runner, request.app.state.engine, answer_id, profile)
     except (AgentError, DraftingError) as error:  # these messages hold no candidate data
         raise HTTPException(502, str(error)) from None

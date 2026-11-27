@@ -5,7 +5,9 @@ correction; editing and rejecting are. An edit keeps the candidate's text and it
 against the drafted text; a rejected answer is drafted again alone (applai.drafting). Once
 every answer is accepted or edited, and every change of CV tailoring (applai.cv_tailoring) is
 decided the same way, as a label at the "cv" level, the candidate moves the application to
-answers_checked. Functions write in the caller's session and do not commit.
+answers_checked. A later page that asks open questions has its own gate (applai.drafting.
+gate_page): it reads that page's answers only, and refuses decisions on earlier answers and
+on the CV, whose labels stay. Functions write in the caller's session and do not commit.
 """
 
 import json
@@ -18,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from applai.cv_tailoring import headline_problem
-from applai.drafting import AnswerStatus, sentence_text
+from applai.drafting import AnswerStatus, gate_page, sentence_text
 from applai.models import Application, CvChange, DraftAnswer, Label, Offer
 from applai.orchestrator import Actor, ApplicationState, move
 from applai.profile import Profile
@@ -126,9 +128,19 @@ def _application(session: Session, user_id: int, application_id: int) -> Applica
     return application
 
 
-def _answers(session: Session, application_id: int) -> list[DraftAnswer]:
-    query = select(DraftAnswer).where(DraftAnswer.application_id == application_id)
-    return list(session.scalars(query.order_by(DraftAnswer.field_index, DraftAnswer.id)))
+def _answers(session: Session, application: Application) -> list[DraftAnswer]:
+    """The answers the application's gate reads: a later gate's, its page's only."""
+    page = gate_page(session, application)
+    query = select(DraftAnswer).where(DraftAnswer.application_id == application.id)
+    answers = session.scalars(query.order_by(DraftAnswer.field_index, DraftAnswer.id))
+    return [answer for answer in answers if page is None or answer.field_index in page]
+
+
+def refuse_earlier(session: Session, application: Application, answer: DraftAnswer) -> None:
+    """Raise GateRefused for an answer an earlier answers gate checked: its labels stay."""
+    page = gate_page(session, application)
+    if page is not None and answer.field_index not in page:
+        raise GateRefused(f"Answer {answer.id} was checked at an earlier answers gate.")
 
 
 def judge_warnings(judge_issues: list[dict[str, Any]] | None) -> list[str]:
@@ -178,20 +190,23 @@ def cv_change_view(change: CvChange, profile: Profile) -> CvChangeView:
 
 
 def draft(session: Session, user_id: int, application_id: int, profile: Profile) -> Draft:
-    """The application's drafted answers, in the order of its form, and its CV tailoring.
+    """The application's drafted answers, in the order of its form, and its CV tailoring. A
+    later gate shows its page's answers only, and no CV: the first gate decided it.
 
     Raises NotFound.
     """
     application = _application(session, user_id, application_id)
     offer = session.get_one(Offer, application.offer_id)
-    answers = [answer_view(answer, profile) for answer in _answers(session, application_id)]
-    changes = [cv_change_view(c, profile) for c in _cv_changes(session, application_id)]
+    answers = [answer_view(answer, profile) for answer in _answers(session, application)]
+    cv = gate_page(session, application) is None
+    changes = [cv_change_view(c, profile) for c in _cv_changes(session, application_id) if cv]
     resolved = all(answer.status in _RESOLVED for answer in answers)
     return Draft(application_id=application.id, offer_id=offer.id, title=offer.title,
                  company=offer.company, state=ApplicationState(application.state),
                  draft_error=application.draft_error, answers=answers,
-                 cv_headline=application.cv_headline, cv_photo=application.cv_photo,
-                 cv_photo_reason=application.cv_photo_reason, cv_changes=changes,
+                 cv_headline=application.cv_headline if cv else None,
+                 cv_photo=application.cv_photo if cv else None,
+                 cv_photo_reason=application.cv_photo_reason if cv else None, cv_changes=changes,
                  resolved=resolved and all(c.status != AnswerStatus.PENDING for c in changes),
                  )  # fmt: skip
 
@@ -229,6 +244,7 @@ def decide(
         raise NotFound(answer_id)
     if application.state != ApplicationState.DRAFTED:
         raise GateRefused(f"Application {application_id} is {application.state}, not drafted.")
+    refuse_earlier(session, application, answer)
     if answer.status == AnswerStatus.REJECTED and request.decision == AnswerDecision.ACCEPT:
         raise GateRefused(f"Answer {answer_id} was rejected: edit it or reject it again.")
     rejects = request.decision == AnswerDecision.REJECT
@@ -260,7 +276,7 @@ def check_answers(session: Session, user_id: int, application_id: int) -> None:
     application = _application(session, user_id, application_id)
     if application.state != ApplicationState.DRAFTED:
         raise GateRefused(f"Application {application_id} is {application.state}, not drafted.")
-    left = [a.label for a in _answers(session, application_id) if a.status not in _RESOLVED]
+    left = [a.label for a in _answers(session, application) if a.status not in _RESOLVED]
     if left:
         raise GateRefused(f"Accept or edit every answer first: {len(left)} left.")
     pending = [c for c in _cv_changes(session, application_id) if c.status == AnswerStatus.PENDING]
@@ -290,6 +306,8 @@ def _tailored_draft(session: Session, user_id: int, application_id: int) -> Appl
     application = _application(session, user_id, application_id)
     if application.state != ApplicationState.DRAFTED:
         raise GateRefused(f"Application {application_id} is {application.state}, not drafted.")
+    if gate_page(session, application) is not None:
+        raise GateRefused(f"Application {application_id}'s CV was checked at an earlier gate.")
     if application.cv_photo is None:
         raise GateRefused(f"Application {application_id} has no CV tailoring.")
     return application

@@ -11,7 +11,9 @@ with its draft_error. Only those facts reach the agent. The cover letter's body 
 greeting and sign-off, in the offer's language, which cite no fact. Then the judge checks
 each sentence against its facts (applai.drafting_judge); its warnings are kept, never
 blocking. CV tailoring runs last (applai.cv_tailoring). An answer the candidate rejects is
-drafted again alone, with their reason (redraft_answer).
+drafted again alone, with their reason (redraft_answer). A page of a form read page by page
+that asks open questions after an answers gate is drafted alone (gate_page): the judge reads
+its answers only, and CV tailoring, decided at the first gate, does not run again.
 """
 
 import json
@@ -21,14 +23,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, NoReturn
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from applai.agents import AgentError, AgentRunner, AgentSpec, RunLock, locked_subject
 from applai.cv import offer_language
 from applai.cv_tailoring import store, tailor_cv
 from applai.drafting_judge import judge_answers
-from applai.models import AgentRun, Application, DraftAnswer, Label, Offer
+from applai.models import AgentRun, Application, DraftAnswer, Label, Offer, StateChange
 from applai.orchestrator import Actor, ApplicationState, move
 from applai.profile import Diffusion, FactStatus, Profile, ProfileError, load_profile
 from applai.text import fold
@@ -125,6 +127,45 @@ def drafted_fields(fields: list[dict[str, Any]]) -> tuple[list[int], int | None]
     return questions, others[0] if others else None
 
 
+type Fields = list[dict[str, Any]]  # a form's, as applications.form_fields keeps them
+
+
+def page_range(fields: Fields, page: int) -> range:
+    """The indices of a page's fields; an empty range at the end for a page not stored."""
+    on = [index for index, field in enumerate(fields) if field.get("page") == page]
+    return range(on[0], on[-1] + 1) if on else range(len(fields), len(fields))
+
+
+def last_page(fields: Fields | None) -> int | None:
+    """The last page stored of a form read page by page; none for a form read at once."""
+    return fields[-1].get("page") if fields else None
+
+
+def gate_page(session: Session, application: Application) -> range | None:
+    """The indices of the fields a later answers gate is for: its form's last page, while a
+    page posted after an answers gate is drafted and checked (applai.browser). None for the
+    first gate, which reads the whole form."""
+    page = last_page(application.form_fields)
+    if application.state not in (ApplicationState.FORM_CAPTURED, ApplicationState.DRAFTED):
+        return None
+    reopened = select(StateChange.id).where(
+        StateChange.application_id == application.id,
+        StateChange.from_state == ApplicationState.ANSWERS_CHECKED,
+        StateChange.to_state == ApplicationState.FORM_CAPTURED,
+    )
+    if page is None or session.scalar(reopened.limit(1)) is None:
+        return None
+    return page_range(application.form_fields or [], page)
+
+
+def _drafted_on(fields: Fields, page: range | None) -> tuple[list[int], int | None]:
+    """drafted_fields of the whole form, or of a page alone, indices counted across pages."""
+    if page is None:
+        return drafted_fields(fields)
+    questions, letter = drafted_fields(fields[page.start : page.stop])
+    return [i + page.start for i in questions], None if letter is None else letter + page.start
+
+
 def drafting_spec(
     offer: dict[str, str | None],
     fields: list[dict[str, Any]],
@@ -215,14 +256,17 @@ def _draft_application(
         offer = session.get_one(Offer, application.offer_id)
         sent = {"title": offer.title, "company": offer.company, "description": offer.description}
         offer_id, fields = offer.id, application.form_fields or []
+        page = gate_page(session, application)
     try:
-        rows = _run(runner, database, offer_id, application_id, sent, fields, profile)
+        rows = _run(runner, database, offer_id, application_id, sent, fields, profile, page)
     except Exception as error:  # these messages hold no candidate data
         known = isinstance(error, AgentError | DraftingError)
         record_failure(database, application_id, str(error) if known else type(error).__name__)
         raise
     judge_answers(runner, database, offer_id, application_id, rows, profile)
-    tailored = tailor_cv(runner, database, data_dir, application_id, profile) if data_dir else None
+    tailored = None  # a later gate's: the CV was decided at the first
+    if data_dir and page is None:
+        tailored = tailor_cv(runner, database, data_dir, application_id, profile)
     with Session(database, expire_on_commit=False) as session, session.begin():
         application = session.get_one(Application, application_id)
         for row in rows:
@@ -243,9 +287,11 @@ def _run(
     offer: dict[str, str | None],
     fields: list[dict[str, Any]],
     profile: Profile,
+    page: range | None,
 ) -> list[DraftAnswer]:
-    """The answers drafted, not stored yet; none, with no run, for a form with none to draft."""
-    questions, letter = drafted_fields(fields)
+    """The answers drafted, not stored yet, of the whole form or of page alone; none, with no
+    run, for a form with none to draft."""
+    questions, letter = _drafted_on(fields, page)
     if not questions and letter is None:
         return []
     spec = drafting_spec(offer, fields, questions, letter, profile)

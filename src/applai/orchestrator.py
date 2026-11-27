@@ -66,6 +66,8 @@ _APPLICATION_STAGES: dict[tuple[str, str], Actor] = {
     (_A.FORM_CAPTURED, _A.DRAFTED): Actor.DRAFTING,
     (_A.DRAFTED, _A.ANSWERS_CHECKED): Actor.CANDIDATE,
     (_A.ANSWERS_CHECKED, _A.FILLED): Actor.FILLING,
+    # A later page of a form read page by page asks open questions: its own answers gate.
+    (_A.ANSWERS_CHECKED, _A.FORM_CAPTURED): Actor.FORM_CAPTURE,
     (_A.FILLED, _A.REVIEWED): Actor.REVIEW,
     (_A.REVIEWED, _A.FORM_CHECKED): Actor.CANDIDATE,
     (_A.FORM_CHECKED, _A.VALIDATED): Actor.CANDIDATE,
