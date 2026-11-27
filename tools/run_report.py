@@ -3,7 +3,10 @@
 The action hides the transcript: `show_full_output` would put every tool output in this public
 repository's logs. Its execution file holds every message but dies with the runner. This prints
 only the denied tool calls and the agent's last message, cut short, in code blocks so nothing the
-agent wrote renders or mentions anyone. It never fails: a missing file is one line.
+agent wrote renders or mentions anyone. It never fails: a missing file says so.
+
+Its first line says how the run ended. An error (`is_error` in the result, or no result at all)
+lets the sweep start the coder again (tools/questions.py); max turns is no error.
 
 Usage: python3 tools/run_report.py EXECUTION_FILE
 """
@@ -18,6 +21,7 @@ from typing import Any, cast
 INPUT_CHARS = 200
 MESSAGE_CHARS = 1500
 FENCE = "~~~"
+ENDED_ON_ERROR = "Ended: on an error."
 
 
 def _cut(text: str, limit: int) -> str:
@@ -56,13 +60,21 @@ def _result(path: str) -> dict[str, Any] | None:
     return results[-1] if results else None
 
 
+def _ended(result: dict[str, Any]) -> str:
+    if result.get("subtype") == "error_max_turns":
+        return "Ended: at max turns."
+    return ENDED_ON_ERROR if result.get("is_error") is True else "Ended: normally."
+
+
 def report(path: str) -> str:
     result = _result(path) if path else None
     if result is None:
-        return "No execution file: nothing to say about denials or the last message."
+        missing = "No execution file: nothing to say about denials or the last message."
+        return f"{ENDED_ON_ERROR}\n\n{missing}"
     raw = result.get("permission_denials")
     denials = [_denial(d) for d in cast(list[Any], raw)] if isinstance(raw, list) else []
-    lines = [f"Denied ({len(denials)}):", FENCE, *denials, FENCE] if denials else ["Denied: none."]
+    lines = [_ended(result), ""]
+    lines += [f"Denied ({len(denials)}):", FENCE, *denials, FENCE] if denials else ["Denied: none."]
     message = str(result.get("result") or "").strip()
     lines += ["", "Last message:", FENCE, _plain(_cut(message, MESSAGE_CHARS)) or "(none)", FENCE]
     return "\n".join(lines)

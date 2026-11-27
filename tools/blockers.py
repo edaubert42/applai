@@ -69,10 +69,11 @@ def _completed(issue: dict[str, Any]) -> bool:
 
 
 def _answered(run: Run, number: int, owner: str, branch: str) -> bool:
-    """True when the coder stopped on questions, now answered, and opened no PR."""
+    """True when the coder stopped on questions, now answered, or on an error, and opened no PR."""
     import questions  # imports this module
 
-    if questions.next_step(questions.comments(run, number), owner) != "restart":
+    thread = questions.comments(run, number)
+    if questions.next_step(thread, owner) != "restart" and not questions.stopped_on_error(thread):
         return False
     return not _gh(run, "pr", "list", "--head", branch, "--state", "open", "--json", "number")
 

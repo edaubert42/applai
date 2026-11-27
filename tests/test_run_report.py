@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 import yaml
-from run_report import main
+from run_report import ENDED_ON_ERROR, main
 
 WORKFLOW = Path(__file__).parents[1] / ".github/workflows/agent-coder.yml"
 
@@ -93,6 +93,52 @@ def test_no_execution_file_says_so_and_does_not_fail(
     assert main(argv) == 0
 
     assert "No execution file" in capsys.readouterr().out
+
+
+def _ended(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], result: dict[str, Any] | None
+) -> list[str]:
+    path = tmp_path / "claude-execution-output.json"
+    if result is None:  # the run died before its result: only the first messages are there
+        path.write_text(json.dumps([{"type": "system", "subtype": "init", "session_id": "s-1"}]))
+    else:
+        path = _execution_file(tmp_path, result)
+    main([str(path)])
+    outside = capsys.readouterr().out.split("~~~")[0]  # what the agent wrote sits in code blocks
+    return [line for line in outside.splitlines() if line.startswith("Ended:")]
+
+
+LIMIT = "You've hit your 5-hour limit · resets 11:20pm (UTC)"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [{"is_error": True, "result": LIMIT}, {"is_error": True, "result": "API Error: 500"}, None],
+)
+def test_a_run_ended_by_an_error_or_with_no_result_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], result: dict[str, Any] | None
+) -> None:
+    assert _ended(tmp_path, capsys, result) == [ENDED_ON_ERROR]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"result": "Done."},
+        {"subtype": "error_max_turns", "is_error": True},
+        {"subtype": "error_max_turns", "result": LIMIT},  # the wording counts for nothing
+    ],
+)
+def test_a_normal_end_or_max_turns_is_not_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], result: dict[str, Any]
+) -> None:
+    ended = _ended(tmp_path, capsys, result)
+    assert len(ended) == 1 and ended != [ENDED_ON_ERROR]
+
+
+def test_no_execution_file_is_an_error(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["missing.json"])
+    assert capsys.readouterr().out.startswith(ENDED_ON_ERROR + "\n")
 
 
 def _coder_steps() -> list[dict[Any, Any]]:

@@ -13,6 +13,10 @@ posts `Default answers:` as github-actions[bot], which counts as the owner's ans
 questions it lists. A question tagged `[sending]` (ADR 0003), or with no recommended answer,
 stays the owner's. The sweep starts the coder when no question is left for the owner.
 
+A coder run that ended on an error of the model's API (tools/run_report.py), the usage limit
+among them, starts again from the sweep once its stop comment is 1 hour old and no PR is open:
+once per stop, at most 3 times a UTC day, then the owner starts it.
+
 Usage:
   python3 tools/questions.py next ISSUE   prints what comes next
   python3 tools/questions.py sweep        answers by default on every open `ready-for-agent` issue
@@ -30,12 +34,20 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from blockers import READY, check
+from run_report import ENDED_ON_ERROR, FENCE
 
 Run = Callable[..., subprocess.CompletedProcess[str]]
 
 AGENT = "claude[bot]"
 BOT = "github-actions[bot]"
 WAIT = timedelta(hours=2)
+ERROR_WAIT = timedelta(hours=1)
+RESTARTS = 3  # a UTC day, after errors
+STARTED_AGAIN = "Sweep: coder started again"
+REFUSED = (
+    f"Sweep: coder not started again: it started again {RESTARTS} times today (UTC) "
+    "after an error. The owner starts it."
+)
 SENDING = "[sending]"
 RETRIED = "Starting the coder again: the first start failed. If this fails, the owner starts it."
 NOT_STARTED = "The coder did not start again: the owner starts it."
@@ -172,6 +184,41 @@ def _never_started(comments: list[dict[str, Any]], owner: str, now: datetime) ->
     )
 
 
+def _error_stop(comment: dict[str, Any]) -> bool:
+    """True for agent-coder.yml's stop comment on an error; the agent's fenced words never count."""
+    body = _body(comment)
+    outside = body.split(FENCE, 1)[0].splitlines()
+    return _login(comment) == BOT and body.startswith("Coder:") and ENDED_ON_ERROR in outside
+
+
+def stopped_on_error(comments: list[dict[str, Any]]) -> bool:
+    """True when the coder's last word, its own or its stop comment, is a stop on an error."""
+    said = [
+        c
+        for c in comments
+        if _login(c) == AGENT or (_login(c) == BOT and _body(c).startswith("Coder:"))
+    ]
+    return bool(said) and _error_stop(said[-1])
+
+
+def restart_after_error(comments: list[dict[str, Any]], now: datetime) -> str | None:
+    """The `Sweep:` comment for a coder that stopped on an error 1 hour ago, else None.
+
+    One per stop: none once any comment of the agents or the sweep followed it. Past RESTARTS
+    the same UTC day, the comment says the owner starts it, and nothing starts.
+    """
+    ours = [c for c in comments if _login(c) in (AGENT, BOT)]
+    if not ours or not _error_stop(ours[-1]) or _age(ours[-1], now) <= ERROR_WAIT:
+        return None
+    today = [
+        c
+        for c in ours
+        if _body(c).startswith(STARTED_AGAIN)
+        and datetime.fromisoformat(str(c["created_at"])).astimezone(UTC).date() == now.date()
+    ]
+    return REFUSED if len(today) >= RESTARTS else f"{STARTED_AGAIN} ({len(today) + 1}/{RESTARTS})."
+
+
 def _gh(run: Run, *args: str) -> None:
     run(["gh", *args], capture_output=True, text=True).check_returncode()
 
@@ -208,6 +255,15 @@ def sweep(run: Run, owner: str, now: datetime) -> int:
                     print(f"#{number}: gh failed ({error.returncode}); the owner starts it")
                     failed = 1
                     _gh(run, "issue", "comment", str(number), "--body", NOT_STARTED)
+            elif again := restart_after_error(thread, now):
+                if check(run, number, owner) != "ready":  # also: a PR is open on its branch
+                    continue
+                # Started first: a failed start leaves no `Sweep:` comment, the next run retries.
+                if again == REFUSED:
+                    print(f"#{number}: started again {RESTARTS} times today; the owner starts it")
+                else:
+                    _gh(run, "workflow", "run", "agent-coder.yml", "-f", f"issue={number}")
+                _gh(run, "issue", "comment", str(number), "--body", again)
         except subprocess.CalledProcessError as error:
             print(f"#{number}: gh failed ({error.returncode}); the next run tries again")
             failed = 1
