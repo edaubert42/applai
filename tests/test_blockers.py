@@ -229,12 +229,25 @@ def test_the_coder_runs_the_agent_only_when_the_check_says_ready():
 
 def test_closing_an_issue_starts_the_coder_on_each_unblocked_issue():
     workflow = _workflow("agent-unblock.yml")
-    assert workflow[True] == {"issues": {"types": ["closed"]}}
+    assert workflow[True]["issues"] == {"types": ["closed"]}
     job = workflow["jobs"]["unblock"]
     assert "state_reason == 'completed'" in job["if"]
     run = "\n".join(step.get("run", "") for step in job["steps"])
     assert "tools/blockers.py unblocked" in run
     assert "gh workflow run agent-coder.yml" in run
+
+
+def test_an_issue_closed_by_an_auto_merge_starts_the_coder_on_each_unblocked_issue():
+    # The workflow's token closes no issue that starts a workflow: agent-merge.yml dispatches.
+    workflow = _workflow("agent-unblock.yml")
+    assert workflow[True]["workflow_dispatch"]["inputs"]["issue"]["required"] is True
+    job = workflow["jobs"]["unblock"]
+    # Main's code only; blockers.py checks the issue was closed as completed.
+    assert (
+        "(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')" in job["if"]
+    )
+    [step] = [s for s in job["steps"] if "tools/blockers.py unblocked" in s.get("run", "")]
+    assert step["env"]["CLOSED"] == "${{ github.event.issue.number || inputs.issue }}"
 
 
 def test_a_coder_started_by_a_workflow_is_not_refused_as_a_bot():

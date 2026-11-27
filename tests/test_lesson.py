@@ -309,10 +309,31 @@ def test_a_manual_run_writes_what_it_would_open_to_the_run_summary_and_opens_not
     workflow = _workflow()
     assert "workflow_dispatch" in workflow[True]
     learn, opener = workflow["jobs"]["learn"], workflow["jobs"]["open"]
-    assert "github.event.sender.login == github.repository_owner" in learn["if"]
+    owner_run = (
+        "github.event_name == 'workflow_dispatch'"
+        " && github.event.sender.login == github.repository_owner && inputs.pr == ''"
+    )
+    assert owner_run in learn["if"]
     dry_run = _run_step(learn, "--dry-run")
-    assert dry_run["if"] == "github.event_name == 'workflow_dispatch'"
-    assert opener["if"] == "github.event_name == 'pull_request'"
+    assert dry_run["if"] == "github.event_name == 'workflow_dispatch' && inputs.pr == ''"
+    assert opener["if"] == "github.event_name == 'pull_request' || inputs.pr != ''"
+
+
+def test_a_pr_merged_by_auto_merge_runs_the_learner_as_after_a_merge():
+    # A merge with the workflow's token starts no workflow: agent-merge.yml dispatches with `pr`.
+    workflow = _workflow()
+    assert workflow[True]["workflow_dispatch"]["inputs"]["pr"]["required"] is False
+    learn = workflow["jobs"]["learn"]
+    merged = (
+        "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
+        " && github.event.sender.login == 'github-actions[bot]' && inputs.pr != ''"
+    )
+    assert merged in learn["if"]
+    # Any other sender with `pr` is refused: the owner's clause, the only other one, needs no `pr`.
+    assert learn["if"].count("workflow_dispatch") == 2
+    gather = _run_step(learn, "tools/lesson.py has-findings")
+    assert gather["env"]["PR"] == "${{ github.event.pull_request.number || inputs.pr }}"
+    assert '[ -n "$PR" ] && ! python3 tools/lesson.py has-findings "$PR"' in gather["run"]
 
 
 def test_a_clean_merged_pr_skips_the_learner_model():
