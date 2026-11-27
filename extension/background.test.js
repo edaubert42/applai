@@ -362,6 +362,7 @@ function pagedChrome(calls, { turns = { 1: "next", 2: "next", 3: "final" }, stuc
     storage: { local: {
       get: async (key) => ({ [key]: stored[key] }),
       set: async (items) => Object.assign(stored, items),
+      remove: async (key) => delete stored[key],
     } },
     scripting: {
       executeScript: async ({ target: { tabId }, func, args = [] }) => {
@@ -379,12 +380,13 @@ function pagedChrome(calls, { turns = { 1: "next", 2: "next", 3: "final" }, stuc
 
 const CITY = [{ field: 0, label: "Ville", kind: "fill", value: "Lyon" }];
 
-async function pagedWith(loop, asked, options) {
+async function pagedWith(loop, asked, options, status = 204) {
   const calls = [];
   await loop(async (url, init) => {
     calls.push([url, init]);
     if (url === `${APPLAI}/api/browser/forms` || url === `${APPLAI}/api/browser/fills`) return Response.json(asked);
-    return new Response(null, { status: 204 });
+    if (status === null) throw new Error("ApplAI stopped");
+    return new Response(null, { status });
   }, pagedChrome(calls, options), async () => {});
   return calls;
 }
@@ -399,6 +401,16 @@ test("a form whose first page turns is posted as page 1, and its tab kept for th
     [`${APPLAI}/api/browser/forms/4`, { ...SENT, body: JSON.stringify({ fields, page: 1 }) }],
   ]);
   assert.deepEqual(stored, { "page-tab:4": { tabId: 10, page: 1 } });
+});
+
+test("a page 1 not accepted by ApplAI closes its tab and keeps nothing, so a retry opens one tab only", async () => {
+  for (const status of [null, 503, 422]) {
+    const stored = {};
+    const calls = await pagedWith(readForms, [{ application_id: 4, url: LEVER }], { stored }, status);
+
+    assert.equal(calls.some(([kind, id]) => kind === "close" && id === 10), true, `closed after ${status}`);
+    assert.deepEqual(stored, {});
+  }
 });
 
 test("a page filled and turned is reported with its number; the final page with its screenshot", async () => {

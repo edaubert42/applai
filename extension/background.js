@@ -85,6 +85,8 @@ export async function readForms(fetch = globalThis.fetch, browser = globalThis.c
       // ApplAI refused the fields: a failure, not a form to open again every minute
       await send(fetch, `/api/browser/forms/${application_id}/failure`, page ? { reason: "not_read", page } : { reason: "not_read" });
     }
+    // Page 1's tab is kept for the fill only once ApplAI has taken the post.
+    if (!page && body.page && !sent?.ok) await dropTab(application_id, browser);
   }
 }
 
@@ -116,6 +118,13 @@ const pageTabKey = (applicationId) => `page-tab:${applicationId}`;
 
 async function keepTab(applicationId, tab, page, browser) {
   await browser.storage.local.set({ [pageTabKey(applicationId)]: { tabId: tab.id, page } }).catch(() => {});
+}
+
+async function dropTab(applicationId, browser) {
+  const key = pageTabKey(applicationId);
+  const kept = (await browser.storage.local.get(key).catch(() => ({})))[key];
+  if (kept) await browser.tabs.remove(kept.tabId).catch(() => {});
+  await browser.storage.local.remove(key).catch(() => {});
 }
 
 // Run work, framed, in the tab showing page: the tab kept for the form when it shows that page or
