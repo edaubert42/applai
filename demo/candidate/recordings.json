@@ -585,6 +585,60 @@
       "output_tokens": 475
     }
   },
+  "review:26bdabe417b436b8b470cd9954790dc49e4aa4a5742a3ad06eedb7270dad1bb7": {
+    "output": {
+      "problems": []
+    },
+    "usage": {
+      "cost_usd": 0.040811,
+      "duration_ms": 3948,
+      "input_tokens": 10081,
+      "model": "claude-sonnet-5-5",
+      "output_tokens": 333
+    }
+  },
+  "review:41663af3a68a6ffe9ee4db8d5ea527866b4c80490c2e2eab726bb79c4a04bc34": {
+    "output": {
+      "problems": [
+        {
+          "field": "Lettre de motivation",
+          "message": "La lettre emploie le féminin (« Je serais heureuse ») alors que le genre grammatical n'est pas renseigné dans le profil. Confirmez cet accord ou utilisez une tournure neutre, par exemple « J'aurais plaisir à échanger avec vous ».",
+          "severity": "warning"
+        }
+      ]
+    },
+    "usage": {
+      "cost_usd": 0.050372,
+      "duration_ms": 8060,
+      "input_tokens": 10519,
+      "model": "claude-sonnet-5-5",
+      "output_tokens": 830
+    }
+  },
+  "review:724543eb1ca94932eefccc85de00b8692ad6e75293a0de19b2444525ab37a02d": {
+    "output": {
+      "problems": []
+    },
+    "usage": {
+      "cost_usd": 0.039461,
+      "duration_ms": 3876,
+      "input_tokens": 9761,
+      "model": "claude-sonnet-5-5",
+      "output_tokens": 326
+    }
+  },
+  "review:ea84d0425872f163ea3b2ccae09d2c54b87fd0a64b36eda28006bde8e45573fb": {
+    "output": {
+      "problems": []
+    },
+    "usage": {
+      "cost_usd": 0.041987,
+      "duration_ms": 4360,
+      "input_tokens": 10225,
+      "model": "claude-sonnet-5-5",
+      "output_tokens": 393
+    }
+  },
   "triage:4274c2328905a6ce013eb3a7444fd98f8e5a8828d3d9667bf45e924ed3782c64": {
     "output": {
       "about": "Camélia Immobilier gère des résidences étudiantes. L'offre ne décrit pas davantage l'entreprise.",
