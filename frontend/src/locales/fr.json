@@ -125,6 +125,7 @@
   "applications.form_url.error": "URL non enregistrée : ApplAI a répondu par une erreur.",
   "applications.fill.extension_disconnected": "Extension ApplAI déconnectée : vérifiez ou activez l’extension dans Chrome pour remplir ce formulaire.",
   "applications.fill.error": "Remplissage impossible : {error}.",
+  "applications.form_page.error": "Une page du formulaire n’a pas pu être relevée, ou a été refusée.",
   "applications.group.in_progress": "En cours · {n}",
   "applications.group.waiting": "En attente de vous · {n}",
   "applications.group.sent": "Envoyées · {n}",

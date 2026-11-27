@@ -5,6 +5,8 @@ issue its `## Blocked by` section names is closed, and only if the owner added t
 
 Usage:
   python3 tools/blockers.py check ISSUE       prints `ready`, or why the coder must not start
+                                              (a coder that stopped on questions, now answered,
+                                              starts again on its branch)
   python3 tools/blockers.py unblocked CLOSED  prints the issues CLOSED was the last blocker of
 
 GITHUB_REPOSITORY_OWNER names who may start the coder.
@@ -66,6 +68,15 @@ def _completed(issue: dict[str, Any]) -> bool:
     return issue["state"] == "closed" and issue.get("state_reason") == "completed"
 
 
+def _answered(run: Run, number: int, owner: str, branch: str) -> bool:
+    """True when the coder stopped on questions, now answered, and opened no PR."""
+    import questions  # imports this module
+
+    if questions.next_step(questions.comments(run, number), owner) != "restart":
+        return False
+    return not _gh(run, "pr", "list", "--head", branch, "--state", "open", "--json", "number")
+
+
 def check(run: Run, number: int, owner: str) -> str:
     issue = _issue(run, number)
     if issue["state"] != "open":
@@ -73,7 +84,9 @@ def check(run: Run, number: int, owner: str) -> str:
     if not _labeled_by_owner(run, number, owner):
         return f"not labeled {READY} by the owner"
     # The coder's branch exists once it started: two blockers closed at once start it once.
-    if _gh(run, "api", f"repos/{{owner}}/{{repo}}/git/matching-refs/heads/agent/issue-{number}-"):
+    path = f"repos/{{owner}}/{{repo}}/git/matching-refs/heads/agent/issue-{number}-"
+    refs = _gh(run, "api", path)
+    if refs and not _answered(run, number, owner, refs[0]["ref"].removeprefix("refs/heads/")):
         return "already started"
     waiting = [n for n in blocked_by(issue["body"] or "") if not _completed(_issue(run, n))]
     return f"waiting for {', '.join(f'#{n}' for n in waiting)}" if waiting else "ready"

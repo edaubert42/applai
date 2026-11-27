@@ -2,6 +2,10 @@
 
 Claude agents that prepare job applications, while the candidate decides at every gate and is the only one who sends.
 
+![The demo: an offer triaged, a cover letter drafted with its cited facts, the candidate's check, and the timeline of models and costs](docs/demo.gif)
+
+[Demo (serverless: the first load takes a few seconds)](https://applai-production-5a4220b3.up.railway.app)
+
 | Stage | Who | What happens |
 |---|---|---|
 | Watch | code | new offers from Google, LinkedIn, Notion and e-mail alerts |
@@ -19,7 +23,7 @@ What it shows:
 - **Everything is measured.** Triage and Drafting are scored on a fixed evaluation bench, and every agent run records its model, tokens, duration and estimated cost in the application's trace.
 - **Built by agents too.** Of the 130 pull requests merged from 18 to 26 November 2026, 78 were opened by a coder agent working from a GitHub issue, then checked by a reviewer agent; I review and merge every one.
 
-**Status:** every stage above is built. Next: a public demo with a fictional candidate, and the Control screen that measures each gate.
+**Status:** every stage above is built. Next: the Control screen that measures each gate.
 
 ## How it's built
 

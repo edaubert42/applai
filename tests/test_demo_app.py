@@ -64,14 +64,20 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[object]:
     return connections
 
 
-def _run_demo(monkeypatch: pytest.MonkeyPatch, visit: Callable[[TestClient], Any]) -> Any:
-    """Run `applai demo` and visit its app instead of serving it; what the visit returns."""
+def _run_demo(
+    monkeypatch: pytest.MonkeyPatch,
+    visit: Callable[[TestClient], Any],
+    address: tuple[str, int] = ("127.0.0.1", 8000),
+    base_url: str = "http://127.0.0.1",
+) -> Any:
+    """Run `applai demo`, check it would listen on address, and visit its app at base_url
+    instead of serving it; what the visit returns."""
     seen: list[Any] = []
 
     def serve(server: uvicorn.Server) -> None:
-        assert (server.config.host, server.config.port) == ("127.0.0.1", 8000)
+        assert (server.config.host, server.config.port) == address
         app: FastAPI = server.config.app  # pyright: ignore[reportAssignmentType]
-        with TestClient(app, base_url="http://127.0.0.1") as client:
+        with TestClient(app, base_url=base_url) as client:
             seen.append(visit(client))
 
     monkeypatch.setattr(uvicorn.Server, "run", serve)
@@ -124,6 +130,55 @@ def test_applai_serve_never_runs_in_demo_mode(tmp_path: Path, monkeypatch: pytes
     assert served.state.demo is False
     with TestClient(create_app(tmp_path), base_url="http://127.0.0.1") as client:
         assert client.get("/api/health").json()["demo"] is False
+
+
+PUBLIC = "applai-demo.example.org"  # the name Railway gives the hosted demo
+
+
+def test_the_hosted_demo_listens_on_port_and_answers_its_public_host_over_https_only(
+    monkeypatch: pytest.MonkeyPatch, isolated: list[object]
+):
+    monkeypatch.setenv("PORT", "8123")
+    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", PUBLIC)
+
+    def visit(client: TestClient) -> tuple[Any, ...]:
+        def add(origin: str, url: str) -> int:
+            offer = client.post("/api/offers", json={"url": url}, headers={"Origin": origin})
+            return offer.status_code
+
+        own = add(f"https://{PUBLIC}", "https://jobs.example.org/offre-1")
+        foreign = [add(origin, "https://jobs.example.org/offre-2")
+                   for origin in ("https://evil.example.org", f"http://{PUBLIC}")]  # fmt: skip
+        added = [o["url"] for o in client.get("/api/offers", params={"state": "new"}).json()]
+        other_host = client.get("/api/applications", headers={"Host": "evil.example.org"})
+        board = client.get("/api/applications").json()
+        return own, foreign, added, other_host.status_code, board
+
+    own, foreign, added, other_host, board = _run_demo(
+        monkeypatch, visit, address=("0.0.0.0", 8123), base_url=f"https://{PUBLIC}"
+    )
+
+    assert own == 201
+    assert foreign == [403, 403]
+    assert added == ["https://jobs.example.org/offre-1"]  # a refused write adds nothing
+    assert other_host == 400
+    assert board["in_progress"]
+    assert isolated == []
+
+
+@pytest.mark.parametrize("port", ["huit-mille", "0", "70000"])
+def test_the_demo_with_an_invalid_port_stops_and_names_port(
+    monkeypatch: pytest.MonkeyPatch, isolated: list[object], port: str
+):
+    monkeypatch.setenv("PORT", port)
+
+    def serve(_: uvicorn.Server) -> None:
+        pytest.fail("the demo served")
+
+    monkeypatch.setattr(uvicorn.Server, "run", serve)
+
+    with pytest.raises(SystemExit, match="PORT"):
+        cli.main(["demo"])
 
 
 def test_the_board_has_applications_in_progress_waiting_and_dropped_with_their_runs(

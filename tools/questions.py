@@ -42,7 +42,7 @@ _NUMBERED = re.compile(r"^(\d+)\.(.*?)(?=^\d+\.|\Z)", re.MULTILINE | re.DOTALL)
 _RECOMMENDED = re.compile(r"\brecommended\W{0,3}:", re.IGNORECASE)
 
 
-def _comments(run: Run, number: int) -> list[dict[str, Any]]:
+def comments(run: Run, number: int) -> list[dict[str, Any]]:
     path = f"repos/{{owner}}/{{repo}}/issues/{number}/comments?per_page=100"
     # One comment per line: `--slurp` is missing from older gh versions.
     done = run(["gh", "api", "--paginate", "--jq", ".[]", path], capture_output=True, text=True)
@@ -186,17 +186,17 @@ def sweep(run: Run, owner: str, now: datetime) -> int:
     failed = 0
     for number in (int(issue["number"]) for issue in json.loads(done.stdout)):
         try:
-            comments = _comments(run, number)
-            body = default_answers(comments, owner, now)
+            thread = comments(run, number)
+            body = default_answers(thread, owner, now)
             if body:
                 _gh(run, "issue", "comment", str(number), "--body", body)
-                posted = [*comments, {"user": {"login": BOT}, "body": body}]
+                posted = [*thread, {"user": {"login": BOT}, "body": body}]
                 if next_step(posted, owner) == "restart":
                     _gh(run, "workflow", "run", "agent-coder.yml", "-f", f"issue={number}")
                 else:
                     left = ", ".join(map(str, _numbered(_FOR_OWNER.split(body, 1)[1])))
                     print(f"#{number}: questions {left} wait for the owner")
-            elif _never_started(comments, owner, now) and check(run, number, owner) == "ready":
+            elif _never_started(thread, owner, now) and check(run, number, owner) == "ready":
                 _gh(run, "workflow", "run", "agent-coder.yml", "-f", f"issue={number}")
         except subprocess.CalledProcessError as error:
             print(f"#{number}: gh failed ({error.returncode}); the next run tries again")
@@ -214,7 +214,7 @@ def main(argv: Sequence[str] | None = None, run: Run = subprocess.run) -> int:
         return sweep(run, owner, datetime.now(UTC))
     if args.issue is None:
         parser.error("next needs an ISSUE")
-    print(next_step(_comments(run, args.issue), owner))
+    print(next_step(comments(run, args.issue), owner))
     return 0
 
 

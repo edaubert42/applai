@@ -125,6 +125,7 @@
   "applications.form_url.error": "The URL was not saved: ApplAI answered with an error.",
   "applications.fill.extension_disconnected": "ApplAI extension disconnected: check or enable the extension in Chrome to fill this form.",
   "applications.fill.error": "Filling failed: {error}.",
+  "applications.form_page.error": "A page of the form could not be read, or was refused.",
   "applications.group.in_progress": "In progress · {n}",
   "applications.group.waiting": "Waiting for you · {n}",
   "applications.group.sent": "Sent · {n}",
