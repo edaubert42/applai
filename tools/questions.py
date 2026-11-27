@@ -190,10 +190,8 @@ def sweep(run: Run, owner: str, now: datetime) -> int:
             body = default_answers(comments, owner, now)
             if body:
                 _gh(run, "issue", "comment", str(number), "--body", body)
-                if (
-                    next_step([*comments, {"user": {"login": BOT}, "body": body}], owner)
-                    == "restart"
-                ):
+                posted = [*comments, {"user": {"login": BOT}, "body": body}]
+                if next_step(posted, owner) == "restart":
                     _gh(run, "workflow", "run", "agent-coder.yml", "-f", f"issue={number}")
                 else:
                     left = ", ".join(map(str, _numbered(_FOR_OWNER.split(body, 1)[1])))
