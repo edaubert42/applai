@@ -15,6 +15,8 @@ for the candidate. With cv_sources in the profile, the CV is rendered for the of
 CV tailoring kept something (applai.cv_tailoring), and a source's CV that fails its checks
 fails Filling. Served, the CV is named CV_<first>_<last>.pdf. A failure is kept
 as the application's fill_error, for a retry by hand.
+On a form read page by page, a page code fills alone (by_code_only) is planned by code as it
+is posted, before the answers gate (applai.browser).
 No action sends anything (ADR 0003): the extension fills, attaches, and reports
 (applai.browser).
 """
@@ -35,7 +37,7 @@ from sqlalchemy.orm import Session
 from applai.agents import AgentError, AgentRunner, AgentSpec
 from applai.cv import CvError, offer_language, render_cv
 from applai.cv_tailoring import chosen_source, tailored_pdf
-from applai.drafting import COVER_LETTER, AnswerStatus
+from applai.drafting import COVER_LETTER, AnswerStatus, drafted_fields
 from applai.letter import render_letter
 from applai.models import Application, DraftAnswer, Offer
 from applai.orchestrator import ApplicationState
@@ -139,6 +141,16 @@ def by_code(
         elif kind in _CHOICES and field["options"]:
             left.append(index)
     return actions, left
+
+
+def by_code_only(fields: list[dict[str, Any]]) -> bool:
+    """Whether code alone fills these fields before the answers gate (ADR 0004): no open
+    question, no cover letter, no file, no choice left to the filling agent."""
+    questions, letter = drafted_fields(fields)
+    return not questions and letter is None and not any(
+        field["type"] == "file" or (field["type"] in _CHOICES and field["options"])
+        for field in fields
+    )
 
 
 def choices_spec(fields: list[dict[str, Any]], left: list[int], profile: Profile) -> AgentSpec:
