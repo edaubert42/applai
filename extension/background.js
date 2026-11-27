@@ -3,11 +3,13 @@
 import { fillForm } from "./fill.js";
 import { readForm, readHtml, readText } from "./forms.js";
 import { hideOverlay, showOverlay } from "./overlay.js";
+import { turnPage } from "./pages.js";
 import { isConfirmed, submitForm } from "./send.js";
 
 export const APPLAI = "http://127.0.0.1:8000"; // applai serve's address
 const READ = "read-pages";
 const LOADED_WITHIN_MS = 30_000; // a form's tab, then it is reported as not loaded
+const TURNED_WITHIN_MS = 10_000; // a page's button clicked, then the page is reported as not turned
 const TRIES = 3; // a page may draw its form after it loads: read it again 2 s later
 
 // Ask ApplAI for the pages to read, fetch each with the browser's cookies, send back its HTML.
@@ -56,7 +58,9 @@ function leftTheOffer(page, url) {
 // Ask ApplAI for the forms to read; open each in an inactive tab, read its controls there
 // (forms.js), close the tab, send the fields back, or the page's text when it shows no control
 // the reader knows. A form outside the manifest's hosts is reported, never opened. ApplAI asks
-// again for a failed form only after its next scan.
+// again for a failed form only after its next scan. A form whose first page turns (pages.js) is
+// read page by page: page 1 is posted as such and its tab kept, where each next page ApplAI
+// asks for is read once the fill turned to it.
 export async function readForms(fetch = globalThis.fetch, browser = globalThis.chrome, wait = sleep) {
   let forms;
   try {
@@ -66,36 +70,102 @@ export async function readForms(fetch = globalThis.fetch, browser = globalThis.c
   } catch {
     return; // ApplAI is not running
   }
-  for (const { application_id, url } of forms) {
+  for (const { application_id, url, page } of forms) {
     let path = "", body;
     try {
-      body = await readIn(url, browser, wait);
+      body = page
+        ? await onPage(application_id, url, page, browser, wait, async (tab) => ({ ...(await fieldsIn(tab, browser, wait)), page }))
+        : await readIn(application_id, url, browser, wait);
     } catch (error) {
       const reason = ["not_allowed", "not_loaded"].includes(error?.message) ? error.message : "not_read";
-      [path, body] = ["/failure", { reason }];
+      [path, body] = ["/failure", page ? { reason, page } : { reason }];
     }
     const sent = await send(fetch, `/api/browser/forms/${application_id}${path}`, body);
     if (sent?.status === 422) {
       // ApplAI refused the fields: a failure, not a form to open again every minute
-      await send(fetch, `/api/browser/forms/${application_id}/failure`, { reason: "not_read" });
+      await send(fetch, `/api/browser/forms/${application_id}/failure`, page ? { reason: "not_read", page } : { reason: "not_read" });
     }
+    // Page 1's tab is kept for the fill only once ApplAI has taken the post.
+    if (!page && body.page && !sent?.ok) await dropTab(application_id, browser);
   }
 }
 
-// Open url in an inactive ApplAI tab, run work there once it has loaded, then close the tab.
+// Open url in an inactive ApplAI tab, run work there once it has loaded, then close the tab,
+// unless work called keep.
 async function inTab(url, browser, wait, work) {
   if (!onHosts(url, browser.runtime.getManifest().host_permissions)) throw new Error("not_allowed");
   const tab = await browser.tabs.create({ url, active: false });
+  let kept = false;
   try {
     await groupTab(tab, browser);
-    for (let waited = 0; (await browser.tabs.get(tab.id)).status !== "complete"; waited += 500) {
-      if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
-      await wait(500);
-    }
-    return await framed(tab, browser, () => work(tab));
+    await loaded(tab, browser, wait);
+    return await framed(tab, browser, () => work(tab, () => (kept = true)));
   } finally {
-    await browser.tabs.remove(tab.id).catch(() => {}); // the candidate closed it already
+    if (!kept) await browser.tabs.remove(tab.id).catch(() => {}); // the candidate closed it already
   }
+}
+
+async function loaded(tab, browser, wait) {
+  for (let waited = 0; (await browser.tabs.get(tab.id)).status !== "complete"; waited += 500) {
+    if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
+    await wait(500);
+  }
+}
+
+// The tab of a form read page by page, and the page it shows, kept in chrome.storage.local as
+// Chrome stops an idle service worker. A storage that fails keeps nothing: a new tab is opened.
+const pageTabKey = (applicationId) => `page-tab:${applicationId}`;
+
+async function keepTab(applicationId, tab, page, browser) {
+  await browser.storage.local.set({ [pageTabKey(applicationId)]: { tabId: tab.id, page } }).catch(() => {});
+}
+
+async function dropTab(applicationId, browser) {
+  const key = pageTabKey(applicationId);
+  const kept = (await browser.storage.local.get(key).catch(() => ({})))[key];
+  if (kept) await browser.tabs.remove(kept.tabId).catch(() => {});
+  await browser.storage.local.remove(key).catch(() => {});
+}
+
+// Run work, framed, in the tab showing page: the tab kept for the form when it shows that page or
+// an earlier one, else a new tab at the form's URL, page 1. The pages before it are turned there,
+// never filled again: the site keeps what was entered. A tab that fails is left open.
+async function onPage(applicationId, url, page, browser, wait, work) {
+  if (!onHosts(url, browser.runtime.getManifest().host_permissions)) throw new Error("not_allowed");
+  const kept = (await browser.storage.local.get(pageTabKey(applicationId)).catch(() => ({})))[pageTabKey(applicationId)];
+  let tab = kept?.page <= page ? await browser.tabs.get(kept.tabId).catch(() => null) : null;
+  let shown = kept?.page;
+  if (!tab) {
+    if (kept) await browser.tabs.remove(kept.tabId).catch(() => {}); // it shows a later page
+    tab = await browser.tabs.create({ url, active: false });
+    shown = 1;
+    await keepTab(applicationId, tab, shown, browser);
+  }
+  await groupTab(tab, browser);
+  await loaded(tab, browser, wait);
+  return framed(tab, browser, async () => {
+    for (; shown < page; shown++) {
+      if ((await turned(tab, browser, wait)) !== "next") throw new Error("not_turned");
+      await keepTab(applicationId, tab, shown + 1, browser);
+    }
+    return work(tab);
+  });
+}
+
+// Click the page's next button (pages.js) and wait for other fields; "final" clicks nothing.
+async function turned(tab, browser, wait) {
+  const read = async () => JSON.stringify((await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readForm }))[0]?.result);
+  const before = await read();
+  const [found] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: turnPage, args: [true] });
+  if (found?.result === "final") return "final";
+  if (found?.result !== "next") throw new Error("not_turned");
+  for (let waited = 0; waited < TURNED_WITHIN_MS; waited += 500) {
+    try {
+      if ((await browser.tabs.get(tab.id)).status === "complete" && (await read()) !== before) return "next";
+    } catch { /* the page is loading */ }
+    await wait(500);
+  }
+  throw new Error("not_turned");
 }
 
 // Google's script draws the jobs after the page loads.
@@ -105,23 +175,34 @@ async function htmlOf(tab, browser, wait) {
   return read?.result ?? "";
 }
 
-async function readIn(url, browser, wait) {
-  return inTab(url, browser, wait, async (tab) => {
-    let fields = [];
-    for (let tries = 0; tries < TRIES && !fields.length; tries++) {
-      if (tries) await wait(2000);
-      const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readForm });
-      fields = read?.result ?? [];
-    }
-    if (fields.length) return { fields };
-    // No control it knows: ApplAI's agent reads the fields in the page's text.
-    const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readText });
-    return { fields, text: read?.result ?? "" };
+async function readIn(applicationId, url, browser, wait) {
+  return inTab(url, browser, wait, async (tab, keep) => {
+    const read = await fieldsIn(tab, browser, wait);
+    const [found] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: turnPage, args: [false] });
+    if (found?.result !== "next") return read;
+    keep();
+    await keepTab(applicationId, tab, 1, browser);
+    return { ...read, page: 1 };
   });
 }
 
+async function fieldsIn(tab, browser, wait) {
+  let fields = [];
+  for (let tries = 0; tries < TRIES && !fields.length; tries++) {
+    if (tries) await wait(2000);
+    const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readForm });
+    fields = read?.result ?? [];
+  }
+  if (fields.length) return { fields };
+  // No control it knows: ApplAI's agent reads the fields in the page's text.
+  const [read] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readText });
+  return { fields, text: read?.result ?? "" };
+}
+
 // Ask ApplAI for forms to fill; fetch attachments, fill in an inactive tab (fill.js), capture a
-// screenshot, leave the tab open for the candidate, and post the filled state.
+// screenshot, leave the tab open for the candidate, and post the filled state. A form filled
+// page by page is filled in the tab showing the page served, then turned (pages.js), and the
+// page posted with its number; the final page is not turned, and posted with its screenshot.
 export async function fillForms(fetch = globalThis.fetch, browser = globalThis.chrome, wait = sleep) {
   let fills;
   try {
@@ -129,13 +210,15 @@ export async function fillForms(fetch = globalThis.fetch, browser = globalThis.c
     if (!asked.ok) return;
     fills = await asked.json();
   } catch { return; }
-  for (const { application_id, url, actions } of fills) {
+  for (const { application_id, url, page, actions } of fills) {
     let path = "", body;
     try {
-      body = await fillIn(application_id, url, actions, fetch, browser, wait);
+      body = page
+        ? await fillPage(application_id, url, page, actions, fetch, browser, wait)
+        : await fillIn(application_id, url, actions, fetch, browser, wait);
     } catch (error) {
-      const reason = ["not_allowed", "not_loaded"].includes(error?.message) ? error.message : "not_filled";
-      [path, body] = ["/failure", { reason }];
+      const known = ["not_allowed", "not_loaded", "not_turned"];
+      [path, body] = ["/failure", { reason: known.includes(error?.message) ? error.message : "not_filled" }];
     }
     const sent = await send(fetch, `/api/browser/fills/${application_id}${path}`, body);
     if (sent?.status === 422) {
@@ -151,20 +234,9 @@ async function fillIn(applicationId, url, actions, fetch, browser, wait) {
   let filled = false;
   try {
     await groupTab(tab, browser);
-    for (let waited = 0; (await browser.tabs.get(tab.id)).status !== "complete"; waited += 500) {
-      if (waited >= LOADED_WITHIN_MS) throw new Error("not_loaded");
-      await wait(500);
-    }
+    await loaded(tab, browser, wait);
     // The frame is gone before the screenshot: it shows only the page.
-    const fields = await framed(tab, browser, async () => {
-      let fields = [];
-      for (let tries = 0; tries < TRIES && !fields.length; tries++) {
-        if (tries) await wait(2000);
-        const [done] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: fillForm, args: [actions, files] });
-        fields = done?.result ?? [];
-      }
-      return fields;
-    });
+    const fields = await framed(tab, browser, () => filledIn(tab, actions, files, browser, wait));
     const screenshot = await captureTab(tab, browser);
     filled = true;
     return screenshot ? { fields, screenshot } : { fields };
@@ -172,6 +244,31 @@ async function fillIn(applicationId, url, actions, fetch, browser, wait) {
     // A filled form keeps its tab: Send uses it (ADR 0003). A failed fill leaves nothing open.
     if (!filled) await browser.tabs.remove(tab.id).catch(() => {}); // the candidate closed it already
   }
+}
+
+// A page filled and turned, or the final page: its tab stays open, filled or failed (ADR 0003).
+async function fillPage(applicationId, url, page, actions, fetch, browser, wait) {
+  if (!onHosts(url, browser.runtime.getManifest().host_permissions)) throw new Error("not_allowed");
+  const files = await fetchFiles(applicationId, actions, fetch);
+  const [tab, fields, found] = await onPage(applicationId, url, page, browser, wait, async (tab) => {
+    const fields = await filledIn(tab, actions, files, browser, wait);
+    const found = await turned(tab, browser, wait);
+    if (found === "next") await keepTab(applicationId, tab, page + 1, browser);
+    return [tab, fields, found];
+  });
+  if (found === "next") return { fields, page };
+  const screenshot = await captureTab(tab, browser);
+  return { fields, ...(screenshot ? { screenshot } : {}), page, final: true };
+}
+
+async function filledIn(tab, actions, files, browser, wait) {
+  let fields = [];
+  for (let tries = 0; tries < TRIES && !fields.length; tries++) {
+    if (tries) await wait(2000);
+    const [done] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: fillForm, args: [actions, files] });
+    fields = done?.result ?? [];
+  }
+  return fields;
 }
 
 // A click's result until ApplAI has taken it: submit is never clicked twice for one application.
