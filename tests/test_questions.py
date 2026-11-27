@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 import yaml
-from questions import default_answers, main
+from questions import RETRIED, default_answers, main
 
 WORKFLOW = Path(__file__).parents[1] / ".github/workflows/agent-coder.yml"
 SWEEP = Path(__file__).parents[1] / ".github/workflows/agent-sweep.yml"
@@ -260,7 +260,13 @@ def test_a_coder_that_failed_to_start_is_started_by_a_later_sweep(
     assert github.started == []  # the coder may still be running: wait as long again
     github.issues[40][-1] = _comment(BOT, DEFAULT_2, HOURS_2_01)
     assert main(["sweep"], run=github) == 0
-    assert (len(github.posted), github.started) == (1, [40])
+    assert (len(github.posted), github.started) == (2, [40])
+    assert github.posted[-1][1] == RETRIED
+    # The run was cancelled or timed out: no second retry, however old the comments are.
+    for comment in github.issues[40]:
+        comment["created_at"] = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    assert main(["sweep"], run=github) == 0
+    assert (len(github.posted), github.started) == (2, [40])
 
 
 def test_the_sweep_runs_every_hour_and_by_hand_on_main():
