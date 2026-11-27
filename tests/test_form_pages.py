@@ -421,3 +421,19 @@ def test_a_page_failure_after_the_gate_is_shown_and_keeps_the_url(data_dir: Path
     assert [fill["page"] for fill in fills] == [2]
     application = _get(engine, application_id)
     assert (application.form_fields, application.form_failures) == (fields, 0)
+
+
+def test_a_stored_pages_error_clears_at_the_answers_gate(data_dir: Path, engine: Engine):
+    # Page 1 read again failed at form_captured; past it, page 1 can no longer be posted.
+    fields = [*_paged(PAGE_1, 1), *_paged(PAGE_2, 2)]
+    application_id = _application(engine, "drafted", form_fields=fields,
+                                  form_url_error="form_not_read", form_failed_page=1)  # fmt: skip
+
+    with _client(data_dir) as (client, _):
+        checked = client.post(f"/api/applications/{application_id}/answers-checked")
+        again = client.post(f"/api/applications/{application_id}/answers-checked")
+        [row] = client.get("/api/applications").json()["in_progress"]
+
+    assert (checked.status_code, again.status_code) == (204, 409)
+    assert (row["state"], row["form_url_error"]) == ("answers_checked", None)
+    assert _get(engine, application_id).form_fields == fields

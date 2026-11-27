@@ -25,7 +25,8 @@ page may be posted. The first page that is not stops: it is drafted, then the ga
 page after it is planned by Filling, unless it asks what the gate did not check. A page
 posted again replaces it, unless drafting reads it or a later page's fields would move.
 A later page that fails or is refused keeps the URL, the pages read and the state; its
-form_url_error clears when that page (form_failed_page) is posted.
+form_url_error clears when that page (form_failed_page) is posted, or at the answers gate
+(applai.correct), past which a stored page is not posted again.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
 page received for one is read for its text, and the offer is triaged again in the background.
 An ask the extension leaves unanswered for REREAD_WITHIN ends when the pages are listed.
