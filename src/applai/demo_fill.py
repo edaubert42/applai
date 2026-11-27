@@ -81,6 +81,11 @@ def fill_in_background(
 ) -> None:
     """Plan the application's fill, then replay its recorded fill and review it."""
     plan_in_background(engine, data_dir, runner, application_id, clock)
+    replay_fill(engine, data_dir, runner, application_id)
+
+
+def replay_fill(engine: Engine, data_dir: Path, runner: AgentRunner, application_id: int) -> None:
+    """Replay the recorded fill of an application whose fill is planned, then review it."""
     with Session(engine) as session, session.begin():
         application = session.get_one(Application, application_id)
         if application.state != ApplicationState.ANSWERS_CHECKED or application.fill_plan is None:

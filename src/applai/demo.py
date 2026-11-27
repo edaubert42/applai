@@ -4,7 +4,9 @@ demo/candidate/offers/ holds fictional offers, each an offer case of the Draftin
 (applai.bench.drafting). run_demo() runs the real pipeline on them in a new database: Triage
 reads each; an offer it leaves triaged with a score of at least review_min_score is accepted,
 as the candidate would, its form is the demo's own (applai.demo_fill), and it is drafted
-(Drafting, the judge, CV tailoring). The others are only triaged. Nothing is sent.
+(Drafting, the judge, CV tailoring). The others are only triaged. The candidate then acts on
+the drafted ones (run_demo): the fill of the checked ones is replayed (applai.demo_fill) and
+reviewed, and the first goes on to sent as the candidate's labels. Nothing reaches a form.
 
 applai demo serves the demo (demo_app): each start builds the board again in a new
 database, so whatever a visitor changed is gone at the next one.
@@ -42,18 +44,23 @@ from applai.app import create_app
 from applai.bench.drafting import OfferCase, load_cases
 from applai.bench.triage import DEMO_DIR, BenchError
 from applai.correct import AnswerDecision, AnswerRequest
-from applai.cv import CvError
 from applai.database import open_database
 from applai.drafting import DraftingError, draft_application
-from applai.filling import FillingError, plan_fill
 from applai.models import LOCAL_USER_ID, Application, CvChange, DraftAnswer, Offer, OfferState
 from applai.orchestrator import Actor, ApplicationState, move
 from applai.profile import Profile, load_profile
 from applai.review import Decision, DecisionRequest, Reason, decide
-from applai.scan import Watch
+from applai.scan import Watch, local_now
 from applai.settings import review_min_score
 from applai.triage import TriageError, triage_offer
-from applai.validation import DropRequest, drop_application
+from applai.validation import (
+    DropRequest,
+    FormCheckedRequest,
+    check_form,
+    drop_application,
+    mark_sent,
+    validate_application,
+)
 
 OFFERS = DEMO_DIR / "offers"
 RECORDINGS = DEMO_DIR / "recordings.json"
@@ -69,14 +76,25 @@ def demo_offers(profile: Profile) -> list[tuple[str, OfferCase]]:
     return offers
 
 
-def run_demo(runner: AgentRunner, database: Engine) -> list[str]:
-    """Run every demo offer through the pipeline, in a new database; what failed, by offer.
+def run_demo(runner: AgentRunner, database: Engine, data_dir: Path) -> list[str]:
+    """Run every demo offer through the pipeline, in a new database; what failed, by offer or
+    application. Fills write their files in data_dir, a copy of demo/candidate.
 
     A failed run or a refused draft stays on its offer or application, as in ApplAI, and the
     next offer runs. Then the candidate acts on the drafted applications, in offer order: the
     first waits for them (« vérifier les textes »), they check the answers of the next ones,
-    which wait for Filling, and drop the last.
+    whose fill is replayed and reviewed, and drop the last. The first of those goes on through
+    the form check, final validation and sent, as the candidate's labels: nothing is sent.
     """
+    failures, checked = _build(runner, database)
+    _fill(runner, database, data_dir, checked)
+    _send_first(database, checked)
+    return failures + _stuck(database, checked)
+
+
+def _build(runner: AgentRunner, database: Engine) -> tuple[list[str], list[int]]:
+    """The offers through Drafting, then the candidate's choices on the drafted applications.
+    What failed, by offer, and the applications whose answers the candidate checked."""
     profile = load_profile(DEMO_DIR)
     min_score = review_min_score(DEMO_DIR)
     failures: list[str] = []
@@ -90,12 +108,41 @@ def run_demo(runner: AgentRunner, database: Engine) -> list[str]:
             select(Application.id).where(Application.state == ApplicationState.DRAFTED)
             .order_by(Application.id)
         ))  # fmt: skip
-        for application_id in drafted[1:-1]:
+        checked = drafted[1:-1]
+        for application_id in checked:
             _check_answers(session, application_id)
         if len(drafted) > 1:
             drop = DropRequest(reasons=[Reason.SALARY], note="Fourchette sous mes attentes.")
             drop_application(session, LOCAL_USER_ID, drafted[-1], drop)
-    return failures
+    return failures, checked
+
+
+def _fill(runner: AgentRunner, database: Engine, data_dir: Path, ids: list[int]) -> None:
+    """Plan each application's fill, replay its recorded fill and review it (applai.demo_fill).
+    A failure stays on the application, as for a visitor."""
+    for application_id in ids:
+        demo_fill.fill_in_background(database, data_dir, runner, application_id, local_now)
+
+
+def _stuck(database: Engine, ids: list[int]) -> list[str]:
+    """The applications still waiting for Filling or Review, with why, by application."""
+    with Session(database) as session:
+        stuck = [(a.id, a.fill_error or a.review_error) for a in session.scalars(
+            select(Application).where(Application.id.in_(ids)).order_by(Application.id)
+        ) if a.state in (ApplicationState.ANSWERS_CHECKED, ApplicationState.FILLED)]  # fmt: skip
+    return [f"application {application_id}: {error}" for application_id, error in stuck]
+
+
+def _send_first(database: Engine, checked: list[int]) -> None:
+    """The first checked application, if reviewed, is form-checked, validated and sent: the
+    candidate's labels, each a move(). It reaches no form: nothing is sent (ADR 0003)."""
+    with Session(database) as session, session.begin():
+        application = session.get(Application, checked[0]) if checked else None
+        if application is None or application.state != ApplicationState.REVIEWED:
+            return  # Filling or Review failed: shown on the application
+        check_form(session, LOCAL_USER_ID, application.id, FormCheckedRequest())
+        validate_application(session, LOCAL_USER_ID, application.id)
+        mark_sent(session, LOCAL_USER_ID, application.id)
 
 
 def _check_answers(session: Session, application_id: int) -> None:
@@ -126,7 +173,8 @@ def demo_app(database_dir: Path, backup_dir: Path) -> tuple[FastAPI, list[str]]:
     recordings = read_recordings(RECORDINGS)
     database = open_database(database_dir, backup_dir)
     try:
-        failures = run_demo(AgentRunner(ReplayBackend(recordings, max_wait_s=0)), database)
+        replay = AgentRunner(ReplayBackend(recordings, max_wait_s=0))
+        failures = run_demo(replay, database, data_dir)
     finally:
         database.dispose()
     watch = Watch(http=httpx2.Client(transport=httpx2.MockTransport(_refuse)),
@@ -205,11 +253,14 @@ def record(backend: Backend, path: Path) -> tuple[Recorder, list[str]]:
     """
     recorder = Recorder(backend, read_recordings(path))
     try:
-        with TemporaryDirectory() as data_dir, TemporaryDirectory() as backup_dir:
-            database = open_database(data_dir, backup_dir)
+        with TemporaryDirectory() as directory, TemporaryDirectory() as backup_dir:
+            data_dir = shutil.copytree(DEMO_DIR, Path(directory) / "candidate")
+            database = open_database(directory, backup_dir)
             try:
-                failures = run_demo(AgentRunner(recorder), database)
-                failures += _record_fills(AgentRunner(recorder), database, Path(data_dir))
+                runner = AgentRunner(recorder)
+                failures, checked = _build(runner, database)
+                failures += _record_fills(runner, database, data_dir, checked)
+                _send_first(database, checked)
             finally:
                 database.dispose()
     finally:
@@ -217,25 +268,25 @@ def record(backend: Backend, path: Path) -> tuple[Recorder, list[str]]:
     return recorder, failures
 
 
-def _record_fills(runner: AgentRunner, database: Engine, data_dir: Path) -> list[str]:
-    """Check the answers of the drafted application too, plan every checked application's fill
-    and record the fills demo/fills lacks (applai.demo_fill). What failed, by application."""
-    profile = load_profile(DEMO_DIR)
-    state = Application.state
+def _record_fills(
+    runner: AgentRunner, database: Engine, data_dir: Path, checked: list[int]
+) -> list[str]:
+    """Check the answers of the drafted application too, plan the fill of every checked
+    application, record the fills demo/fills lacks (applai.demo_fill), then replay them and
+    review: the runs Review lacks are recorded too. What failed, by application."""
     with Session(database) as session, session.begin():
-        drafted = select(Application.id).where(state == ApplicationState.DRAFTED)
-        for application_id in session.scalars(drafted).all():
+        drafted = select(Application.id).where(Application.state == ApplicationState.DRAFTED)
+        waiting = list(session.scalars(drafted.order_by(Application.id)))
+        for application_id in waiting:
             _check_answers(session, application_id)
-        checked = select(Application.id).where(state == ApplicationState.ANSWERS_CHECKED)
-        ids = session.scalars(checked.order_by(Application.id)).all()
-    failures: list[str] = []
-    for application_id in ids:
-        try:
-            plan_fill(runner, database, data_dir, application_id, profile)
-        except (AgentError, FillingError, CvError) as error:  # they quote no answer
-            failures.append(f"application {application_id}: {error}")
+    ids = checked + waiting
+    _fill(runner, database, data_dir, ids)  # planned; replayed where recorded
     with Session(database) as session:
-        planned = select(Application).where(Application.id.in_(ids),
-                                            Application.fill_plan.is_not(None))  # fmt: skip
+        planned = select(Application).where(
+            Application.id.in_(ids), Application.state == ApplicationState.ANSWERS_CHECKED,
+            Application.fill_plan.is_not(None),
+        )  # fmt: skip
         plans = [(a.id, a.form_fields or [], a.fill_plan or []) for a in session.scalars(planned)]
-    return failures + demo_fill.record_fills(data_dir, plans)
+    failures = demo_fill.record_fills(data_dir, plans)
+    _fill(runner, database, data_dir, [plan[0] for plan in plans])
+    return failures + _stuck(database, ids)

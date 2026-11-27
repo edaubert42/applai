@@ -22,8 +22,6 @@ from applai.app import create_app
 from applai.bench.triage import DEMO_DIR
 from applai.database import open_database
 from applai.models import Application, Label
-from applai.orchestrator import Actor, move
-from applai.orchestrator import ApplicationState as S
 from applai.scan import Watch
 
 ENV = {
@@ -126,7 +124,7 @@ def test_applai_serve_never_runs_in_demo_mode(tmp_path: Path, monkeypatch: pytes
         assert client.get("/api/health").json()["demo"] is False
 
 
-def test_the_board_has_applications_in_progress_waiting_and_dropped_with_their_runs(
+def test_the_board_has_a_sent_application_with_every_stage_in_its_trace(
     monkeypatch: pytest.MonkeyPatch, isolated: list[object]
 ):
     def visit(client: TestClient) -> dict[str, Any]:
@@ -139,32 +137,33 @@ def test_the_board_has_applications_in_progress_waiting_and_dropped_with_their_r
 
     board, traces = seen["board"], seen["traces"]
     assert [row["state"] for row in board["waiting"]] == ["drafted"]  # « vérifier les textes »
-    assert {row["state"] for row in board["in_progress"]} == {"answers_checked"}
+    assert {row["state"] for row in board["in_progress"]} == {"reviewed"}
+    assert [row["state"] for row in board["sent"]] == ["sent"]
     assert [row["state"] for row in board["dropped"]] == ["dropped"]
-    assert board["sent"] == []
     drafted = ["triage", "drafting", "drafting_judge", "cv_tailoring"]
-    gates_by_state = {"drafted": ["accepted"], "answers_checked": ["accepted", "answers_checked"],
-                      "dropped": ["accepted", "dropped"]}  # fmt: skip
-    for state, gates in gates_by_state.items():
+    answers = ["accepted", "answers_checked"]
+    stages = {
+        "drafted": (drafted, ["accepted"]),
+        "reviewed": ([*drafted, "review"], answers),
+        "sent": ([*drafted, "review"], [*answers, "form_checked", "validated", "sent"]),
+        "dropped": (drafted, ["accepted", "dropped"]),
+    }
+    for state, (runs, gates) in stages.items():
         steps = traces[state]["steps"]
-        assert [s["agent"] for s in steps if s["kind"] == "run"] == drafted, state
+        assert [s["agent"] for s in steps if s["kind"] == "run"] == runs, state
         assert {s["outcome"] for s in steps if s["kind"] == "run"} == {"ok"}, state
         assert [s["to_state"] for s in steps if s["kind"] == "gate"] == gates, state
+    sent = board["sent"][0]
+    assert sent["form_url"] == f"/demo/forms/{sent['id']}"
     assert isolated == []
 
 
-def _validated(app: FastAPI) -> int:
-    """Stand in for Filling, Review and the gates, which the demo has no recordings of."""
-    with Session(app.state.engine) as session, session.begin():
-        application = session.scalars(select(Application).where(
-            Application.state == "answers_checked")).first()  # fmt: skip
-        assert application is not None
-        application.form_url = "https://jobs.example.org/form"
-        steps = [(S.FILLED, Actor.FILLING), (S.REVIEWED, Actor.REVIEW),
-                 (S.FORM_CHECKED, Actor.CANDIDATE), (S.VALIDATED, Actor.CANDIDATE)]  # fmt: skip
-        for state, actor in steps:
-            move(session, application, state, actor)
-        return application.id
+def _validated(client: TestClient) -> int:
+    """Take a reviewed application of the board through the form and final validation gates."""
+    application_id = client.get("/api/applications").json()["in_progress"][0]["id"]
+    for gate in ("form-checked", "validate"):
+        assert client.post(f"/api/applications/{application_id}/{gate}").status_code == 204
+    return application_id
 
 
 def test_sending_answers_403_in_demo_mode_and_the_application_does_not_move(
@@ -172,7 +171,8 @@ def test_sending_answers_403_in_demo_mode_and_the_application_does_not_move(
 ):
     def visit(client: TestClient) -> list[tuple[str, int, str]]:
         app: FastAPI = client.app  # pyright: ignore[reportAssignmentType]
-        application_id = _validated(app)
+        sent_before = client.get("/api/applications").json()["sent"]
+        application_id = _validated(client)
         answers = [
             ("authorize-send", client.post(f"/api/applications/{application_id}/authorize-send")),
             ("sent", client.post(f"/api/applications/{application_id}/sent")),
@@ -186,7 +186,9 @@ def test_sending_answers_403_in_demo_mode_and_the_application_does_not_move(
         with Session(app.state.engine) as session:
             application = session.get_one(Application, application_id)
             assert (application.state, application.send_authorized_at) == ("validated", None)
-            assert session.scalars(select(Label).where(Label.decision == "sent")).all() == []
+            sent = session.scalars(select(Label.application_id).where(Label.decision == "sent"))
+            assert list(sent) == [sent_before[0]["id"]]  # the board's own, from the build
+        assert client.get("/api/applications").json()["sent"] == sent_before
         return [(name, a.status_code, a.json()["detail"]) for name, a in answers]
 
     answers = _run_demo(monkeypatch, visit)
@@ -264,7 +266,7 @@ def _check(client: TestClient, application_id: int) -> int:
     return client.post(f"{url}/answers-checked").status_code
 
 
-def test_a_checked_application_is_filled_as_recorded_shown_in_final_validation_and_reviewed(
+def test_a_checked_application_is_filled_as_recorded_reviewed_and_shown_in_final_validation(
     monkeypatch: pytest.MonkeyPatch, isolated: list[object]
 ):
     def visit(client: TestClient) -> list[Any]:
@@ -281,8 +283,9 @@ def test_a_checked_application_is_filled_as_recorded_shown_in_final_validation_a
 
     state, filled, plan, runs, review, screenshot = _run_demo(monkeypatch, visit)
 
-    assert state == "filled"  # Review has no recording yet: #283 records it
+    assert state == "reviewed"
     assert runs[-1] == "review"
+    assert review["problems"] is not None and review["review_error"] is None
     recorded = demo_fill.FILLS / demo_fill.fill_key(plan)
     assert filled == json.loads(recorded.with_suffix(".json").read_text())
     assert screenshot == recorded.with_suffix(".png").read_bytes()
@@ -344,17 +347,48 @@ def test_a_plan_with_no_recorded_fill_shows_an_error_and_a_retry_fills_it_once(
     assert isolated == []
 
 
+def test_a_review_with_no_recording_shows_as_an_error_nothing_is_sent_and_a_retry_is_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated: list[object],
+    capsys: pytest.CaptureFixture[str],
+):  # fmt: skip
+    kept = {key: run for key, run in agents.read_recordings(demo.RECORDINGS).items()
+            if not key.startswith("review:")}  # fmt: skip
+    agents.write_recordings(tmp_path / "recordings.json", kept)
+    monkeypatch.setattr(demo, "RECORDINGS", tmp_path / "recordings.json")
+
+    def visit(client: TestClient) -> list[Any]:
+        board = client.get("/api/applications").json()
+        filled = board["in_progress"][0]["id"]
+        retries = [client.post(f"/api/applications/{filled}/review").status_code for _ in range(2)]
+        review = client.get(f"/api/applications/{filled}/review").json()
+        steps = client.get(f"/api/applications/{filled}/trace").json()["steps"]
+        return [board, retries, review, steps, client.get("/api/applications").json()]
+
+    board, retries, review, steps, after = _run_demo(monkeypatch, visit)
+
+    assert {row["state"] for row in board["in_progress"]} == {"filled"}
+    assert board["sent"] == [] and len(board["in_progress"]) == 3
+    assert "Failed: application " in capsys.readouterr().out
+    assert retries == [202, 202]  # asking again is safe: it fails again, the same way
+    assert (review["state"], review["problems"]) == ("filled", None)
+    assert review["review_error"] == "agent review failed: no_recording"
+    reviews = [s["outcome"] for s in steps if s["kind"] == "run" and s["agent"] == "review"]
+    assert reviews == ["no_recording"] * 3  # the build's, then one for each retry
+    assert after == board and isolated == []
+
+
 def test_outside_demo_mode_filling_still_waits_for_the_extension(
     tmp_path: Path, isolated: list[object]
 ):
     recordings = agents.read_recordings(demo.RECORDINGS)
     (tmp_path / "database").mkdir()
     database = open_database(tmp_path / "database", tmp_path / "backups")
+    data_dir = shutil.copytree(DEMO_DIR, tmp_path / "candidate")
     try:
-        demo.run_demo(agents.AgentRunner(agents.ReplayBackend(recordings, max_wait_s=0)), database)
+        replay = agents.ReplayBackend(recordings, max_wait_s=0)
+        demo.run_demo(agents.AgentRunner(replay), database, data_dir)
     finally:
         database.dispose()
-    data_dir = shutil.copytree(DEMO_DIR, tmp_path / "candidate")
     refuse = httpx2.MockTransport(demo._refuse)  # pyright: ignore[reportPrivateUsage]
     runner = agents.AgentRunner(agents.ReplayBackend(recordings, max_wait_s=0))
     watch = Watch(http=httpx2.Client(transport=refuse), runner=runner, ms_client_id=None)
