@@ -376,7 +376,10 @@ def _waiting_form(session: Session, application_id: int, page: int | None) -> Ap
     return application
 
 
-def _page_range(fields: list[dict[str, Any]], page: int) -> range:
+type _Fields = list[dict[str, Any]]  # a form's, as applications.form_fields keeps them
+
+
+def _page_range(fields: _Fields, page: int) -> range:
     """The indices of a page's fields; an empty range at the end for a page not stored."""
     on = [index for index, field in enumerate(fields) if field.get("page") == page]
     return range(on[0], on[-1] + 1) if on else range(len(fields), len(fields))
@@ -385,7 +388,7 @@ def _page_range(fields: list[dict[str, Any]], page: int) -> range:
 def _page_waiting(application: Application, page: int | None) -> bool:
     """form_captured page by page: a page before the last, or, when code fills the last page
     alone, that one or the next. A last page that waits for drafting is not replaced."""
-    last = _last_page(application.form_fields or [])
+    last = _last_page(application.form_fields)
     return (
         application.user_id == LOCAL_USER_ID
         and application.state == ApplicationState.FORM_CAPTURED
@@ -395,31 +398,26 @@ def _page_waiting(application: Application, page: int | None) -> bool:
     )
 
 
-def _last_page(fields: list[dict[str, Any]]) -> int | None:
+def _last_page(fields: _Fields | None) -> int | None:
     """The last page stored of a form read page by page; none for a form read at once."""
     return fields[-1].get("page") if fields else None
 
 
-def _last_page_by_code(fields: list[dict[str, Any]] | None) -> bool:
+def _last_page_by_code(fields: _Fields | None) -> bool:
     """Whether a form is read page by page and code alone fills its last page."""
-    last = _last_page(fields or [])
-    if fields is None or last is None:
+    if not fields or (last := _last_page(fields)) is None:
         return False
     on = _page_range(fields, last)
     return by_code_only(fields[on.start : on.stop])
 
 
-def _moves_later_pages(
-    fields: list[dict[str, Any]], posted: list[dict[str, Any]], page: int
-) -> bool:
+def _moves_later_pages(fields: _Fields, posted: _Fields, page: int) -> bool:
     """Whether a page posted again would move a later page's indices, or stop before it."""
     old = _page_range(fields, page)
     return old.stop < len(fields) and (len(posted) != len(old) or not by_code_only(posted))
 
 
-def _store_page(
-    application: Application, posted: list[dict[str, Any]], page: int, data_dir: Path
-) -> bool:
+def _store_page(application: Application, posted: _Fields, page: int, data_dir: Path) -> bool:
     """Store a page's fields in place of its own and clear the page errors; plan the page if
     code fills it alone, keeping the other pages' actions. Whether it waits for drafting.
     A profile that does not load is kept as the fill_error: the page is not served."""
@@ -542,9 +540,7 @@ def fills(request: Request) -> list[FillToDo]:
         ]
 
 
-def _fill_to_do(
-    application_id: int, url: str, fields: list[dict[str, Any]], plan: list[dict[str, Any]]
-) -> FillToDo:
+def _fill_to_do(application_id: int, url: str, fields: _Fields, plan: _Fields) -> FillToDo:
     """The fill of the whole form; of a form read page by page, its last page's alone."""
     actions, page = _actions(plan), _last_page(fields)
     if page is not None:

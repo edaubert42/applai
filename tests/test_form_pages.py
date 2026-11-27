@@ -204,9 +204,8 @@ def test_a_retry_that_changes_an_earlier_pages_field_count_is_refused_and_shown(
         [row] = client.get("/api/applications").json()["in_progress"]
         again = _post(client, application_id, PAGE_1, 1)
 
-    assert refused == 409
+    assert (refused, again) == (409, 204)  # the same page again is taken, and clears the error
     assert (row["state"], row["form_url_error"]) == ("form_captured", "form_page_changed")
-    assert again == 204  # the same page again is taken, and clears the error
     after = _get(engine, application_id)
     assert (after.form_fields, after.fill_plan) == (before.form_fields, before.fill_plan)
     assert after.form_url_error is None
@@ -237,8 +236,7 @@ def test_a_capture_failure_on_page_2_is_shown_and_the_application_does_not_move(
         "form_captured", LEVER, error,
     )  # fmt: skip
     assert [fill["page"] for fill in fills] == [1]  # page 1's fill stays, nothing else
-    assert model.specs == []
-    assert again == 204
+    assert (model.specs, again) == ([], 204)
     application = _get(engine, application_id)
     assert (application.form_url_error, application.form_failures) == (None, 0)
     assert application.form_fields == [*_paged(PAGE_1, 1), *_paged(PAGE_2, 2)]
@@ -259,10 +257,8 @@ def test_a_page_not_planned_keeps_its_fill_error_and_a_post_again_plans_it(
         again = _post(client, application_id, PAGE_1, 1)
         planned = _fills(client)
 
-    assert (sent, again) == (204, 204)
-    assert row["state"] == "form_captured"
-    assert row["fill_error"] is not None
-    assert unplanned == []
+    assert (sent, again, unplanned) == (204, 204, [])
+    assert (row["state"], row["fill_error"] is not None) == ("form_captured", True)
     assert [fill["actions"] for fill in planned] == [PLAN_1]
     assert _get(engine, application_id).fill_error is None
 
