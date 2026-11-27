@@ -1,0 +1,34 @@
+# Every hour, an owner question left unanswered for 2 hours takes the coder's recommended answer,
+# and the coder starts again when no question is left for the owner (tools/questions.py sweep).
+# A question tagged `[sending]`, or with no recommended answer, stays the owner's (ADR 0003).
+name: Agent sweep
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: agent-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    # The coder it starts runs main's code only; so does the sweep.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write # gh workflow run, to start the coder again
+      contents: read
+      issues: write # the `Default answers:` comment
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Answer by default what waited 2 hours, start the coder
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/questions.py sweep

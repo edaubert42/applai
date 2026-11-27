@@ -91,9 +91,11 @@ jobs:
             You are the coder agent of ${{ github.repository }}. Build issue #${{ steps.ready.outputs.issue }}.
 
             1. Read the issue with `gh issue view ${{ steps.ready.outputs.issue }} --comments`, then CLAUDE.md and what it points to.
-               `Answers:` comments and the owner's comments settle earlier questions.
+               `Answers:`, `Default answers:` (your recommended answer applies) and the owner's comments settle earlier questions.
                If the issue is still ambiguous, comment on it and stop. The comment starts with the line `Questions:`,
-               then numbered questions, each with a recommended answer. Say so when the issue itself looks wrong
+               then numbered questions, each with a recommended answer. Start a question with `[sending]` when it touches
+               who or what submits an application (ADR 0003): it never takes your recommended answer by default (agent-sweep.yml).
+               Say so when the issue itself looks wrong
                (an invalid value, a contradiction, a missing file): the answerer leaves those to the owner.
                Never end without a PR or a `Questions:` comment: a tool you need is denied, a gate cannot run,
                or the code contradicts the issue (a missing transition, a rule it breaks)? Ask it there and stop.
@@ -169,6 +171,8 @@ jobs:
                `gh issue comment ${{ steps.ready.outputs.issue }} --body-file <file>`. Exact form, the coder's numbers kept:
                first line `Answers:`, then one line per answered question: `N. <answer> (<source>)`.
                If any question is for the owner, then a line `Owner:` and one line per question: `N. <why>`.
+               Tag it `[sending]`, as `N. [sending] <why>`, when the question touches who or what submits an application
+               (ADR 0003): an owner question left 2 hours otherwise takes the coder's recommended answer (agent-sweep.yml).
                Short lines, no paragraphs. Post exactly one comment, then stop.
       - name: Start the coder again when every question is answered
         if: steps.after.outputs.next == 'answer'
