@@ -255,6 +255,8 @@ def check_answers(session: Session, user_id: int, application_id: int) -> None:
     if pending:
         raise GateRefused(f"Decide every CV change first: {len(pending)} left.")
     move(session, application, ApplicationState.ANSWERS_CHECKED, Actor.CANDIDATE)
+    if application.form_failed_page is not None:  # a stored page's: it can't be posted again
+        application.form_url_error = application.form_failed_page = None
 
 
 class HeadlineRequest(BaseModel):

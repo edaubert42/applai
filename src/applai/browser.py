@@ -18,6 +18,15 @@ background (applai.drafting). With no control, it sends the page's text, and the
 agent reads the fields in it (applai.capture.read_fields). A form that fails, or shows no field,
 is asked for again only after the next scan; after MAX_FORM_FAILURES its URL is dropped and the
 candidate pastes one, which counts from zero again.
+A form spread over pages at one URL is posted page by page, each field stored with its page;
+indices count across pages. Page 1 moves it to form_captured; while it stays there, a page code
+fills alone (applai.filling.by_code_only) is planned by code and served as a fill, and the next
+page may be posted. The first page that is not stops: it is drafted, then the gate runs; each
+page after it is planned by Filling, unless it asks what the gate did not check. A page
+posted again replaces it, unless drafting reads it or a later page's fields would move.
+A later page that fails or is refused keeps the URL, the pages read and the state; its
+form_url_error clears when that page (form_failed_page) is posted, or at the answers gate
+(applai.correct), past which a stored page is not posted again.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
 page received for one is read for its text, and the offer is triaged again in the background.
 An ask the extension leaves unanswered for REREAD_WITHIN ends when the pages are listed.
@@ -55,8 +64,8 @@ from applai import details, reread, validation
 from applai.agents import AgentRunner
 from applai.capture import MAX_FIELDS, MAX_LABEL, FormField, read_fields
 from applai.details import MAX_PAGE_FAILURES, PageError, describe_offer, read_by_extension
-from applai.drafting import draft_in_background
-from applai.filling import FillAction, Slot, file_path
+from applai.drafting import draft_in_background, drafted_fields
+from applai.filling import FillAction, Slot, by_code, by_code_only, file_path
 from applai.google import describe_google_offer, on_google
 from applai.models import LOCAL_USER_ID, Application, Offer, OfferOrigin, OfferState, Scan
 from applai.orchestrator import Actor, ApplicationState, TransitionError, move
@@ -98,10 +107,12 @@ class FormToRead(BaseModel):
 class FormSent(BaseModel):
     fields: list[FormField] = Field(max_length=MAX_FIELDS)  # none: read from text, if sent
     text: str | None = Field(None, max_length=MAX_TEXT)  # the page's visible text
+    page: int | None = Field(None, ge=1, le=MAX_FIELDS)  # none: the whole form at once
 
 
 class FormFailed(BaseModel):
     reason: Literal["not_allowed", "not_loaded", "not_read"]
+    page: int | None = Field(None, ge=1, le=MAX_FIELDS)
 
 
 class BrowserStatus(BaseModel):
@@ -311,55 +322,161 @@ def form_sent(
 ) -> None:
     """Store a waiting application's fields and move it to form_captured, then draft it in
     the background with the watch's runner (applai.drafting). With no fields and the page's
-    text, the form_capture agent reads them in the text; none found is a failure."""
+    text, the form_capture agent reads them in the text; none found is a failure. A page
+    code fills alone is planned, not drafted; a page after the answers gate is planned by
+    Filling (applai.filling.plan_fill), unless it asks what the gate did not check."""
     state = request.app.state
-    engine, watch = state.engine, state.watch
-    fields, reason = body.fields, "no_field"
+    engine, watch, page = state.engine, state.watch, body.page
+    fields, reason, draft, plan = body.fields, "no_field", True, False
     if not fields and body.text and watch is not None:
         with Session(engine) as session:  # refused before the model is called
-            _waiting_form(session, application_id)
+            _waiting_form(session, application_id, page)
         try:  # no session is held while the agent runs
             fields = read_fields(watch.runner, engine, application_id, body.text)
         except Exception:  # in the trace; a 500 would open the form again every minute
             reason = "not_read"
     with Session(engine) as session:
-        application = _waiting_form(session, application_id)
+        application = _waiting_form(session, application_id, page)
+        captured = application.state != ApplicationState.CREATED  # a later page, or again
+        posted = [{**field.model_dump(), "page": page} for field in fields]
+        refused = None
         if not fields:
-            _form_failed(application, reason, request.app.state.clock())
-        else:
+            _form_failed(application, reason, state.clock(), page)
+        elif page is None:
             application.form_fields = [field.model_dump() for field in fields]
+        elif application.state == ApplicationState.ANSWERS_CHECKED:
+            questions, letter = drafted_fields(posted)
+            if questions or letter is not None:  # out of scope: a gate for a later page
+                refused = "asks_after_gate", f"Page {page} asks what the gate did not check."
+            else:  # the page after the last (_page_waiting): Filling plans it again with it
+                _clear_page_error(application, page)
+                application.form_fields = [*(application.form_fields or []), *posted]
+                application.fill_plan = application.fill_failed_at = None  # not served meanwhile
+                draft, plan = False, True
+        elif _moves_later_pages(application.form_fields or [], posted, page):
+            refused = "page_changed", f"Page {page} would move the fields of the pages after it."
+        else:
+            draft = _store_page(application, posted, page, state.data_dir)
+        if refused is not None:  # shown on the row until that page is posted
+            _form_failed(application, refused[0], state.clock(), page)
+            session.commit()
+            raise HTTPException(409, refused[1])
+        if fields and not captured:
             try:
                 move(session, application, ApplicationState.FORM_CAPTURED, Actor.FORM_CAPTURE)
             except TransitionError as error:  # another post moved it meanwhile
                 raise HTTPException(409, str(error)) from None
         session.commit()
-    if fields and watch is not None:
+    if fields and draft and watch is not None:
         later.add_task(draft_in_background, state.engine, state.data_dir, watch.runner,
                        application_id)  # fmt: skip
+    if plan and watch is not None:
+        later.add_task(state.plan_fill, engine, state.data_dir, watch.runner, application_id,
+                       state.clock)  # fmt: skip
 
 
 @router.post("/forms/{application_id}/failure", status_code=204)
 def form_failed(application_id: int, body: FormFailed, request: Request) -> None:
-    """Record a form the extension could not read."""
+    """Record a form, or a page of it, the extension could not read."""
     with Session(request.app.state.engine) as session:
-        _form_failed(_waiting_form(session, application_id), body.reason, request.app.state.clock())
+        application = _waiting_form(session, application_id, body.page)
+        _form_failed(application, body.reason, request.app.state.clock(), body.page)
         session.commit()
 
 
-def _waiting_form(session: Session, application_id: int) -> Application:
+def _waiting_form(session: Session, application_id: int, page: int | None) -> Application:
     application = session.get(Application, application_id)
     if application is None or application.user_id != LOCAL_USER_ID:
         raise HTTPException(404, "no such application")
-    if not _form_waiting(application, _last_scan(session)):
-        raise HTTPException(409, f"Application {application_id} is not waiting for its form.")
+    first = page in (None, 1) and _form_waiting(application, _last_scan(session))
+    if not first and not _page_waiting(application, page):
+        raise HTTPException(409, f"Application {application_id} is not waiting for this form.")
     return application
 
 
-def _form_failed(application: Application, reason: str, now: datetime) -> None:
+type _Fields = list[dict[str, Any]]  # a form's, as applications.form_fields keeps them
+
+
+def _page_range(fields: _Fields, page: int) -> range:
+    """The indices of a page's fields; an empty range at the end for a page not stored."""
+    on = [index for index, field in enumerate(fields) if field.get("page") == page]
+    return range(on[0], on[-1] + 1) if on else range(len(fields), len(fields))
+
+
+def _page_waiting(application: Application, page: int | None) -> bool:
+    """form_captured page by page: a page before the last, or, when code fills the last page
+    alone, that one or the next. A last page that waits for drafting is not replaced.
+    answers_checked: the page after the last, once the pages before it are planned."""
+    last = _last_page(application.form_fields)
+    if application.user_id != LOCAL_USER_ID or page is None or last is None:
+        return False
+    if application.state == ApplicationState.ANSWERS_CHECKED:
+        return page == last + 1 and application.fill_plan is not None
+    return application.state == ApplicationState.FORM_CAPTURED and (
+        page < last or (page <= last + 1 and _last_page_by_code(application.form_fields))
+    )
+
+
+def _last_page(fields: _Fields | None) -> int | None:
+    """The last page stored of a form read page by page; none for a form read at once."""
+    return fields[-1].get("page") if fields else None
+
+
+def _last_page_by_code(fields: _Fields | None) -> bool:
+    """Whether a form is read page by page and code alone fills its last page."""
+    if not fields or (last := _last_page(fields)) is None:
+        return False
+    on = _page_range(fields, last)
+    return by_code_only(fields[on.start : on.stop])
+
+
+def _moves_later_pages(fields: _Fields, posted: _Fields, page: int) -> bool:
+    """Whether a page posted again would move a later page's indices, or stop before it."""
+    old = _page_range(fields, page)
+    return old.stop < len(fields) and (len(posted) != len(old) or not by_code_only(posted))
+
+
+def _store_page(application: Application, posted: _Fields, page: int, data_dir: Path) -> bool:
+    """Store a page's fields in place of its own and clear its errors; plan the page if code
+    fills it alone, keeping the other pages' actions. Whether it waits for drafting.
+    A profile that does not load is kept as the fill_error: the page is not served."""
+    fields = application.form_fields or []
+    old = _page_range(fields, page)
+    last = _last_page(fields) or 0
+    application.form_fields = [*fields[: old.start], *posted, *fields[old.stop :]]
+    _clear_page_error(application, page)
+    if page >= last:  # the fill served, and its fill_error, are the last page's
+        application.fill_error = None
+    application.fill_failed_at = None
+    kept = [action for action in application.fill_plan or [] if action["field"] not in old]
+    application.fill_plan = kept
+    if not by_code_only(posted):
+        return True
+    try:
+        actions, _ = by_code(posted, {}, load_profile(data_dir), cv=False)
+    except ProfileError as error:  # its message holds no value of the profile
+        application.fill_error = str(error)
+        return False
+    planned = [{**action.model_dump(), "field": action.field + old.start} for action in actions]
+    application.fill_plan = sorted([*kept, *planned], key=lambda action: action["field"])
+    return False
+
+
+def _clear_page_error(application: Application, page: int) -> None:
+    """Clear the form_url_error of a page read page by page, once that page is posted."""
+    if application.form_failed_page in (None, page):
+        application.form_url_error = application.form_failed_page = None
+
+
+def _form_failed(application: Application, reason: str, now: datetime, page: int | None) -> None:
     """Record a form not read, asked for again after the next scan; after the last failure
-    allowed, drop its URL so the candidate pastes one."""
-    application.form_failures += 1
+    allowed, drop its URL so the candidate pastes one. A later page of a form read page by
+    page keeps its URL, its pages and its state: the error shows until that page is posted."""
     application.form_failed_at = now.astimezone(UTC).replace(tzinfo=None)  # as the scans' times
+    if application.state != ApplicationState.CREATED:  # form_captured or answers_checked
+        application.form_url_error, application.form_failed_page = f"form_{reason}", page
+        return
+    application.form_failures += 1
     if application.form_failures >= MAX_FORM_FAILURES:
         application.form_url = None
         application.form_url_error = f"form_{reason}"
@@ -373,6 +490,7 @@ FILL_AGAIN_STATES = (ApplicationState.FILLED, ApplicationState.REVIEWED,
 class FillToDo(BaseModel):
     application_id: int
     url: str
+    page: int | None = None  # a form read page by page: its last page, its fields counted from 0
     actions: list[FillAction]  # none sends: ADR 0003
 
 
@@ -401,18 +519,22 @@ class FillFailed(BaseModel):
 
 def _fill_waiting(application: Application, last_scan: datetime | None) -> bool:
     """With a plan and a form's URL: answers_checked and not failed since the last scan started,
-    or filled once and asked to fill again."""
+    filled once and asked to fill again, or form_captured with a last page code planned and no
+    fill_error since it was posted."""
     failed = application.fill_failed_at
+    if application.fill_again_at is not None:
+        ready = application.state in FILL_AGAIN_STATES
+    elif application.state == ApplicationState.FORM_CAPTURED:
+        ready = application.fill_error is None and _last_page_by_code(application.form_fields)
+    else:
+        ready = application.state == ApplicationState.ANSWERS_CHECKED and (
+            failed is None or (last_scan is not None and last_scan > failed)
+        )
     return (
         application.user_id == LOCAL_USER_ID
         and application.fill_plan is not None
         and application.form_url is not None
-        and (
-            application.state in FILL_AGAIN_STATES
-            if application.fill_again_at is not None
-            else application.state == ApplicationState.ANSWERS_CHECKED
-            and (failed is None or (last_scan is not None and last_scan > failed))
-        )
+        and ready
     )
 
 
@@ -425,7 +547,7 @@ def _waiting_fill(session: Session, application_id: int) -> Application:
     return application
 
 
-@router.get("/fills")
+@router.get("/fills", response_model_exclude_none=True)  # a form read at once: no page
 def fills(request: Request) -> list[FillToDo]:
     """The applications waiting for the extension to fill their form."""
     with Session(request.app.state.engine) as session:
@@ -433,16 +555,28 @@ def fills(request: Request) -> list[FillToDo]:
         checked = session.scalars(
             select(Application)
             .where(
-                (Application.state == ApplicationState.ANSWERS_CHECKED)
+                Application.state.in_(
+                    [ApplicationState.ANSWERS_CHECKED, ApplicationState.FORM_CAPTURED]
+                )
                 | Application.fill_again_at.is_not(None)
             )
             .order_by(Application.id)
         )
         return [
-            FillToDo(application_id=a.id, url=a.form_url, actions=_actions(a.fill_plan))
+            _fill_to_do(a.id, a.form_url, a.form_fields or [], a.fill_plan)
             for a in checked
             if a.form_url is not None and a.fill_plan is not None and _fill_waiting(a, last_scan)
         ]
+
+
+def _fill_to_do(application_id: int, url: str, fields: _Fields, plan: _Fields) -> FillToDo:
+    """The fill of the whole form; of a form read page by page, its last page's alone."""
+    actions, page = _actions(plan), _last_page(fields)
+    if page is not None:
+        on = _page_range(fields, page)
+        actions = [a.model_copy(update={"field": a.field - on.start})
+                   for a in actions if a.field in on]  # fmt: skip
+    return FillToDo(application_id=application_id, url=url, page=page, actions=actions)
 
 
 def _actions(plan: list[dict[str, Any]]) -> list[FillAction]:
@@ -520,7 +654,8 @@ def fill_failed(application_id: int, body: FillFailed, request: Request) -> None
         application = _waiting_fill(session, application_id)
         again = "again_" if application.fill_again_at is not None else ""
         application.fill_error = f"fill_{again}{body.reason}"
-        application.fill_failed_at = utc(request.app.state.clock())
+        if application.state != ApplicationState.FORM_CAPTURED:  # there, a post again retries
+            application.fill_failed_at = utc(request.app.state.clock())
         application.fill_again_at = None
         session.commit()
 
