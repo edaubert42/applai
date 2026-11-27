@@ -27,7 +27,7 @@ AGENT = "claude[bot]"
 _FOR_OWNER = re.compile(r"^Owner:", re.MULTILINE)
 
 
-def _comments(run: Run, number: int) -> list[dict[str, Any]]:
+def comments(run: Run, number: int) -> list[dict[str, Any]]:
     path = f"repos/{{owner}}/{{repo}}/issues/{number}/comments?per_page=100"
     # One comment per line: `--slurp` is missing from older gh versions.
     done = run(["gh", "api", "--paginate", "--jq", ".[]", path], capture_output=True, text=True)
@@ -68,7 +68,7 @@ def main(argv: Sequence[str] | None = None, run: Run = subprocess.run) -> int:
     parser.add_argument("command", choices=["next"])
     parser.add_argument("issue", type=int)
     args = parser.parse_args(argv)
-    print(next_step(_comments(run, args.issue), os.environ["GITHUB_REPOSITORY_OWNER"]))
+    print(next_step(comments(run, args.issue), os.environ["GITHUB_REPOSITORY_OWNER"]))
     return 0
 
 

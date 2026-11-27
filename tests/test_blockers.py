@@ -54,7 +54,14 @@ ISSUES: dict[int, dict[str, Any]] = {
     39: _issue("open", "#38", [_labeled(OWNER)]),
     40: _issue("open", "#29", [_labeled(OWNER)]),
 }
-BRANCHES = ["agent/issue-40-backup", "agent/issue-300-other"]  # the coder already built 40
+# The coder stopped on questions after pushing its branch; the owner answered.
+ASKED = {"user": {"login": "claude[bot]"}, "body": "Questions:\n\n1. Which port?"}
+ANSWERED = [ASKED, {"user": {"login": OWNER}, "body": "Owner:\n\n1. 8000."}]
+ISSUES[41] = {**_issue("open", "None.", [_labeled(OWNER)]), "comments": ANSWERED}
+ISSUES[42] = {**_issue("open", "None.", [_labeled(OWNER)]), "comments": ANSWERED, "prs": [7]}
+ISSUES[43] = {**_issue("open", "None.", [_labeled(OWNER)]), "comments": [ASKED]}
+BRANCHES = ["agent/issue-40-backup", "agent/issue-300-other", "agent/issue-41-pages",
+            "agent/issue-42-pages", "agent/issue-43-pages"]  # fmt: skip
 
 
 class FakeGh:
@@ -82,6 +89,15 @@ class FakeGh:
 
     def _serve(self, args: list[str]) -> Any:
         match args:
+            case ["gh", "api", "--paginate", "--jq", ".[]", path] if "/comments?" in path:
+                found = re.fullmatch(
+                    r"repos/\{owner\}/\{repo\}/issues/(\d+)/comments\?per_page=100", path
+                )
+                assert found, path
+                return self.issues[int(found.group(1))].get("comments", [])
+            case ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number"]:
+                number = int(branch.split("-")[1])
+                return [{"number": n} for n in self.issues[number].get("prs", [])]
             case ["gh", "api", "--paginate", "--jq", ".[]", path]:
                 found = re.fullmatch(
                     r"repos/\{owner\}/\{repo\}/issues/(\d+)/events\?per_page=100", path
@@ -145,6 +161,14 @@ def test_an_issue_the_coder_already_started_does_not_start_again(
 ):
     assert _run(capsys, ISSUES, "check", "40") == (0, "already started\n")
     assert _run(capsys, ISSUES, "check", "30") == (0, "ready\n")  # agent/issue-300-* is not 30's
+
+
+def test_a_coder_that_stopped_on_questions_starts_again_once_answered(
+    capsys: pytest.CaptureFixture[str],
+):
+    assert _run(capsys, ISSUES, "check", "41") == (0, "ready\n")
+    assert _run(capsys, ISSUES, "check", "42") == (0, "already started\n")  # its PR is open
+    assert _run(capsys, ISSUES, "check", "43") == (0, "already started\n")  # not answered yet
 
 
 @pytest.mark.parametrize("number", ["32", "33", "37"])
