@@ -1,6 +1,7 @@
 # Binary or document files allowed in this public repository, one path per line.
 # Add a file here only once it is checked to hold fictional data (demo GIF, fake forms).
 src/applai/geo/idf_communes.csv
+docs/demo.gif
 demo/candidate/cv/photo.jpg
 demo/fills/2b66cc80a72a8479a2eaf3220a14304e577d5403bcc0b4efd34c3e50fc54fb1d.png
 demo/fills/3383b90c78f12ed9eb2784e00a75a9546af0a118682d13860a0e0e88784b57e9.png
