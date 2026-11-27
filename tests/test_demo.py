@@ -1,6 +1,7 @@
 """The demo: applai demo record runs the agents once on the demo offers, the demo replays them."""
 
 import json
+import shutil
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from applai.agents import (
     read_recordings,
     recording_key,
 )
+from applai.bench.triage import DEMO_DIR
 from applai.cli import main
 from applai.database import open_database
 from applai.models import AgentRun
@@ -60,7 +62,18 @@ def _tailor(_: dict[str, Any]) -> dict[str, Any]:
             "changes": []}  # fmt: skip
 
 
-OUTPUTS = {"triage": _card, "drafting": _draft, "drafting_judge": _judge, "cv_tailoring": _tailor}
+def _review(_: dict[str, Any]) -> dict[str, Any]:
+    problem = {"severity": "warning", "field": "Téléphone", "message": "À vérifier."}
+    return {"problems": [problem]}
+
+
+OUTPUTS = {
+    "triage": _card,
+    "drafting": _draft,
+    "drafting_judge": _judge,
+    "cv_tailoring": _tailor,
+    "review": _review,
+}
 
 
 # Written as is, its decimals would read as a phone number: split so this file passes too.
@@ -107,6 +120,7 @@ def test_record_writes_every_run_of_the_demo_and_a_second_record_runs_none(recor
     runs = Counter(spec.name for spec in models.specs)
     assert runs["triage"] == len(list(demo.OFFERS.glob("*.yaml")))
     assert 0 < runs["drafting"] == runs["drafting_judge"] == runs["cv_tailoring"] < runs["triage"]
+    assert runs["review"] == runs["drafting"] - 1  # all but the dropped one
 
     again = Models()
     main(["demo", "record"], runner=AgentRunner(again))
@@ -131,9 +145,32 @@ def test_a_failed_run_is_printed_and_the_next_record_runs_only_what_is_missing(
     retry = Models()
     main(["demo", "record"], runner=AgentRunner(retry))
 
-    assert [spec.name for spec in retry.specs] == ["drafting", "drafting_judge", "cv_tailoring"]
+    names = ["drafting", "drafting_judge", "cv_tailoring", "review"]
+    assert [spec.name for spec in retry.specs] == names
     assert retry.specs[0] == failed
     assert set(read_recordings(recordings)) == set(kept) | {recording_key(s) for s in retry.specs}
+
+
+def test_a_failed_review_is_printed_not_recorded_and_the_next_record_runs_only_it(
+    recordings: Path, capsys: pytest.CaptureFixture[str]
+):
+    models = Models(failing="review")
+
+    main(["demo", "record"], runner=AgentRunner(models))
+
+    assert "agent review failed: timeout" in capsys.readouterr().out
+    failed = next(spec for spec in models.specs if spec.name == "review")
+    kept = read_recordings(recordings)
+    assert recording_key(failed) not in kept
+    fills = recordings.parent / "fills"
+    written = {path: path.stat().st_mtime_ns for path in fills.iterdir()}
+
+    retry = Models()
+    main(["demo", "record"], runner=AgentRunner(retry))
+
+    assert retry.specs == [failed]
+    assert set(read_recordings(recordings)) == set(kept) | {recording_key(failed)}
+    assert {path: path.stat().st_mtime_ns for path in fills.iterdir()} == written
 
 
 def test_an_output_the_schema_refuses_is_not_recorded_and_the_next_record_asks_again(
@@ -216,9 +253,10 @@ def test_the_recordings_pass_the_privacy_checks_which_read_their_text(
 
 def test_every_demo_application_replays_from_the_recordings_in_the_repository(tmp_path: Path):
     engine = open_database(tmp_path)
+    data_dir = shutil.copytree(DEMO_DIR, tmp_path / "candidate")
     try:
         replay = ReplayBackend(read_recordings(demo.RECORDINGS), max_wait_s=0)
-        demo.run_demo(AgentRunner(replay), engine)
+        failures = demo.run_demo(AgentRunner(replay), engine, data_dir)
         with Session(engine) as session:
             runs = session.execute(select(AgentRun.agent, AgentRun.outcome)).all()
     finally:
@@ -227,3 +265,5 @@ def test_every_demo_application_replays_from_the_recordings_in_the_repository(tm
     failed = [agent for agent, outcome in runs if outcome != OK]
     assert runs
     assert failed == [], f"no valid recording for {Counter(failed)}: run `applai demo record`"
+    assert failures == []
+    assert Counter(agent for agent, _ in runs)["review"] == 3
