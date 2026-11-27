@@ -86,10 +86,8 @@ def merge(run: Run, number: int, head: str) -> str | None:
         comments = gh_list(run, f"issues/{number}/comments")
     except subprocess.CalledProcessError as error:
         return f"reading the verdicts failed: {error.stderr.strip()}"
-    if any(
-        by_login(c, REVIEWER) and (c["body"] or "").startswith("Verdict: changes needed")
-        for c in comments
-    ):
+    changes = "Verdict: changes needed"
+    if any(by_login(c, REVIEWER) and (c["body"] or "").startswith(changes) for c in comments):
         return "the reviewer asked for changes"
     merged = _gh(run, "pr", "merge", str(number), "--squash", "--match-head-commit", head)
     if merged.returncode != 0:
@@ -102,13 +100,9 @@ def start(run: Run, number: int, issues: list[int]) -> list[str]:
     commands = [f"agent-unblock.yml -f issue={issue}" for issue in issues]
     commands.append(f"agent-learner.yml -f pr={number}")
     failed = [c for c in commands if _gh(run, "workflow", "run", *c.split()).returncode != 0]
-    # agent-learner.yml refuses `pr` from anyone but github-actions[bot]: no command by hand.
-    return [
-        f"gh workflow run {c}"
-        if c.startswith("agent-unblock")
-        else "the learner for this PR (no command by hand: it takes `pr` from github-actions only)"
-        for c in failed
-    ]
+    # agent-learner.yml takes `pr` from github-actions[bot] only: no command by hand for it.
+    by_hand = "the learner for this PR (no command by hand: it takes `pr` from github-actions only)"
+    return [f"gh workflow run {c}" if c.startswith("agent-unblock") else by_hand for c in failed]
 
 
 def main(
