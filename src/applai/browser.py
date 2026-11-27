@@ -22,8 +22,9 @@ A form spread over pages at one URL is posted page by page, each field stored wi
 indices count across pages. Page 1 moves it to form_captured; while it stays there, a page code
 fills alone (applai.filling.by_code_only) is planned by code and served as a fill, and the next
 page may be posted. The first page that is not stops: it is drafted, then the gate runs. A
-page posted again replaces it, unless it would move a later page's fields. A later page that
-fails keeps the URL, the pages read and the state: its form_url_error clears when it is posted.
+page posted again replaces it, unless drafting reads it or a later page's fields would move.
+A later page that fails keeps the URL, the pages read and the state; its form_url_error
+clears when it is posted.
 The pages also list the triaged offers the candidate asked to read again (applai.reread); the
 page received for one is read for its text, and the offer is triaged again in the background.
 An ask the extension leaves unanswered for REREAD_WITHIN ends when the pages are listed.
@@ -382,15 +383,15 @@ def _page_range(fields: list[dict[str, Any]], page: int) -> range:
 
 
 def _page_waiting(application: Application, page: int | None) -> bool:
-    """form_captured page by page: a page stored, posted again, or the next one after a last
-    page code fills alone."""
+    """form_captured page by page: a page before the last, or, when code fills the last page
+    alone, that one or the next. A last page that waits for drafting is not replaced."""
     last = _last_page(application.form_fields or [])
     return (
         application.user_id == LOCAL_USER_ID
         and application.state == ApplicationState.FORM_CAPTURED
         and page is not None
         and last is not None
-        and (page <= last or (page == last + 1 and _last_page_by_code(application.form_fields)))
+        and (page < last or (page <= last + 1 and _last_page_by_code(application.form_fields)))
     )
 
 
@@ -402,7 +403,7 @@ def _last_page(fields: list[dict[str, Any]]) -> int | None:
 def _last_page_by_code(fields: list[dict[str, Any]] | None) -> bool:
     """Whether a form is read page by page and code alone fills its last page."""
     last = _last_page(fields or [])
-    if last is None or not fields:
+    if fields is None or last is None:
         return False
     on = _page_range(fields, last)
     return by_code_only(fields[on.start : on.stop])
@@ -422,7 +423,8 @@ def _store_page(
     """Store a page's fields in place of its own and clear the page errors; plan the page if
     code fills it alone, keeping the other pages' actions. Whether it waits for drafting.
     A profile that does not load is kept as the fill_error: the page is not served."""
-    fields, old = application.form_fields or [], _page_range(application.form_fields or [], page)
+    fields = application.form_fields or []
+    old = _page_range(fields, page)
     application.form_fields = [*fields[: old.start], *posted, *fields[old.stop :]]
     application.form_url_error = application.fill_error = None
     kept = [action for action in application.fill_plan or [] if action["field"] not in old]

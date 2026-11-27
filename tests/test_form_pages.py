@@ -145,14 +145,9 @@ def test_page_2_counts_its_fields_after_page_1_and_leaves_page_1_as_it_was(
     assert application.form_fields == [*_paged(PAGE_1, 1), *_paged(PAGE_2, 2)]
     assert application.fill_plan == [*PLAN_1, {"field": 4, **CITY}]  # LinkedIn: no value
     assert application.state == "form_captured"
-    assert fills == [
-        {
-            "application_id": application_id,
-            "url": LEVER,
-            "page": 2,
-            "actions": [{"field": 0, **CITY}],
-        }
-    ]  # counted from the page's first field
+    page_2 = [{"field": 0, **CITY}]  # counted from the page's first field
+    assert fills == [{"application_id": application_id, "url": LEVER, "page": 2,
+                      "actions": page_2}]  # fmt: skip
 
 
 def test_a_page_with_an_open_question_is_drafted_alone_and_the_application_moves_on(
@@ -276,14 +271,16 @@ def test_a_page_out_of_turn_is_refused(data_dir: Path, engine: Engine):
     created = _application(engine)
     asks = _application(engine)
 
-    with _client(data_dir, DRAFTED, JUDGED) as (client, _):
+    with _client(data_dir) as (client, _):  # no model reply: Drafting fails, form_captured stays
         early = _post(client, created, PAGE_2, 2)  # page 1 first
-        _post(client, asks, PAGE_2_ASKS, 1)  # drafted: the gate comes next
+        _post(client, asks, PAGE_2_ASKS, 1)  # it waits for drafting
         late = _post(client, asks, PAGE_1, 2)
+        again = _post(client, asks, PAGE_2, 1)  # drafting reads it
         unpaged = client.post(f"/api/browser/forms/{asks}", json={"fields": PAGE_1},
                               headers=EXTENSION)  # fmt: skip
 
-    assert (early, late, unpaged.status_code) == (409, 409, 409)
+    assert (early, late, again, unpaged.status_code) == (409, 409, 409, 409)
+    assert _get(engine, asks).state == "form_captured"
     assert (_get(engine, created).state, _get(engine, created).form_fields) == ("created", None)
     assert _get(engine, asks).form_fields == _paged(PAGE_2_ASKS, 1)
 
