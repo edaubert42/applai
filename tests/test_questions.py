@@ -269,6 +269,37 @@ def test_a_coder_that_failed_to_start_is_started_by_a_later_sweep(
     assert (len(github.posted), github.started) == (2, [40])
 
 
+def _failed_start() -> FakeGitHub:
+    """An issue whose default answers, 2 hours old, did not start the coder."""
+    return FakeGitHub({40: [*_left(ROUND, LEFT_2), _comment(BOT, DEFAULT_2, HOURS_2_01)]})
+
+
+def test_a_retry_whose_mark_fails_starts_nothing_and_the_next_run_tries_again(
+    capsys: pytest.CaptureFixture[str],
+):
+    github = _failed_start()
+    github.fail = "issue comment"
+    assert main(["sweep"], run=github) == 1
+    assert (github.posted, github.started) == ([], [])
+    assert "#40: gh failed" in capsys.readouterr().out
+    github.fail = ""
+    assert main(["sweep"], run=github) == 0
+    assert (github.posted, github.started) == ([(40, RETRIED)], [40])
+
+
+def test_a_retry_that_fails_to_start_is_not_retried_again(capsys: pytest.CaptureFixture[str]):
+    github = _failed_start()
+    github.fail = "workflow run"
+    assert main(["sweep"], run=github) == 1
+    assert "#40: gh failed" in capsys.readouterr().out
+    assert (github.posted, github.started) == ([(40, RETRIED)], [])
+    github.fail = ""
+    for comment in github.issues[40]:
+        comment["created_at"] = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    assert main(["sweep"], run=github) == 0
+    assert (github.posted, github.started) == ([(40, RETRIED)], [])  # the owner starts it
+
+
 def test_the_sweep_runs_every_hour_and_by_hand_on_main():
     workflow = yaml.safe_load(SWEEP.read_text())
     assert set(workflow[True]) == {"schedule", "workflow_dispatch"}  # `on:` is read as True

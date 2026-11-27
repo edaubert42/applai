@@ -37,7 +37,7 @@ AGENT = "claude[bot]"
 BOT = "github-actions[bot]"
 WAIT = timedelta(hours=2)
 SENDING = "[sending]"
-RETRIED = "Started the coder again: the first start failed."
+RETRIED = "Starting the coder again: the first start failed. If this fails, the owner starts it."
 _FOR_OWNER = re.compile(r"^Owner:", re.MULTILINE)
 _NUMBERED = re.compile(r"^(\d+)\.(.*?)(?=^\d+\.|\Z)", re.MULTILINE | re.DOTALL)
 _RECOMMENDED = re.compile(r"\brecommended\W{0,3}:", re.IGNORECASE)
@@ -198,9 +198,9 @@ def sweep(run: Run, owner: str, now: datetime) -> int:
                     left = ", ".join(map(str, _numbered(_FOR_OWNER.split(body, 1)[1])))
                     print(f"#{number}: questions {left} wait for the owner")
             elif _never_started(thread, owner, now) and check(run, number, owner) == "ready":
-                _gh(run, "workflow", "run", "agent-coder.yml", "-f", f"issue={number}")
-                # Marks the retry: one per round, whatever the run does next.
+                # Marks the retry before it: one per round, even if this start fails too.
                 _gh(run, "issue", "comment", str(number), "--body", RETRIED)
+                _gh(run, "workflow", "run", "agent-coder.yml", "-f", f"issue={number}")
         except subprocess.CalledProcessError as error:
             print(f"#{number}: gh failed ({error.returncode}); the next run tries again")
             failed = 1
