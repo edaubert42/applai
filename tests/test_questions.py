@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 import yaml
-from questions import RETRIED, default_answers, main
+from questions import NOT_STARTED, RETRIED, default_answers, main
 
 WORKFLOW = Path(__file__).parents[1] / ".github/workflows/agent-coder.yml"
 SWEEP = Path(__file__).parents[1] / ".github/workflows/agent-sweep.yml"
@@ -291,13 +291,14 @@ def test_a_retry_that_fails_to_start_is_not_retried_again(capsys: pytest.Capture
     github = _failed_start()
     github.fail = "workflow run"
     assert main(["sweep"], run=github) == 1
-    assert "#40: gh failed" in capsys.readouterr().out
-    assert (github.posted, github.started) == ([(40, RETRIED)], [])
+    out = capsys.readouterr().out
+    assert "the owner starts it" in out and "tries again" not in out
+    assert (github.posted, github.started) == ([(40, RETRIED), (40, NOT_STARTED)], [])
     github.fail = ""
     for comment in github.issues[40]:
         comment["created_at"] = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     assert main(["sweep"], run=github) == 0
-    assert (github.posted, github.started) == ([(40, RETRIED)], [])  # the owner starts it
+    assert github.started == []  # the owner starts it
 
 
 def test_the_sweep_runs_every_hour_and_by_hand_on_main():
