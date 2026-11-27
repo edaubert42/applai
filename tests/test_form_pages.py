@@ -2,7 +2,7 @@
 code plans the pages it fills alone, and the first page with an open question is drafted."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -73,7 +73,7 @@ def engine(data_dir: Path) -> Iterator[Engine]:
 
 
 @contextmanager
-def _client(data_dir: Path, *results: AgentResult) -> Iterator[tuple[TestClient, FakeBackend]]:
+def _client(data_dir: Path, *results: AgentResult) -> Generator[tuple[TestClient, FakeBackend]]:
     """The real app with the watch on and the model mocked."""
     model = FakeBackend(results)
     http = httpx2.Client(transport=httpx2.MockTransport(lambda _: httpx2.Response(404)))
@@ -145,8 +145,14 @@ def test_page_2_counts_its_fields_after_page_1_and_leaves_page_1_as_it_was(
     assert application.form_fields == [*_paged(PAGE_1, 1), *_paged(PAGE_2, 2)]
     assert application.fill_plan == [*PLAN_1, {"field": 4, **CITY}]  # LinkedIn: no value
     assert application.state == "form_captured"
-    assert fills == [{"application_id": application_id, "url": LEVER, "page": 2,
-                      "actions": [{"field": 0, **CITY}]}]  # counted from the page's first field
+    assert fills == [
+        {
+            "application_id": application_id,
+            "url": LEVER,
+            "page": 2,
+            "actions": [{"field": 0, **CITY}],
+        }
+    ]  # counted from the page's first field
 
 
 def test_a_page_with_an_open_question_is_drafted_alone_and_the_application_moves_on(
@@ -283,14 +289,17 @@ def test_a_page_out_of_turn_is_refused(data_dir: Path, engine: Engine):
 
 
 def test_an_answers_checked_paged_form_is_served_its_last_page(data_dir: Path, engine: Engine):
-    plan = [*PLAN_1, {"field": 4, **CITY}, {"field": 5, "label": WHY, "kind": "fill",
-                                             "value": "J'ai construit une prévision."}]
+    plan = [
+        *PLAN_1,
+        {"field": 4, **CITY},
+        {"field": 5, "label": WHY, "kind": "fill", "value": "J'ai construit une prévision."},
+    ]
     fields = [*_paged(PAGE_1, 1), *_paged(PAGE_2_ASKS, 2)]
     application_id = _application(engine, "answers_checked", form_fields=fields, fill_plan=plan)
 
     with _client(data_dir) as (client, _):
         fills = _fills(client)
 
+    page_2 = [{"field": 0, **CITY}, {**plan[5], "field": 1}]  # counted from the page's first field
     assert fills == [{"application_id": application_id, "url": LEVER, "page": 2,
-                      "actions": [{**action, "field": action["field"] - 4}
-                                  for action in plan[4:]]}]  # fmt: skip
+                      "actions": page_2}]  # fmt: skip

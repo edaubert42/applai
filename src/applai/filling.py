@@ -147,10 +147,11 @@ def by_code_only(fields: list[dict[str, Any]]) -> bool:
     """Whether code alone fills these fields before the answers gate (ADR 0004): no open
     question, no cover letter, no file, no choice left to the filling agent."""
     questions, letter = drafted_fields(fields)
-    return not questions and letter is None and not any(
+    files_or_choices = any(
         field["type"] == "file" or (field["type"] in _CHOICES and field["options"])
         for field in fields
     )
+    return not questions and letter is None and not files_or_choices
 
 
 def choices_spec(fields: list[dict[str, Any]], left: list[int], profile: Profile) -> AgentSpec:

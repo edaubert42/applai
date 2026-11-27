@@ -156,7 +156,10 @@ function ApplicationRow({
   // A failure is shown instead of the spinner and of the gate: it is what the candidate must see.
   // Only the errors the row shows: a fill_error past answers_checked shows on final validation.
   const reviewError = row.state === "filled" ? row.review_error : null;
-  const hasError = row.draft_error !== null || (row.state === "answers_checked" && row.fill_error !== null) || reviewError !== null;
+  // A form read page by page: a page not read, or not planned, before the answers gate.
+  const pageError = row.state === "form_captured" ? row.form_url_error : null;
+  const fillError = row.state === "answers_checked" || row.state === "form_captured" ? row.fill_error : null;
+  const hasError = row.draft_error !== null || fillError !== null || reviewError !== null || pageError !== null;
   // The stage the candidate can start again: the one whose error the row shows.
   const retry: RetryStage | null =
     row.state === "form_captured" && row.draft_error !== null
@@ -372,9 +375,14 @@ function ApplicationRow({
           {failure("applications.draft.error", row.draft_error)}
         </p>
       )}
-      {row.state === "answers_checked" && (row.fill_error || !extensionConnected) && (
+      {pageError && (
         <p role="alert" className="basis-full text-sm text-minus">
-          {row.fill_error ? failure("applications.fill.error", row.fill_error) : t("applications.fill.extension_disconnected")}
+          {t("applications.form_page.error")}
+        </p>
+      )}
+      {(fillError || (row.state === "answers_checked" && !extensionConnected)) && (
+        <p role="alert" className="basis-full text-sm text-minus">
+          {fillError ? failure("applications.fill.error", fillError) : t("applications.fill.extension_disconnected")}
         </p>
       )}
       {reviewError && (

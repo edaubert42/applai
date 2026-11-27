@@ -360,6 +360,18 @@ describe("who acts next on an application", () => {
     expect(failedFilling.queryByRole("status")).toBeNull();
   });
 
+  it("shows a page not read and a page not planned on a form_captured row, with no spinner", async () => {
+    const unread = aRow({ id: 1, offer_id: 1, title: "Poste page", state: "form_captured", running: "drafting", form_url_error: "form_not_loaded" });
+    const unplanned = aRow({ id: 2, offer_id: 2, title: "Poste plan", state: "form_captured", fill_error: "profile.yaml not found" });
+    await openScreen(applicationsRoutes({ in_progress: [unread, unplanned] }));
+
+    expect(rowOf("Poste page").getByRole("alert").textContent).toBe(fr["applications.form_page.error"]);
+    expect(rowOf("Poste page").queryByRole("status")).toBeNull();
+    expect(rowOf("Poste plan").getByRole("alert").textContent).toBe(
+      fill(fr["applications.fill.error"], { error: "profile.yaml not found" }),
+    );
+  });
+
   it.each([
     ["fr", fr],
     ["en", en],

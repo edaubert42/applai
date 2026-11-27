@@ -384,14 +384,13 @@ def _page_range(fields: list[dict[str, Any]], page: int) -> range:
 def _page_waiting(application: Application, page: int | None) -> bool:
     """form_captured page by page: a page stored, posted again, or the next one after a last
     page code fills alone."""
-    fields = application.form_fields or []
-    last = _last_page(fields)
+    last = _last_page(application.form_fields or [])
     return (
         application.user_id == LOCAL_USER_ID
         and application.state == ApplicationState.FORM_CAPTURED
         and page is not None
         and last is not None
-        and (page <= last or (page == last + 1 and by_code_only(_on_page(fields, last))))
+        and (page <= last or (page == last + 1 and _last_page_by_code(application.form_fields)))
     )
 
 
@@ -400,9 +399,13 @@ def _last_page(fields: list[dict[str, Any]]) -> int | None:
     return fields[-1].get("page") if fields else None
 
 
-def _on_page(fields: list[dict[str, Any]], page: int) -> list[dict[str, Any]]:
-    on = _page_range(fields, page)
-    return fields[on.start : on.stop]
+def _last_page_by_code(fields: list[dict[str, Any]] | None) -> bool:
+    """Whether a form is read page by page and code alone fills its last page."""
+    last = _last_page(fields or [])
+    if last is None or not fields:
+        return False
+    on = _page_range(fields, last)
+    return by_code_only(fields[on.start : on.stop])
 
 
 def _moves_later_pages(
@@ -490,25 +493,19 @@ def _fill_waiting(application: Application, last_scan: datetime | None) -> bool:
     filled once and asked to fill again, or form_captured with a last page code planned and no
     fill_error since it was posted."""
     failed = application.fill_failed_at
-    fields = application.form_fields or []
-    last = _last_page(fields)
-    planned = (
-        application.state == ApplicationState.FORM_CAPTURED
-        and application.fill_error is None
-        and last is not None
-        and by_code_only(_on_page(fields, last))
-    )
+    if application.fill_again_at is not None:
+        ready = application.state in FILL_AGAIN_STATES
+    elif application.state == ApplicationState.FORM_CAPTURED:
+        ready = application.fill_error is None and _last_page_by_code(application.form_fields)
+    else:
+        ready = application.state == ApplicationState.ANSWERS_CHECKED and (
+            failed is None or (last_scan is not None and last_scan > failed)
+        )
     return (
         application.user_id == LOCAL_USER_ID
         and application.fill_plan is not None
         and application.form_url is not None
-        and (
-            application.state in FILL_AGAIN_STATES
-            if application.fill_again_at is not None
-            else planned
-            or application.state == ApplicationState.ANSWERS_CHECKED
-            and (failed is None or (last_scan is not None and last_scan > failed))
-        )
+        and ready
     )
 
 
