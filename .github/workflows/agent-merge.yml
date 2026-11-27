@@ -1,0 +1,41 @@
+# Auto-merge (ADR 0010): code, not a model, merges a small, normal agent PR the reviewer finds
+# ready at its first review (tools/auto_merge.py). The owner opens it with AUTO_MERGE=on.
+name: Agent merge
+
+on:
+  issue_comment: # zizmor: ignore[dangerous-triggers] the reviewer's comments only; main's code, no PR code runs
+    types: [created]
+
+permissions: {}
+
+jobs:
+  merge:
+    # Only the reviewer's ready verdict on a PR; the tool checks it is the first one.
+    if: >-
+      github.event.issue.pull_request
+      && github.event.comment.user.login == 'claude[bot]'
+      && startsWith(github.event.comment.body, 'Verdict: ready to merge')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      group: agent-merge-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    permissions:
+      actions: write # gh workflow run: agent-unblock and agent-learner
+      checks: read
+      statuses: read
+      contents: write # the squash merge
+      issues: read
+      pull-requests: write # the merge, and one comment when it fails
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Merge the PR when every rule holds, then start unblock and learner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          AUTO_MERGE: ${{ vars.AUTO_MERGE }}
+          PR: ${{ github.event.issue.number }}
+          VERDICT_AT: ${{ github.event.comment.created_at }}
+        run: python3 tools/auto_merge.py "$PR" "$VERDICT_AT"

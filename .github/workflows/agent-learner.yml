@@ -4,6 +4,7 @@
 # The agent only reads: a read-only token, no id-token to trade for the agents' app token,
 # and no tool that writes. Code opens the issues, in a job without a model, and
 # tools/lesson.py refuses a lesson its evidence does not back. A manual run opens nothing.
+# An auto-merge starts no workflow: agent-merge.yml dispatches this one with `pr` instead.
 name: Agent learner
 
 on:
@@ -11,6 +12,11 @@ on:
     types: [closed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      pr:
+        description: A PR agent-merge.yml merged; empty for the owner's dry run
+        required: false
+        type: string
 
 permissions: {}
 
@@ -20,13 +26,16 @@ env:
 
 jobs:
   learn:
-    # Once per merged PR of this repository; by hand, for the owner only.
+    # Once per merged PR of this repository, auto-merged ones included; by hand, for the owner
+    # only, as a dry run. Any other sender with `pr` is refused.
     if: >-
       (github.event_name == 'pull_request'
       && github.event.pull_request.merged == true
       && github.event.pull_request.head.repo.full_name == github.repository)
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      && github.event.sender.login == 'github-actions[bot]' && inputs.pr != '')
       || (github.event_name == 'workflow_dispatch'
-      && github.event.sender.login == github.repository_owner)
+      && github.event.sender.login == github.repository_owner && inputs.pr == '')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -45,10 +54,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          EVENT: ${{ github.event_name }}
-          PR: ${{ github.event.pull_request.number || '' }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
         run: |
-          if [ "$EVENT" = pull_request ] && ! python3 tools/lesson.py has-findings "$PR"; then
+          if [ -n "$PR" ] && ! python3 tools/lesson.py has-findings "$PR"; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -75,7 +83,7 @@ jobs:
           prompt: |
             You are the learner agent of ${{ github.repository }}. You turn the agents' recurring or obvious
             mistakes into lessons: a rule or a check that the owner accepts or not. You only read and return
-            lessons; code opens them as issues. ${{ github.event_name == 'pull_request' && format('PR #{0} was just merged.', github.event.pull_request.number) || 'This is a manual run: what you return goes to the run summary, nothing is opened.' }}
+            lessons; code opens them as issues. ${{ (github.event.pull_request.number || inputs.pr) && format('PR #{0} was just merged.', github.event.pull_request.number || inputs.pr) || 'This is a manual run: what you return goes to the run summary, nothing is opened.' }}
 
             1. Read learner-history.md. It lists every `lesson` issue with its kind and state, then, on the
                last merged PRs, the reviewer's `changes needed` findings, the fixer's `Fix CI:` commits and
@@ -96,7 +104,7 @@ jobs:
                Code refuses a rule with fewer than 3 of them, and a PR without a finding.
                Write like CLAUDE.md, with the words of GLOSSARY.md, about the fictional candidate only.
       - name: A manual run writes what it would open to the run summary
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.pr == ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -107,7 +115,7 @@ jobs:
 
   open:
     needs: learn
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || inputs.pr != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # One at a time, so that two quick merges cannot open the same lesson twice.
