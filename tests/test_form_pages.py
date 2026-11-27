@@ -296,3 +296,58 @@ def test_an_answers_checked_paged_form_is_served_its_last_page(data_dir: Path, e
     page_2 = [{"field": 0, **CITY}, {**plan[5], "field": 1}]  # counted from the page's first field
     assert fills == [{"application_id": application_id, "url": LEVER, "page": 2,
                       "actions": page_2}]  # fmt: skip
+
+
+def test_a_fill_failure_at_form_captured_is_shown_and_does_not_hold_back_the_next_fill(
+    data_dir: Path, engine: Engine
+):
+    application_id = _application(engine)
+
+    with _client(data_dir) as (client, _):
+        _post(client, application_id, PAGE_1, 1)
+        failed = client.post(f"/api/browser/fills/{application_id}/failure",
+                             json={"reason": "not_filled"}, headers=EXTENSION)  # fmt: skip
+        [row] = client.get("/api/applications").json()["in_progress"]
+        held = _fills(client)
+        _post(client, application_id, PAGE_1, 1)  # a retry
+        retried = _fills(client)
+
+    assert (failed.status_code, row["fill_error"], held) == (204, "fill_not_filled", [])
+    assert _get(engine, application_id).fill_failed_at is None
+    assert [fill["actions"] for fill in retried] == [PLAN_1]
+
+
+def test_a_page_stored_keeps_the_error_of_a_page_not_read(data_dir: Path, engine: Engine):
+    application_id = _application(engine)
+
+    with _client(data_dir) as (client, _):
+        _post(client, application_id, PAGE_1, 1)
+        _post(client, application_id, PAGE_2, 2)
+        client.post(f"/api/browser/forms/{application_id}/failure",
+                    json={"reason": "not_loaded", "page": 3}, headers=EXTENSION)  # fmt: skip
+        again = _post(client, application_id, PAGE_1, 1)  # an earlier page, same fields
+
+    assert again == 204
+    assert _get(engine, application_id).form_url_error == "form_not_loaded"
+
+
+def test_a_page_after_the_gate_is_planned_by_code_and_one_with_a_question_is_refused(
+    data_dir: Path, engine: Engine
+):
+    ask = {"field": 5, "label": WHY, "kind": "fill", "value": "J'ai construit une prévision."}
+    plan = [*PLAN_1, {"field": 4, **CITY}, ask]
+    fields = [*_paged(PAGE_1, 1), *_paged(PAGE_2_ASKS, 2)]
+    application_id = _application(engine, "answers_checked", form_fields=fields, fill_plan=plan)
+    page_3 = [_field("Ville", "text")]
+
+    with _client(data_dir) as (client, _):
+        refused = _post(client, application_id, [_field(WHY, "textarea")], 3)
+        skipped = _post(client, application_id, page_3, 4)
+        sent = _post(client, application_id, page_3, 3)
+        fills = _fills(client)
+
+    assert (refused, skipped, sent) == (409, 409, 204)
+    application = _get(engine, application_id)
+    assert application.state == "answers_checked"
+    assert application.form_fields == [*fields, *_paged(page_3, 3)]
+    assert [(fill["page"], fill["actions"]) for fill in fills] == [(3, [{"field": 0, **CITY}])]

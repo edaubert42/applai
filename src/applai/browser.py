@@ -334,12 +334,14 @@ def form_sent(
             reason = "not_read"
     with Session(engine) as session:
         application = _waiting_form(session, application_id, page)
-        captured = application.state == ApplicationState.FORM_CAPTURED  # a later page, or again
+        captured = application.state != ApplicationState.CREATED  # a later page, or again
         posted = [{**field.model_dump(), "page": page} for field in fields]
         if not fields:
             _form_failed(application, reason, state.clock())
         elif page is None:
             application.form_fields = [field.model_dump() for field in fields]
+        elif application.state == ApplicationState.ANSWERS_CHECKED and not by_code_only(posted):
+            raise HTTPException(409, f"Page {page} has an open question after the answers gate.")
         elif _moves_later_pages(application.form_fields or [], posted, page):
             _form_failed(application, "page_changed", state.clock())
             session.commit()
@@ -387,14 +389,15 @@ def _page_range(fields: _Fields, page: int) -> range:
 
 def _page_waiting(application: Application, page: int | None) -> bool:
     """form_captured page by page: a page before the last, or, when code fills the last page
-    alone, that one or the next. A last page that waits for drafting is not replaced."""
+    alone, that one or the next. A last page that waits for drafting is not replaced.
+    answers_checked: the page after the last, to be planned by code (see _store_page)."""
     last = _last_page(application.form_fields)
-    return (
-        application.user_id == LOCAL_USER_ID
-        and application.state == ApplicationState.FORM_CAPTURED
-        and page is not None
-        and last is not None
-        and (page < last or (page <= last + 1 and _last_page_by_code(application.form_fields)))
+    if application.user_id != LOCAL_USER_ID or page is None or last is None:
+        return False
+    if application.state == ApplicationState.ANSWERS_CHECKED:
+        return page == last + 1
+    return application.state == ApplicationState.FORM_CAPTURED and (
+        page < last or (page <= last + 1 and _last_page_by_code(application.form_fields))
     )
 
 
@@ -423,8 +426,13 @@ def _store_page(application: Application, posted: _Fields, page: int, data_dir: 
     A profile that does not load is kept as the fill_error: the page is not served."""
     fields = application.form_fields or []
     old = _page_range(fields, page)
+    last = _last_page(fields) or 0
     application.form_fields = [*fields[: old.start], *posted, *fields[old.stop :]]
-    application.form_url_error = application.fill_error = None
+    if page >= last:  # the errors are of the page waiting; an earlier page keeps them
+        application.form_url_error = application.fill_error = None
+    elif application.form_url_error == "form_page_changed":
+        application.form_url_error = None
+    application.fill_failed_at = None
     kept = [action for action in application.fill_plan or [] if action["field"] not in old]
     application.fill_plan = kept
     if not by_code_only(posted):
@@ -625,7 +633,8 @@ def fill_failed(application_id: int, body: FillFailed, request: Request) -> None
         application = _waiting_fill(session, application_id)
         again = "again_" if application.fill_again_at is not None else ""
         application.fill_error = f"fill_{again}{body.reason}"
-        application.fill_failed_at = utc(request.app.state.clock())
+        if application.state != ApplicationState.FORM_CAPTURED:  # there, a post again retries
+            application.fill_failed_at = utc(request.app.state.clock())
         application.fill_again_at = None
         session.commit()
 
