@@ -60,8 +60,17 @@ ANSWERED = [ASKED, {"user": {"login": OWNER}, "body": "Owner:\n\n1. 8000."}]
 ISSUES[41] = {**_issue("open", "None.", [_labeled(OWNER)]), "comments": ANSWERED}
 ISSUES[42] = {**_issue("open", "None.", [_labeled(OWNER)]), "comments": ANSWERED, "prs": [7]}
 ISSUES[43] = {**_issue("open", "None.", [_labeled(OWNER)]), "comments": [ASKED]}
+# The coder pushed its branch, then the model's API failed; the sweep starts it again.
+BOT = "github-actions[bot]"
+ERROR_STOP = {"user": {"login": BOT}, "body": "Coder: stopped (run).\n\nEnded: on an error.\n"}
+AGAIN = {"user": {"login": BOT}, "body": "Sweep: coder started again (1/3)."}
+NORMAL_STOP = {"user": {"login": BOT}, "body": "Coder: stopped (run).\n\nEnded: normally.\n"}
+ISSUES[44] = {**_issue("open", "None.", [_labeled(OWNER)]), "comments": [ERROR_STOP, AGAIN]}
+ISSUES[45] = {**ISSUES[44], "prs": [8]}
+ISSUES[46] = {**ISSUES[44], "comments": [ERROR_STOP, NORMAL_STOP]}
 BRANCHES = ["agent/issue-40-backup", "agent/issue-300-other", "agent/issue-41-pages",
-            "agent/issue-42-pages", "agent/issue-43-pages"]  # fmt: skip
+            "agent/issue-42-pages", "agent/issue-43-pages", "agent/issue-44-pages",
+            "agent/issue-45-pages", "agent/issue-46-pages"]  # fmt: skip
 
 
 class FakeGh:
@@ -169,6 +178,14 @@ def test_a_coder_that_stopped_on_questions_starts_again_once_answered(
     assert _run(capsys, ISSUES, "check", "41") == (0, "ready\n")
     assert _run(capsys, ISSUES, "check", "42") == (0, "already started\n")  # its PR is open
     assert _run(capsys, ISSUES, "check", "43") == (0, "already started\n")  # not answered yet
+
+
+def test_a_coder_that_stopped_on_an_error_starts_again_on_its_branch(
+    capsys: pytest.CaptureFixture[str],
+):
+    assert _run(capsys, ISSUES, "check", "44") == (0, "ready\n")
+    assert _run(capsys, ISSUES, "check", "45") == (0, "already started\n")  # its PR is open
+    assert _run(capsys, ISSUES, "check", "46") == (0, "already started\n")  # its last stop
 
 
 @pytest.mark.parametrize("number", ["32", "33", "37"])

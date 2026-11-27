@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 import yaml
-from questions import NOT_STARTED, RETRIED, default_answers, main
+from questions import NOT_STARTED, RETRIED, default_answers, main, sweep
 
 WORKFLOW = Path(__file__).parents[1] / ".github/workflows/agent-coder.yml"
 SWEEP = Path(__file__).parents[1] / ".github/workflows/agent-sweep.yml"
@@ -165,9 +165,17 @@ class FakeGitHub:
     contain `fail` fails, as during an API outage.
     """
 
-    def __init__(self, issues: dict[int, list[dict[str, Any]]], fail: str = "") -> None:
+    def __init__(
+        self,
+        issues: dict[int, list[dict[str, Any]]],
+        fail: str = "",
+        branches: tuple[int, ...] = (),
+        prs: tuple[int, ...] = (),
+    ) -> None:
         self.issues = issues
         self.fail = fail
+        self.branches = branches  # issues the coder pushed a branch for
+        self.prs = prs  # issues whose branch has an open PR
         self.posted: list[tuple[int, str]] = []
         self.started: list[int] = []
 
@@ -190,7 +198,12 @@ class FakeGitHub:
                 label = {"name": "ready-for-agent"}
                 return json.dumps({"event": "labeled", "actor": {"login": OWNER}, "label": label})
             case ["gh", "api", path] if "/git/matching-refs/heads/agent/issue-" in path:
-                return "[]"  # the coder pushed no branch
+                number = int(path.rsplit("-", 2)[-2])
+                pushed = number in self.branches
+                return json.dumps([{"ref": f"refs/heads/agent/issue-{number}-x"}] if pushed else [])
+            case ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number"]:
+                number = int(branch.split("-")[1])
+                return json.dumps([{"number": 7}] if number in self.prs else [])
             case ["gh", "api", path] if re.fullmatch(r"repos/\{owner\}/\{repo\}/issues/\d+", path):
                 return json.dumps({"state": "open", "body": "## Blocked by\n\nNone.\n"})
             case ["gh", "issue", "comment", number, "--body", body]:
@@ -299,6 +312,87 @@ def test_a_retry_that_fails_to_start_is_not_retried_again(capsys: pytest.Capture
         comment["created_at"] = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     assert main(["sweep"], run=github) == 0
     assert github.started == []  # the owner starts it
+
+
+# The coder's stop comments, as agent-coder.yml posts them with tools/run_report.py.
+STOP = "Coder: stopped without a PR or questions (https://github.com/example/runs/1).\n\n"
+ERROR_STOP = STOP + (
+    "Ended: on an error.\n\nDenied: none.\n\n"
+    "Last message:\n~~~\nYou've hit your 5-hour limit · resets 11:20pm (UTC)\n~~~"
+)
+# What the agent wrote sits in a code block: it counts for nothing.
+NORMAL_STOP = (
+    STOP + "Ended: normally.\n\nDenied: none.\n\nLast message:\n~~~\nEnded: on an error.\n~~~"
+)
+HOUR_1_01 = timedelta(hours=1, minutes=1)
+MINUTES_59 = timedelta(minutes=59)
+
+
+def _again(n: int) -> str:
+    return f"Sweep: coder started again ({n}/3)."
+
+
+def test_an_error_stop_an_hour_old_with_no_open_pr_starts_the_coder_again():
+    github = FakeGitHub(
+        {
+            40: [_comment(BOT, ERROR_STOP, HOUR_1_01)],
+            41: [_comment(BOT, ERROR_STOP, MINUTES_59)],
+            42: [_comment(BOT, NORMAL_STOP, HOUR_1_01)],
+            43: [_comment(BOT, ERROR_STOP, HOUR_1_01)],  # its PR is open
+            44: [*_left(QUESTIONS, ANSWERED), _comment(BOT, ERROR_STOP, HOUR_1_01)],
+            45: [_comment(BOT, ERROR_STOP, HOUR_1_01)],
+        },
+        branches=(43, 44, 45),
+        prs=(43,),
+    )
+    assert main(["sweep"], run=github) == 0
+    assert github.started == [40, 44, 45]  # 44 and 45 start again on their branch
+    assert github.posted == [(40, _again(1)), (44, _again(1)), (45, _again(1))]
+    # One restart per error stop: the next sweep waits for the coder's next stop.
+    assert main(["sweep"], run=github) == 0
+    assert github.started == [40, 44, 45]
+
+
+NOW = datetime(2026, 11, 27, 18, 0, tzinfo=UTC)
+
+
+def _at(body: str, hours_ago: int) -> dict[str, Any]:
+    return {
+        "user": {"login": BOT},
+        "body": body,
+        "created_at": (NOW - timedelta(hours=hours_ago)).isoformat(),
+    }
+
+
+def test_a_fourth_restart_the_same_utc_day_is_refused_and_left_to_the_owner(
+    capsys: pytest.CaptureFixture[str],
+):
+    stops = [_at(ERROR_STOP, 9), _at(_again(1), 8), _at(ERROR_STOP, 7), _at(_again(2), 6)]
+    stops += [_at(ERROR_STOP, 5), _at(_again(3), 4), _at(ERROR_STOP, 2)]
+    github = FakeGitHub({40: list(stops)})
+    assert sweep(github, OWNER, NOW) == 0
+    assert github.started == []
+    [(number, refused)] = github.posted
+    assert number == 40 and refused.startswith("Sweep:") and "owner" in refused
+    assert "#40" in capsys.readouterr().out
+    assert sweep(github, OWNER, NOW + timedelta(days=1)) == 0  # refused once, and for good
+    assert len(github.posted) == 1 and github.started == []
+    # Yesterday's restarts do not count.
+    tomorrow = FakeGitHub({40: stops})
+    assert sweep(tomorrow, OWNER, NOW + timedelta(hours=7)) == 0
+    assert (tomorrow.posted, tomorrow.started) == ([(40, _again(1))], [40])
+
+
+def test_a_failed_start_leaves_no_sweep_comment_and_the_next_run_tries_again(
+    capsys: pytest.CaptureFixture[str],
+):
+    github = FakeGitHub({40: [_comment(BOT, ERROR_STOP, HOUR_1_01)]}, fail="workflow run")
+    assert main(["sweep"], run=github) == 1
+    assert (github.posted, github.started) == ([], [])
+    assert "#40: gh failed" in capsys.readouterr().out
+    github.fail = ""
+    assert main(["sweep"], run=github) == 0
+    assert (github.posted, github.started) == ([(40, _again(1))], [40])
 
 
 def test_the_sweep_runs_every_hour_and_by_hand_on_main():
